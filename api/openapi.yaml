@@ -1,0 +1,795 @@
+openapi: 3.1.1
+info:
+  title: Cable API
+  version: 0.0.1
+  description: Public operator and player HTTP contract for Cable.
+servers:
+  - url: https://localhost:8443/api/v1
+tags:
+  - name: system
+  - name: operator
+  - name: player
+paths:
+  /health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /enrollment-tokens:
+    post:
+      tags: [operator]
+      operationId: createEnrollmentToken
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_enroll]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: One-time enrollment secret. The secret is never retrievable again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnrollmentTokenCreated"
+        default:
+          $ref: "#/components/responses/Problem"
+  /admin-tokens:
+    get:
+      tags: [operator]
+      operationId: listAdminTokens
+      security: [{operatorToken: []}]
+      x-required-scopes: [security_admin]
+      responses:
+        "200":
+          description: Token metadata; never token secrets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/AdminToken"}
+  /admin-tokens/{tokenId}:revoke:
+    post:
+      tags: [operator]
+      operationId: revokeAdminToken
+      security: [{operatorToken: []}]
+      x-required-scopes: [security_admin]
+      parameters:
+        - $ref: "#/components/parameters/TokenId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": {description: Token revoked or already revoked.}
+        default: {$ref: "#/components/responses/Problem"}
+  /nodes:
+    get:
+      tags: [operator]
+      operationId: listNodes
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      responses:
+        "200":
+          description: Nodes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Node"}
+  /nodes/{nodeId}:
+    get:
+      tags: [operator]
+      operationId: getNode
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      parameters: [{$ref: "#/components/parameters/NodeId"}]
+      responses:
+        "200":
+          description: Node.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Node"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: updateNode
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_write]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: {type: string, minLength: 1, maxLength: 120}
+      responses:
+        "200":
+          description: Updated node.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Node"}
+        default: {$ref: "#/components/responses/Problem"}
+  /nodes/{nodeId}/status:
+    get:
+      tags: [operator]
+      operationId: getNodeStatus
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      parameters: [{$ref: "#/components/parameters/NodeId"}]
+      responses:
+        "200":
+          description: Latest observed node status.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NodeReport"}
+        default: {$ref: "#/components/responses/Problem"}
+  /nodes/{nodeId}/recovery-tokens:
+    post:
+      tags: [operator]
+      operationId: createNodeRecoveryToken
+      security: [{operatorToken: []}]
+      x-required-scopes: [security_admin]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: One-time recovery secret bound to the existing node ID.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EnrollmentTokenCreated"}
+        default: {$ref: "#/components/responses/Problem"}
+  /nodes/{nodeId}/assignment:
+    get:
+      tags: [operator]
+      operationId: getNodeAssignment
+      security: [{operatorToken: []}]
+      x-required-scopes: [assignment_read]
+      parameters: [{$ref: "#/components/parameters/NodeId"}]
+      responses:
+        "200":
+          description: Desired assignment.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Assignment"}
+        default: {$ref: "#/components/responses/Problem"}
+    put:
+      tags: [operator]
+      operationId: putNodeAssignment
+      security: [{operatorToken: []}]
+      x-required-scopes: [assignment_write]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AssignmentInput"}
+      responses:
+        "200":
+          description: Existing idempotent assignment response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Assignment"}
+        "201":
+          description: New assignment generation.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Assignment"}
+        default: {$ref: "#/components/responses/Problem"}
+  /nodes/{nodeId}/events:
+    get:
+      tags: [operator]
+      operationId: listNodeEvents
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+        - name: cursor
+          in: query
+          schema: {type: string}
+      responses:
+        "200":
+          description: Node events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/NodeEvent"}
+                  nextCursor: {type: [string, "null"]}
+  /uploads:
+    post:
+      tags: [operator]
+      operationId: createUpload
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UploadCreate"}
+      responses:
+        "201":
+          description: Upload created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Upload"}
+        default: {$ref: "#/components/responses/Problem"}
+  /uploads/{uploadId}:
+    head:
+      tags: [operator]
+      operationId: headUpload
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_write]
+      parameters: [{$ref: "#/components/parameters/UploadId"}]
+      responses:
+        "204":
+          description: Current offset and declared length.
+          headers:
+            Upload-Offset: {schema: {type: integer, format: int64, minimum: 0}}
+            Upload-Length: {schema: {type: integer, format: int64, minimum: 1}}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: appendUpload
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_write]
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+        - name: Upload-Offset
+          in: header
+          required: true
+          schema: {type: integer, format: int64, minimum: 0}
+      requestBody:
+        required: true
+        content:
+          application/offset+octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "204":
+          description: Chunk accepted.
+          headers:
+            Upload-Offset: {schema: {type: integer, format: int64, minimum: 0}}
+        default: {$ref: "#/components/responses/Problem"}
+  /uploads/{uploadId}:complete:
+    post:
+      tags: [operator]
+      operationId: completeUpload
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_write]
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: Asset and immutable artifact created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Asset"}
+        default: {$ref: "#/components/responses/Problem"}
+  /assets:register-local:
+    post:
+      tags: [operator]
+      operationId: registerLocalAsset
+      security: [{operatorToken: []}]
+      x-required-scopes: [local_media_read]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties: {path: {type: string, minLength: 1}}
+      responses:
+        "201":
+          description: Asset copied into Cable storage.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Asset"}
+        default: {$ref: "#/components/responses/Problem"}
+  /assets:
+    get:
+      tags: [operator]
+      operationId: listAssets
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_read]
+      responses:
+        "200":
+          description: Assets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/Asset"}}
+  /assets/{assetId}:
+    get:
+      tags: [operator]
+      operationId: getAsset
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_read]
+      parameters: [{$ref: "#/components/parameters/AssetId"}]
+      responses:
+        "200":
+          description: Asset.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Asset"}
+        default: {$ref: "#/components/responses/Problem"}
+  /releases:publish:
+    post:
+      tags: [operator]
+      operationId: publishRelease
+      security: [{operatorToken: []}]
+      x-required-scopes: [release_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PublishReleaseInput"}
+      responses:
+        "201":
+          description: Immutable signed release.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReleaseEnvelope"}
+        default: {$ref: "#/components/responses/Problem"}
+  /releases/{releaseId}:
+    get:
+      tags: [operator]
+      operationId: getRelease
+      security: [{operatorToken: []}]
+      x-required-scopes: [release_read]
+      parameters: [{$ref: "#/components/parameters/ReleaseId"}]
+      responses:
+        "200":
+          description: Release envelope.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReleaseEnvelope"}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/enroll:
+    post:
+      tags: [player]
+      operationId: enrollPlayer
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EnrollPlayerInput"}
+      responses:
+        "201":
+          description: One-time client certificate and publisher trust response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EnrollPlayerOutput"}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/recover:
+    post:
+      tags: [player]
+      operationId: recoverPlayer
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EnrollPlayerInput"}
+      responses:
+        "201":
+          description: Recredentialed existing node with a new event epoch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EnrollPlayerOutput"}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/credentials:rotate:
+    post:
+      tags: [player]
+      operationId: rotatePlayerCredential
+      security: [{nodeMTLS: []}]
+      responses:
+        "201":
+          description: One-time replacement client certificate.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ClientCredential"}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/capabilities:
+    put:
+      tags: [player]
+      operationId: putPlayerCapabilities
+      security: [{nodeMTLS: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CapabilityReport"}
+      responses:
+        "204": {description: Capability report accepted.}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/assignment:
+    get:
+      tags: [player]
+      operationId: getPlayerAssignment
+      security: [{nodeMTLS: []}]
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema: {type: string}
+        - name: waitSeconds
+          in: query
+          schema: {type: integer, minimum: 0, maximum: 30, default: 0}
+      responses:
+        "200":
+          description: Latest desired assignment.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Assignment"}
+        "304": {description: Assignment unchanged.}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/releases/{releaseId}:
+    get:
+      tags: [player]
+      operationId: getPlayerRelease
+      security: [{nodeMTLS: []}]
+      parameters: [{$ref: "#/components/parameters/ReleaseId"}]
+      responses:
+        "200":
+          description: Historically assigned release envelope.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReleaseEnvelope"}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/reports:
+    post:
+      tags: [player]
+      operationId: postPlayerReport
+      security: [{nodeMTLS: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NodeReport"}
+      responses:
+        "202": {description: New report accepted.}
+        "204": {description: Duplicate or older report ignored.}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/events:append:
+    post:
+      tags: [player]
+      operationId: appendPlayerEvents
+      security: [{nodeMTLS: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [epoch, events]
+              properties:
+                epoch: {type: string, format: uuid}
+                events:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: {$ref: "#/components/schemas/NodeEvent"}
+      responses:
+        "200":
+          description: Events stored through a contiguous watermark.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [epoch, acknowledgedThrough]
+                properties:
+                  epoch: {type: string, format: uuid}
+                  acknowledgedThrough: {type: integer, format: int64, minimum: 0}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/artifacts/{digest}/content:
+    parameters:
+      - $ref: "#/components/parameters/Digest"
+    head:
+      tags: [player]
+      operationId: headPlayerArtifact
+      security: [{nodeMTLS: []}]
+      responses:
+        "200":
+          description: Artifact metadata.
+          headers:
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+            Content-Length: {schema: {type: integer, format: int64, minimum: 0}}
+            ETag: {$ref: "#/components/headers/ETag"}
+        default: {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [player]
+      operationId: getPlayerArtifact
+      security: [{nodeMTLS: []}]
+      parameters:
+        - name: Range
+          in: header
+          schema: {type: string}
+        - name: If-Range
+          in: header
+          schema: {type: string}
+      responses:
+        "200":
+          description: Complete artifact.
+          headers:
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "206":
+          description: One satisfiable byte range.
+          headers:
+            Content-Range: {schema: {type: string}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "416":
+          description: Unsatisfiable byte range.
+          headers:
+            Content-Range: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+components:
+  securitySchemes:
+    operatorToken:
+      type: http
+      scheme: bearer
+      bearerFormat: CableToken
+    nodeMTLS:
+      type: mutualTLS
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 16, maxLength: 200}
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: {type: string}
+    NodeId: {name: nodeId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    TokenId: {name: tokenId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    UploadId: {name: uploadId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    AssetId: {name: assetId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    ReleaseId: {name: releaseId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    Digest:
+      name: digest
+      in: path
+      required: true
+      schema: {type: string, pattern: "^[a-f0-9]{64}$"}
+  headers:
+    ETag: {schema: {type: string}}
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+  schemas:
+    Id: {type: string, format: uuid}
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status: {type: string, const: ok}
+        version: {type: string}
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string}
+        instance: {type: string, format: uri-reference}
+        correlationId: {type: string}
+    AdminToken:
+      type: object
+      required: [id, prefix, scopes, revoked]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        prefix: {type: string}
+        scopes: {type: array, items: {type: string}}
+        revoked: {type: boolean}
+    EnrollmentTokenCreated:
+      type: object
+      required: [id, secret, expiresAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        secret: {type: string, writeOnly: true}
+        expiresAt: {type: string, format: date-time}
+    Node:
+      type: object
+      required: [id, name, credentialState]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        name: {type: string}
+        credentialState: {type: string, enum: [active, revoked, expired]}
+        desiredGeneration: {type: integer, format: int64, minimum: 0}
+        observedGeneration: {type: integer, format: int64, minimum: 0}
+    UploadCreate:
+      type: object
+      required: [name, length, mediaType]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 255}
+        length: {type: integer, format: int64, minimum: 1}
+        mediaType: {type: string}
+    Upload:
+      type: object
+      required: [id, length, offset, state]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        length: {type: integer, format: int64, minimum: 1}
+        offset: {type: integer, format: int64, minimum: 0}
+        state: {type: string, enum: [open, finalizing, complete, failed]}
+    Artifact:
+      type: object
+      required: [digest, size, mediaType]
+      properties:
+        digest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        size: {type: integer, format: int64, minimum: 1}
+        mediaType: {type: string}
+    Asset:
+      type: object
+      required: [id, name, artifact]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        name: {type: string}
+        artifact: {$ref: "#/components/schemas/Artifact"}
+    PlaybackPayload:
+      type: object
+      required: [assetId, fit, loop, muted, volume, orientation, allowedDeliveryModes]
+      properties:
+        assetId: {$ref: "#/components/schemas/Id"}
+        fit: {type: string, enum: [fit, fill]}
+        loop: {type: boolean}
+        muted: {type: boolean}
+        volume: {type: integer, minimum: 0, maximum: 100}
+        imageDurationSeconds: {type: integer, minimum: 1, maximum: 86400}
+        orientation: {type: integer, enum: [0, 90, 180, 270]}
+        allowedDeliveryModes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, enum: [stream, cache_then_play]}
+    PublishReleaseInput:
+      type: object
+      required: [playback]
+      properties:
+        playback: {$ref: "#/components/schemas/PlaybackPayload"}
+    ReleasePayload:
+      type: object
+      required: [schemaVersion, minimumProtocolVersion, playback, artifacts, requiredFeatures]
+      properties:
+        schemaVersion: {type: string, const: "1.0"}
+        minimumProtocolVersion: {type: string}
+        playback: {$ref: "#/components/schemas/PlaybackPayload"}
+        artifacts: {type: array, minItems: 1, items: {$ref: "#/components/schemas/Artifact"}}
+        requiredFeatures: {type: array, items: {type: string}, uniqueItems: true}
+    ReleaseEnvelope:
+      type: object
+      required: [id, digest, keyId, signature, payload]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        digest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        keyId: {type: string}
+        signature: {type: string, contentEncoding: base64}
+        payload: {$ref: "#/components/schemas/ReleasePayload"}
+    AssignmentInput:
+      type: object
+      required: [releaseId, releaseDigest, deliveryMode, expectedGeneration]
+      properties:
+        releaseId: {$ref: "#/components/schemas/Id"}
+        releaseDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        deliveryMode: {type: string, enum: [stream, cache_then_play]}
+        expectedGeneration: {type: integer, format: int64, minimum: 0}
+    Assignment:
+      allOf:
+        - $ref: "#/components/schemas/AssignmentInput"
+        - type: object
+          required: [id, nodeId, desiredGeneration]
+          properties:
+            id: {$ref: "#/components/schemas/Id"}
+            nodeId: {$ref: "#/components/schemas/Id"}
+            desiredGeneration: {type: integer, format: int64, minimum: 1}
+    EnrollPlayerInput:
+      type: object
+      required: [token, publicKey]
+      properties:
+        token: {type: string, writeOnly: true}
+        publicKey: {type: string, contentEncoding: base64}
+    ClientCredential:
+      type: object
+      required: [certificate, expiresAt]
+      properties:
+        certificate: {type: string, writeOnly: true}
+        expiresAt: {type: string, format: date-time}
+    EnrollPlayerOutput:
+      allOf:
+        - $ref: "#/components/schemas/ClientCredential"
+        - type: object
+          required: [nodeId, eventEpoch, publisherKeyId, publisherPublicKey]
+          properties:
+            nodeId: {$ref: "#/components/schemas/Id"}
+            eventEpoch: {type: string, format: uuid}
+            publisherKeyId: {type: string}
+            publisherPublicKey: {type: string, contentEncoding: base64}
+    CapabilityReport:
+      type: object
+      required: [platform, architecture, protocolVersion, rendererVersion, profileId]
+      properties:
+        platform: {type: string}
+        architecture: {type: string}
+        protocolVersion: {type: string}
+        rendererVersion: {type: string}
+        profileId: {type: string}
+        freeBytes: {type: integer, format: int64, minimum: 0}
+        outputReady: {type: boolean}
+        clockReliable: {type: boolean}
+    NodeReport:
+      type: object
+      required: [eventEpoch, sequence, desiredGenerationSeen, observedGeneration, conditions]
+      properties:
+        eventEpoch: {type: string, format: uuid}
+        sequence: {type: integer, format: int64, minimum: 1}
+        desiredGenerationSeen: {type: integer, format: int64, minimum: 0}
+        observedGeneration: {type: integer, format: int64, minimum: 0}
+        renderingReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
+        candidateReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
+        healthyReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
+        lastKnownGoodReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
+        conditions: {type: array, items: {$ref: "#/components/schemas/Condition"}}
+    Condition:
+      type: object
+      required: [type, status, reason]
+      properties:
+        type: {type: string}
+        status: {type: boolean}
+        reason: {type: string}
+        message: {type: string}
+    NodeEvent:
+      type: object
+      required: [id, epoch, sequence, type, occurredAt]
+      properties:
+        id: {type: string, format: uuid}
+        epoch: {type: string, format: uuid}
+        sequence: {type: integer, format: int64, minimum: 1}
+        type: {type: string}
+        occurredAt: {type: string, format: date-time}
+        coversThrough: {type: integer, format: int64, minimum: 1}
+        data: {type: object, additionalProperties: true}

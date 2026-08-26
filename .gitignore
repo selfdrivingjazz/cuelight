@@ -1,0 +1,11 @@
+/bin/
+/coverage.out
+/.cache/
+*.test
+*.prof
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
