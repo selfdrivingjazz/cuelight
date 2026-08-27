@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -28,6 +30,8 @@ import (
 	controlrelease "github.com/jmill/cable/internal/control/release"
 	"github.com/jmill/cable/internal/control/store"
 	"github.com/jmill/cable/internal/media/localcas"
+	playerclient "github.com/jmill/cable/internal/player/client"
+	"github.com/jmill/cable/internal/protocol"
 	canonical "github.com/jmill/cable/internal/release"
 )
 
@@ -102,15 +106,120 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 
 	operatorRepository := store.NewOperatorAdapter(repository)
 	operator := operatorapi.NewHandler(operatorapi.Dependencies{Auth: authService, PKI: pkiService, Nodes: operatorRepository, Assignments: repository, Media: mediaService, Registration: registration, Assets: repository, Releases: releaseService, MaxJSONBytes: config.MaxBodyBytes, MaxChunkBytes: config.MaxChunkBytes, Idempotency: operatorapi.NewIdempotencyCache()})
+	api := http.NewServeMux()
+	pkiHandler := newPKIHandler(pkiService, config.MaxBodyBytes)
+	api.Handle("/player/enroll", pkiHandler)
+	api.Handle("/player/recover", pkiHandler)
+	api.Handle("/player/credentials:rotate", pkiHandler)
+	api.Handle("/player/credentials/rotate", pkiHandler)
+	playerHandler := playerapi.NewHandler(playerService)
+	api.Handle("/player/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		playerHandler.ServeHTTP(w, r)
+	}))
+	api.Handle("/", operator)
 	root := http.NewServeMux()
-	root.Handle("/api/v1/", http.StripPrefix("/api/v1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/player/") {
-			playerapi.NewHandler(playerService).ServeHTTP(w, r)
+	root.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
+	return root, nil
+}
+
+func newPKIHandler(service *pki.Service, maxBody int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if service == nil {
+			http.Error(w, "PKI service is not configured", http.StatusInternalServerError)
 			return
 		}
-		operator.ServeHTTP(w, r)
-	})))
-	return root, nil
+		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		switch r.URL.Path {
+		case "/player/enroll", "/player/recover":
+			var input playerclient.EnrollmentRequest
+			if err := decodePKIJSON(w, r, maxBody, &input); err != nil {
+				writePKIError(w, err)
+				return
+			}
+			publicKey, err := decodePublicKey(input.PublicKey)
+			if err != nil {
+				writePKIError(w, err)
+				return
+			}
+			if r.URL.Path == "/player/enroll" {
+				result, err := service.Enroll(r.Context(), pki.EnrollRequest{Token: input.Token, IdempotencyKey: key, Credential: pki.CredentialRequest{PublicKey: publicKey}})
+				if err != nil {
+					writePKIError(w, err)
+					return
+				}
+				writePKIJSON(w, http.StatusCreated, result)
+				return
+			}
+			result, err := service.Recover(r.Context(), pki.RecoverRequest{Token: input.Token, IdempotencyKey: key, Credential: pki.CredentialRequest{PublicKey: publicKey}})
+			if err != nil {
+				writePKIError(w, err)
+				return
+			}
+			writePKIJSON(w, http.StatusCreated, result.Enrollment)
+		case "/player/credentials:rotate", "/player/credentials/rotate":
+			nodeID, err := protocol.NodeIdentity(r, nil)
+			if err != nil {
+				writePKIError(w, fmt.Errorf("%w: %v", playerapi.ErrUnauthorized, err))
+				return
+			}
+			if len(r.TLS.PeerCertificates) == 0 {
+				writePKIError(w, playerapi.ErrUnauthorized)
+				return
+			}
+			publicKeyDER, err := x509.MarshalPKIXPublicKey(r.TLS.PeerCertificates[0].PublicKey)
+			if err != nil {
+				writePKIError(w, err)
+				return
+			}
+			result, err := service.Rotate(r.Context(), pki.RotateRequest{NodeID: nodeID, PreviousSerial: r.TLS.PeerCertificates[0].SerialNumber.String(), IdempotencyKey: key, Credential: pki.CredentialRequest{PublicKey: publicKeyDER}})
+			if err != nil {
+				writePKIError(w, err)
+				return
+			}
+			writePKIJSON(w, http.StatusCreated, result.ClientCredential)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+func decodePKIJSON(w http.ResponseWriter, r *http.Request, limit int64, target any) error {
+	if limit <= 0 {
+		limit = 4 << 20
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}
+
+func decodePublicKey(value string) ([]byte, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, errors.New("public key is required")
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.RawStdEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	return []byte(value), nil
+}
+
+func writePKIError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	if errors.Is(err, playerapi.ErrUnauthorized) {
+		status = http.StatusUnauthorized
+	}
+	if errors.Is(err, pki.ErrNodeRevoked) || errors.Is(err, pki.ErrCredentialRevoked) {
+		status = http.StatusForbidden
+	}
+	http.Error(w, err.Error(), status)
+}
+func writePKIJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 // ConfigureTLS configures direct TLS client-CA verification without requiring

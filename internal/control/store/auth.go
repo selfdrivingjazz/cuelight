@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -27,7 +28,7 @@ func (s *Store) Create(ctx context.Context, record auth.TokenRecord) error {
 
 func (s *Store) FindByPrefix(ctx context.Context, prefix string) ([]auth.TokenRecord, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `
-		SELECT id::text, actor_id::text, prefix, token_hash, scopes, created_at, revoked_at
+		SELECT id::text, actor_id::text, prefix, token_hash, array_to_json(scopes), created_at, revoked_at
 		FROM admin_tokens WHERE prefix = $1 ORDER BY id`, prefix)
 	if err != nil {
 		return nil, wrap("find administrator tokens", err)
@@ -38,7 +39,7 @@ func (s *Store) FindByPrefix(ctx context.Context, prefix string) ([]auth.TokenRe
 
 func (s *Store) List(ctx context.Context) ([]auth.TokenRecord, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `
-		SELECT id::text, actor_id::text, prefix, token_hash, scopes, created_at, revoked_at
+		SELECT id::text, actor_id::text, prefix, token_hash, array_to_json(scopes), created_at, revoked_at
 		FROM admin_tokens ORDER BY created_at, id`)
 	if err != nil {
 		return nil, wrap("list administrator tokens", err)
@@ -51,7 +52,7 @@ func (s *Store) Revoke(ctx context.Context, id string, at time.Time) (auth.Token
 	row := s.q(ctx).QueryRowContext(ctx, `
 		UPDATE admin_tokens SET revoked_at = COALESCE(revoked_at, $2)
 		WHERE id = $1
-		RETURNING id::text, actor_id::text, prefix, token_hash, scopes, created_at, revoked_at`, id, at)
+		RETURNING id::text, actor_id::text, prefix, token_hash, array_to_json(scopes), created_at, revoked_at`, id, at)
 	record, err := scanAdminToken(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return auth.TokenRecord{}, auth.ErrNotFound
@@ -66,11 +67,15 @@ type rowScanner interface {
 func scanAdminToken(row rowScanner) (auth.TokenRecord, error) {
 	var record auth.TokenRecord
 	var hash []byte
-	if err := row.Scan(&record.ID, &record.ActorID, &record.Prefix, &hash, &record.Scopes, &record.CreatedAt, &record.RevokedAt); err != nil {
+	var scopesJSON []byte
+	if err := row.Scan(&record.ID, &record.ActorID, &record.Prefix, &hash, &scopesJSON, &record.CreatedAt, &record.RevokedAt); err != nil {
 		return auth.TokenRecord{}, err
 	}
 	if len(hash) != sha256.Size {
 		return auth.TokenRecord{}, fmt.Errorf("administrator token %s has invalid hash length %d", record.ID, len(hash))
+	}
+	if err := json.Unmarshal(scopesJSON, &record.Scopes); err != nil {
+		return auth.TokenRecord{}, fmt.Errorf("administrator token %s has invalid scopes: %w", record.ID, err)
 	}
 	copy(record.Hash[:], hash)
 	return record, nil

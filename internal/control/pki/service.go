@@ -168,7 +168,7 @@ func (service *Service) Enroll(ctx context.Context, request EnrollRequest) (Enro
 	}
 	now := service.clock.Now().UTC()
 	hash := requestDigest(string(OperationEnroll), string(HashToken(request.Token)), request.Name, string(request.Credential.PublicKey), string(request.Credential.CSR))
-	idempotency := service.idempotency(OperationEnroll, "", request.IdempotencyKey, hash, now)
+	idempotency := service.idempotency(OperationEnroll, "token:"+string(HashToken(request.Token)), request.IdempotencyKey, hash, now)
 	result, err := executeIdempotent(ctx, service.repository, service.sealer, idempotency, func(store Store) (Enrollment, error) {
 		if _, err := consumeExpected(ctx, store, request.Token, PurposeEnroll, "", now); err != nil {
 			return Enrollment{}, err
@@ -217,7 +217,7 @@ func (service *Service) Recover(ctx context.Context, request RecoverRequest) (Re
 	}
 	now := service.clock.Now().UTC()
 	hash := requestDigest(string(OperationRecover), string(HashToken(request.Token)), request.NodeID, string(request.Credential.PublicKey), string(request.Credential.CSR))
-	idempotency := service.idempotency(OperationRecover, "", request.IdempotencyKey, hash, now)
+	idempotency := service.idempotency(OperationRecover, "token:"+string(HashToken(request.Token)), request.IdempotencyKey, hash, now)
 	result, err := executeIdempotent(ctx, service.repository, service.sealer, idempotency, func(store Store) (Recovery, error) {
 		token, err := consumeExpected(ctx, store, request.Token, PurposeRecover, request.NodeID, now)
 		if err != nil {

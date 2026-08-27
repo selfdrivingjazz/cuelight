@@ -122,6 +122,9 @@ func (c *Config) defaults() {
 	if c.CapacityBytes == 0 {
 		c.CapacityBytes = 1 << 30
 	}
+	c.OutputReady = true
+	c.Capabilities.OutputReady = true
+	c.Capabilities.ClockReliable = true
 	if c.Capabilities.Platform == "" {
 		c.Capabilities.Platform = "sim"
 	}

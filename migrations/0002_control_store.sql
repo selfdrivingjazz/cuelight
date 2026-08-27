@@ -12,7 +12,7 @@ ALTER TABLE uploads
 
 CREATE TABLE pki_idempotency_records (
   operation text NOT NULL,
-  actor_id uuid NOT NULL REFERENCES actors(id),
+  actor_id text NOT NULL,
   key text NOT NULL,
   request_hash text NOT NULL,
   response_ciphertext bytea,
