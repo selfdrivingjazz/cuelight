@@ -1,11 +1,13 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -17,7 +19,10 @@ import (
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
 	"github.com/jmill/cable/internal/control/persistence"
+	controlplayerapi "github.com/jmill/cable/internal/control/playerapi"
 	controlrelease "github.com/jmill/cable/internal/control/release"
+	"github.com/jmill/cable/internal/media/localcas"
+	playerclient "github.com/jmill/cable/internal/player/client"
 	canonical "github.com/jmill/cable/internal/release"
 )
 
@@ -268,5 +273,184 @@ func TestPostgresMigrationsRoundTrip(t *testing.T) {
 	}
 	if actors.Valid {
 		t.Fatalf("actors table remains after down migrations: %s", actors.String)
+	}
+}
+
+func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
+	repository, db := newPostgresTestStore(t)
+	ctx := context.Background()
+	actorID := "00000000-0000-4000-8000-000000000021"
+	nodeOne := "00000000-0000-4000-8000-000000000022"
+	nodeTwo := "00000000-0000-4000-8000-000000000023"
+	assetID := "00000000-0000-4000-8000-000000000024"
+	artifactDigest := fmt.Sprintf("%064x", 3)
+	if err := repository.EnsureActor(ctx, actorID, "player-api-test"); err != nil {
+		t.Fatal(err)
+	}
+	for _, nodeID := range []string{nodeOne, nodeTwo} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO nodes (id, name, credential_state, event_epoch)
+			VALUES ($1, $2, 'active', $3)`, nodeID, nodeID, nodeID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO artifacts (digest, size_bytes, media_type, state)
+		VALUES ($1, 6, 'text/plain', 'ready')`, artifactDigest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO assets (id, name) VALUES ($1, 'player-asset')`, assetID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO asset_artifacts (asset_id, artifact_digest, role)
+		VALUES ($1, $2, 'original')`, assetID, artifactDigest); err != nil {
+		t.Fatal(err)
+	}
+	payload := canonical.PayloadV1{
+		SchemaVersion:          canonical.SchemaVersion,
+		MinimumProtocolVersion: canonical.ProtocolV1,
+		Playback:               canonical.PlaybackPayload{AssetID: assetID, Fit: "fit", AllowedDeliveryMode: []string{assignment.DeliveryStream}},
+		Artifacts:              []canonical.Artifact{{Digest: artifactDigest, Size: 6, MediaType: "text/plain"}},
+	}
+	releaseDigest, _, err := canonical.Digest(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := repository.Publish(ctx, controlrelease.Publication{ActorID: actorID, IdempotencyKey: "player-publish", RequestDigest: fmt.Sprintf("%064x", 4)},
+		func() (controlrelease.PreparedPublication, error) {
+			return controlrelease.PreparedPublication{Payload: payload, Digest: releaseDigest}, nil
+		},
+		func(id string, prepared controlrelease.PreparedPublication) (canonical.EnvelopeV1, error) {
+			return canonical.EnvelopeV1{ID: id, Digest: prepared.Digest, KeyID: "player", Signature: "AA==", Payload: prepared.Payload}, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignmentService := assignment.Service{Assignments: repository}
+	putInput := assignment.PutInput{ReleaseID: published.Envelope.ID, ReleaseDigest: published.Envelope.Digest, DeliveryMode: assignment.DeliveryStream, ExpectedGeneration: 0}
+	if _, err := assignmentService.Put(ctx, nodeOne, assignment.Mutation{ActorID: actorID, IdempotencyKey: "player-assignment-1"}, putInput); err != nil {
+		t.Fatal(err)
+	}
+
+	report := playerclient.CapabilityReport{Platform: "linux", Architecture: "amd64", ProtocolVersion: "1", RendererVersion: "1", ProfileID: "default"}
+	if err := repository.PutCapabilities(ctx, nodeOne, report); err != nil {
+		t.Fatal(err)
+	}
+	var stored []byte
+	if err := db.QueryRowContext(ctx, `SELECT report FROM node_capability_reports WHERE node_id = $1`, nodeOne).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) == 0 {
+		t.Fatal("capability report was not persisted")
+	}
+	if _, ok, err := repository.CurrentAssignment(ctx, nodeTwo); err != nil || ok {
+		t.Fatalf("cross-node current assignment = found=%v err=%v", ok, err)
+	}
+	current, ok, err := repository.CurrentAssignment(ctx, nodeOne)
+	if err != nil || !ok || current.ReleaseID != published.Envelope.ID {
+		t.Fatalf("current assignment = %#v found=%v err=%v", current, ok, err)
+	}
+	if _, ok, err := repository.AssignedRelease(ctx, nodeTwo, published.Envelope.ID); err != nil || ok {
+		t.Fatalf("cross-node release assignment = found=%v err=%v", ok, err)
+	}
+	if _, ok, err := repository.AssignedRelease(ctx, nodeOne, published.Envelope.ID); err != nil || !ok {
+		t.Fatalf("assigned release = found=%v err=%v", ok, err)
+	}
+	envelope, err := repository.LoadRelease(ctx, published.Envelope.ID)
+	if err != nil || envelope.Digest != published.Envelope.Digest {
+		t.Fatalf("loaded release = %#v err=%v", envelope, err)
+	}
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- repository.WaitForAssignment(cancelCtx, nodeOne, 1, time.Second) }()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	if err := <-waitDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled assignment wait = %v", err)
+	}
+	if _, err := assignmentService.Put(ctx, nodeOne, assignment.Mutation{ActorID: actorID, IdempotencyKey: "player-assignment-2"}, assignment.PutInput{
+		ReleaseID: published.Envelope.ID, ReleaseDigest: published.Envelope.Digest, DeliveryMode: assignment.DeliveryStream, ExpectedGeneration: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.WaitForAssignment(ctx, nodeOne, 1, time.Second); err != nil {
+		t.Fatalf("assignment wait after update = %v", err)
+	}
+
+	candidate := published.Envelope.Digest
+	accepted, err := repository.RecordReport(ctx, nodeOne, playerclient.NodeReport{
+		EventEpoch: nodeOne, Sequence: 1, DesiredGenerationSeen: 2, ObservedGeneration: 2, CandidateReleaseDigest: &candidate,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("fresh report accepted=%v err=%v", accepted, err)
+	}
+	stale := playerclient.NodeReport{EventEpoch: nodeOne, Sequence: 1, DesiredGenerationSeen: 2, ObservedGeneration: 0}
+	accepted, err = repository.RecordReport(ctx, nodeOne, stale)
+	if err != nil || accepted {
+		t.Fatalf("stale report accepted=%v err=%v", accepted, err)
+	}
+	var observed int64
+	if err := db.QueryRowContext(ctx, `SELECT observed_generation FROM nodes WHERE id = $1`, nodeOne).Scan(&observed); err != nil {
+		t.Fatal(err)
+	}
+	if observed != 2 {
+		t.Fatalf("stale report changed observed generation to %d", observed)
+	}
+	if authorized, err := repository.AuthorizeArtifact(ctx, nodeOne, artifactDigest); err != nil || !authorized {
+		t.Fatalf("authorized artifact = %v err=%v", authorized, err)
+	}
+	if authorized, err := repository.AuthorizeArtifact(ctx, nodeTwo, artifactDigest); err != nil || authorized {
+		t.Fatalf("cross-node artifact authorization = %v err=%v", authorized, err)
+	}
+
+	event := func(id string, sequence int64) playerclient.NodeEvent {
+		return playerclient.NodeEvent{ID: id, Epoch: nodeOne, Sequence: sequence, Type: "test"}
+	}
+	ack, err := repository.AppendEvents(ctx, nodeOne, playerclient.EventBatch{Epoch: nodeOne, Events: []playerclient.NodeEvent{event("00000000-0000-4000-8000-000000000031", 1)}})
+	if err != nil || ack.AcknowledgedThrough != 1 {
+		t.Fatalf("first event ack=%#v err=%v", ack, err)
+	}
+	if duplicate, err := repository.AppendEvents(ctx, nodeOne, playerclient.EventBatch{Epoch: nodeOne, Events: []playerclient.NodeEvent{event("00000000-0000-4000-8000-000000000031", 1)}}); err != nil || duplicate.AcknowledgedThrough != 1 {
+		t.Fatalf("duplicate event ack=%#v err=%v", duplicate, err)
+	}
+	if _, err := repository.AppendEvents(ctx, nodeOne, playerclient.EventBatch{Epoch: nodeOne, Events: []playerclient.NodeEvent{event("00000000-0000-4000-8000-000000000033", 3)}}); !errors.Is(err, controlplayerapi.ErrEventGap) {
+		t.Fatalf("event gap err=%v", err)
+	}
+	ack, err = repository.AppendEvents(ctx, nodeOne, playerclient.EventBatch{Epoch: nodeOne, Events: []playerclient.NodeEvent{event("00000000-0000-4000-8000-000000000032", 2)}})
+	if err != nil || ack.AcknowledgedThrough != 2 {
+		t.Fatalf("second event ack=%#v err=%v", ack, err)
+	}
+	conflict := event("00000000-0000-4000-8000-000000000031", 1)
+	conflict.Type = "different"
+	if _, err := repository.AppendEvents(ctx, nodeOne, playerclient.EventBatch{Epoch: nodeOne, Events: []playerclient.NodeEvent{conflict}}); !errors.Is(err, controlplayerapi.ErrEventConflict) {
+		t.Fatalf("event conflict err=%v", err)
+	}
+	if _, err := repository.AppendEvents(ctx, nodeOne, playerclient.EventBatch{Epoch: nodeTwo, Events: []playerclient.NodeEvent{event("00000000-0000-4000-8000-000000000034", 3)}}); !errors.Is(err, controlplayerapi.ErrEpochMismatch) {
+		t.Fatalf("event epoch err=%v", err)
+	}
+
+	cas, err := localcas.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, err := cas.Put(bytes.NewReader([]byte("player")), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := NewLocalCASReader(cas)
+	stat, err := reader.Stat(ctx, object.Digest)
+	if err != nil || stat.Size != 6 {
+		t.Fatalf("CAS stat = %#v err=%v", stat, err)
+	}
+	body, err := reader.Open(ctx, object.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(body)
+	body.Close()
+	if err != nil || string(content) != "player" {
+		t.Fatalf("CAS content = %q err=%v", content, err)
 	}
 }
