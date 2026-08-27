@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "appendPlayerEvents",
+  "request": {"method": "POST", "path": "/player/events:append", "security": "nodeMTLS", "body": {"eventEpoch": "00000000-0000-4000-8000-000000000050", "ackThrough": 0, "events": [{"id": "00000000-0000-4000-8000-000000000051", "epoch": "00000000-0000-4000-8000-000000000050", "sequence": 1, "type": "assignment_observed", "occurredAt": "2026-01-01T00:00:00Z", "coversThrough": 1, "data": {"generation": 1}}]}},
+  "response": {"status": 204, "mediaType": "", "body": null}
+}

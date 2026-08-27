@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "putPlayerCapabilities",
+  "request": {"method": "PUT", "path": "/player/capabilities", "security": "nodeMTLS", "body": {"platform": "linux", "architecture": "arm64", "protocolVersion": "1.0", "rendererVersion": "mpv-0.38", "profileId": "pi5-1080p-h264-aac", "freeBytes": 1073741824, "outputReady": true, "clockReliable": true}},
+  "response": {"status": 204, "mediaType": "", "body": null}
+}

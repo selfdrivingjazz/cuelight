@@ -139,6 +139,12 @@ func (c *Client) GetNode(ctx context.Context, nodeID string) (Node, error) {
 	err := c.doJSON(ctx, http.MethodGet, "/nodes/"+url.PathEscape(nodeID), nil, "", "", &result, http.StatusOK)
 	return result, err
 }
+func (c *Client) GetAssignment(ctx context.Context, nodeID string) (Assignment, error) {
+	var result Assignment
+	path := "/nodes/" + url.PathEscape(nodeID) + "/assignment"
+	err := c.doJSON(ctx, http.MethodGet, path, nil, "", "", &result, http.StatusOK)
+	return result, err
+}
 
 func (c *Client) GetStatus(ctx context.Context, nodeID string) (Document, error) {
 	var result Document

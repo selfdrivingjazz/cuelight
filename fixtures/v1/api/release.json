@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "publishRelease",
+  "request": {"method": "POST", "path": "/releases/publish", "security": "operatorToken", "headers": {"Idempotency-Key": "fixture-release-0001"}, "body": {"playback": {"assetId": "00000000-0000-4000-8000-000000000020", "fit": "fit", "loop": true, "muted": false, "volume": 80, "imageDurationSeconds": 5, "orientation": 0, "allowedDeliveryModes": ["stream", "cache_then_play"]}}},
+  "response": {"status": 201, "mediaType": "application/json", "body": {"id": "00000000-0000-4000-8000-000000000030", "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "keyId": "fixture-publisher-1", "signature": "",
+    "payload": {"schemaVersion": "1.0", "minimumProtocolVersion": "1.0", "playback": {"assetId": "00000000-0000-4000-8000-000000000020", "fit": "fit", "loop": true, "muted": false, "volume": 80, "imageDurationSeconds": 5, "orientation": 0, "allowedDeliveryModes": ["cache_then_play", "stream"]}, "artifacts": [{"digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 483, "mediaType": "image/jpeg"}], "requiredFeatures": []}}}
+}

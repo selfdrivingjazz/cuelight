@@ -1,0 +1,1 @@
+{"schemaVersion":"1.0","name":"overflow","description":"Bound event storage and recover with an explicit watermark gap.","steps":[{"action":"append-events","count":8},{"action":"restart"},{"action":"reconcile-events"}],"expected":{"terminal":"reconciled","overflowDetected":true,"gapRecovered":true,"boundedEventCount":2,"cleanup":"deterministic"}}

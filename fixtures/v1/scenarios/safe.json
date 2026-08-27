@@ -1,0 +1,1 @@
+{"schemaVersion":"1.0","name":"safe","description":"Enter SAFE when there is no playable last-known-good release.","steps":[{"action":"assign","fixture":"phase1.mp4"},{"action":"fail","target":"renderer-probation"},{"action":"wait","condition":"safe"}],"expected":{"terminal":"safe","error":"no_last_known_good","renderingReleaseDigest":null,"cleanup":"deterministic"}}

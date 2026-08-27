@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "getNode",
+  "request": {"method": "GET", "path": "/nodes/00000000-0000-4000-8000-000000000001", "security": "operatorToken"},
+  "response": {"status": 200, "mediaType": "application/json", "body": {"id": "00000000-0000-4000-8000-000000000001", "name": "fixture-node", "credentialState": "active", "desiredGeneration": 1, "observedGeneration": 1}}
+}

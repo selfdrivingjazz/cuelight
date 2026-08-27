@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	operator "github.com/jmill/cable/internal/client"
 	"io"
 	"mime"
 	"net/http"
@@ -15,8 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	operator "github.com/jmill/cable/internal/client"
+	"time"
 )
 
 const (
@@ -28,15 +28,27 @@ const (
 	exitConflict = 6
 	exitAPI      = 7
 	exitIO       = 8
+	exitTimeout  = 9
+)
+
+type outputMode string
+
+const (
+	outputHuman outputMode = "human"
+	outputJSON  outputMode = "json"
+	outputJSONL outputMode = "jsonl"
 )
 
 type globalOptions struct {
-	json                  bool
+	json                  bool // retained for source compatibility with older callers
+	output                outputMode
 	configPath            string
 	server                string
 	token                 string
 	allowInsecureLoopback bool
 }
+
+func (o globalOptions) machine() bool { return o.output != outputHuman }
 
 type commandIO struct {
 	stdin      io.Reader
@@ -51,25 +63,41 @@ func run(ctx context.Context, args []string, streams commandIO) int {
 		fmt.Fprintln(streams.stderr, err)
 		return exitConfig
 	}
-	options := globalOptions{}
+	options := globalOptions{output: outputHuman}
+	var outputErr error
+	args, options.output, options.json, outputErr = extractOutputArgs(args)
+	if outputErr != nil {
+		return renderFailure(streams, true, exitUsage, outputErr)
+	}
 	flags := flag.NewFlagSet("cable", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	flags.BoolVar(&options.json, "json", false, "write machine-readable JSON")
+	flags.BoolVar(&options.json, "json", options.json, "write machine-readable JSON (deprecated; use --output json)")
 	flags.StringVar(&options.configPath, "config", defaultPath, "operator config path")
 	flags.StringVar(&options.server, "server", "", "override the configured server")
 	flags.StringVar(&options.token, "token", "", "override the configured operator token")
 	flags.BoolVar(&options.allowInsecureLoopback, "allow-insecure-loopback", false, "allow plain HTTP to a loopback server")
 	showVersion := flags.Bool("version", false, "print version")
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		writeUsage(streams.stdout)
+		return exitOK
+	}
 	if err := flags.Parse(args); err != nil {
 		fmt.Fprintln(streams.stderr, err)
 		writeUsage(streams.stderr)
 		return exitUsage
+	}
+	if options.output != outputHuman {
+		options.json = true
 	}
 	if *showVersion {
 		fmt.Fprintf(streams.stdout, "cable %s\n", version)
 		return exitOK
 	}
 	remaining := flags.Args()
+	if len(remaining) > 1 && (remaining[1] == "-h" || remaining[1] == "--help") {
+		writeCommandUsage(streams.stdout, remaining[0])
+		return exitOK
+	}
 	if len(remaining) == 0 {
 		writeUsage(streams.stderr)
 		return exitUsage
@@ -98,11 +126,50 @@ func run(ctx context.Context, args []string, streams commandIO) int {
 		return runStatus(ctx, remaining[1:], options, streams)
 	case "events":
 		return runEvents(ctx, remaining[1:], options, streams)
+	case "play":
+		return runPlay(ctx, remaining[1:], options, streams)
+	case "wait":
+		return runWait(ctx, remaining[1:], options, streams)
+	case "fixture":
+		return runFixture(remaining[1:], options, streams)
 	default:
 		fmt.Fprintf(streams.stderr, "unknown command %q\n", remaining[0])
 		writeUsage(streams.stderr)
 		return exitUsage
 	}
+}
+
+func extractOutputArgs(args []string) ([]string, outputMode, bool, error) {
+	mode := outputHuman
+	legacy := false
+	remaining := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--json" {
+			legacy, mode = true, outputJSON
+			continue
+		}
+		if arg == "--output" {
+			if i+1 >= len(args) {
+				return nil, mode, legacy, errors.New("--output requires human, json, or jsonl")
+			}
+			i++
+			mode = outputMode(args[i])
+			if mode != outputHuman && mode != outputJSON && mode != outputJSONL {
+				return nil, mode, legacy, fmt.Errorf("invalid output format %q (want human, json, or jsonl)", args[i])
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "--output=") {
+			mode = outputMode(strings.TrimPrefix(arg, "--output="))
+			if mode != outputHuman && mode != outputJSON && mode != outputJSONL {
+				return nil, mode, legacy, fmt.Errorf("invalid output format %q (want human, json, or jsonl)", mode)
+			}
+			continue
+		}
+		remaining = append(remaining, arg)
+	}
+	return remaining, mode, legacy, nil
 }
 
 func runLogin(args []string, options globalOptions, streams commandIO) int {
@@ -178,7 +245,11 @@ func runToken(ctx context.Context, args []string, options globalOptions, streams
 		if err != nil {
 			return renderAPIError(streams, options.json, err)
 		}
-		if options.json {
+		if options.output == outputJSONL {
+			for _, item := range items {
+				writeJSONL(streams.stdout, item)
+			}
+		} else if options.json {
 			writeJSON(streams.stdout, struct {
 				Items []operator.AdminToken `json:"items"`
 			}{Items: items})
@@ -250,7 +321,7 @@ func runEnrollment(ctx context.Context, args []string, options globalOptions, st
 	if err != nil {
 		return renderAPIError(streams, options.json, err)
 	}
-	printSecret(streams.stdout, options.json, created)
+	printSecret(streams.stdout, options.output, created)
 	return exitOK
 }
 
@@ -278,7 +349,7 @@ func runRecovery(ctx context.Context, args []string, options globalOptions, stre
 	if err != nil {
 		return renderAPIError(streams, options.json, err)
 	}
-	printSecret(streams.stdout, options.json, created)
+	printSecret(streams.stdout, options.output, created)
 	return exitOK
 }
 
@@ -299,7 +370,11 @@ func runNode(ctx context.Context, args []string, options globalOptions, streams 
 		if err != nil {
 			return renderAPIError(streams, options.json, err)
 		}
-		if options.json {
+		if options.output == outputJSONL {
+			for _, item := range items {
+				writeJSONL(streams.stdout, item)
+			}
+		} else if options.json {
 			writeJSON(streams.stdout, struct {
 				Items []operator.Node `json:"items"`
 			}{Items: items})
@@ -383,7 +458,7 @@ func runMedia(ctx context.Context, args []string, options globalOptions, streams
 		if err != nil {
 			return renderAPIError(streams, options.json, err)
 		}
-		printAsset(streams.stdout, options.json, asset)
+		printAsset(streams.stdout, options.output, asset)
 		return exitOK
 	case "register-local":
 		flags := commandFlags("media register-local")
@@ -402,7 +477,7 @@ func runMedia(ctx context.Context, args []string, options globalOptions, streams
 		if err != nil {
 			return renderAPIError(streams, options.json, err)
 		}
-		printAsset(streams.stdout, options.json, asset)
+		printAsset(streams.stdout, options.output, asset)
 		return exitOK
 	default:
 		return usageError(streams.stderr, "usage: cable media <upload|register-local>")
@@ -539,7 +614,11 @@ func runEvents(ctx context.Context, args []string, options globalOptions, stream
 	if err != nil {
 		return renderAPIError(streams, options.json, err)
 	}
-	if options.json {
+	if options.output == outputJSONL {
+		for _, event := range page.Items {
+			writeJSONL(streams.stdout, event)
+		}
+	} else if options.json {
 		writeJSON(streams.stdout, page)
 	} else if len(page.Items) == 0 {
 		fmt.Fprintln(streams.stdout, "No events.")
@@ -550,6 +629,293 @@ func runEvents(ctx context.Context, args []string, options globalOptions, stream
 		if page.NextCursor != nil {
 			fmt.Fprintf(streams.stdout, "Next cursor: %s\n", *page.NextCursor)
 		}
+	}
+	return exitOK
+}
+
+func runPlay(ctx context.Context, args []string, options globalOptions, streams commandIO) int {
+	flags := commandFlags("play")
+	filePath := flags.String("file", "", "media file to upload")
+	assetID := flags.String("asset", "", "existing asset ID")
+	releaseFile := flags.String("release-file", "", "publish input JSON file")
+	name := flags.String("name", "", "asset name")
+	mediaType := flags.String("media-type", "", "media type")
+	mode := flags.String("delivery-mode", "stream", "stream or cache_then_play")
+	timeout := flags.Duration("timeout", 30*time.Second, "wait timeout")
+	interval := flags.Duration("interval", 250*time.Millisecond, "poll interval")
+	noWait := flags.Bool("no-wait", false, "do not wait for convergence")
+	key := flags.String("idempotency-key", "", "idempotency key (generated when omitted)")
+	if code := parseCommand(flags, args, streams.stderr); code != exitOK {
+		return code
+	}
+	if flags.NArg() != 1 || (*filePath == "" && *assetID == "" && *releaseFile == "") ||
+		(*filePath != "" && *assetID != "") || *timeout < 0 || *interval <= 0 {
+		return usageError(streams.stderr, "usage: cable play [--file FILE|--asset ASSET_ID|--release-file FILE] NODE_ID")
+	}
+	if *mode != "stream" && *mode != "cache_then_play" {
+		return usageError(streams.stderr, "play --delivery-mode must be stream or cache_then_play")
+	}
+	resolvedKey, err := mutationKey(*key)
+	if err != nil {
+		return renderFailure(streams, options.json, exitIO, err)
+	}
+	api, code := configuredClient(options, streams)
+	if code != exitOK {
+		return code
+	}
+	nodeID := flags.Arg(0)
+	var asset operator.Asset
+	if *filePath != "" {
+		file, err := os.Open(*filePath)
+		if err != nil {
+			return renderFailure(streams, options.json, exitIO, fmt.Errorf("open play media: %w", err))
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+			if err == nil {
+				err = errors.New("play media must be a non-empty regular file")
+			}
+			return renderFailure(streams, options.json, exitIO, err)
+		}
+		resolvedName := *name
+		if resolvedName == "" {
+			resolvedName = filepath.Base(*filePath)
+		}
+		resolvedType := *mediaType
+		if resolvedType == "" {
+			resolvedType = mime.TypeByExtension(strings.ToLower(filepath.Ext(*filePath)))
+			if resolvedType == "" {
+				resolvedType = "application/octet-stream"
+			}
+		}
+		asset, err = api.UploadAsset(ctx, resolvedName, resolvedType, info.Size(), file, resolvedKey)
+		if err != nil {
+			return renderAPIError(streams, options.json, err)
+		}
+	} else if *assetID != "" {
+		asset.ID = *assetID
+	} else {
+		input, err := os.ReadFile(*releaseFile)
+		if err != nil {
+			return renderFailure(streams, options.json, exitIO, fmt.Errorf("read play release: %w", err))
+		}
+		release, err := api.PublishRelease(ctx, input, resolvedKey)
+		if err != nil {
+			return renderAPIError(streams, options.json, err)
+		}
+		return convergePlay(ctx, api, options, streams, nodeID, release, *mode, resolvedKey, *timeout, *interval, *noWait)
+	}
+	input := map[string]any{
+		"playback": map[string]any{
+			"assetId": asset.ID, "fit": "fit", "loop": false, "muted": false,
+			"volume": 100, "orientation": 0, "allowedDeliveryModes": []string{*mode},
+		},
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return renderFailure(streams, options.json, exitIO, err)
+	}
+	release, err := api.PublishRelease(ctx, body, resolvedKey)
+	if err != nil {
+		return renderAPIError(streams, options.json, err)
+	}
+	return convergePlay(ctx, api, options, streams, nodeID, release, *mode, resolvedKey, *timeout, *interval, *noWait)
+}
+
+func convergePlay(ctx context.Context, api *operator.Client, options globalOptions, streams commandIO, nodeID string, release operator.Document, mode, key string, timeout, interval time.Duration, noWait bool) int {
+	releaseID, _ := release["id"].(string)
+	digest, _ := release["digest"].(string)
+	if releaseID == "" || digest == "" {
+		return renderFailure(streams, options.json, exitAPI, errors.New("publish response omitted release id or digest"))
+	}
+	current, err := api.GetAssignment(ctx, nodeID)
+	if err != nil {
+		var problem *operator.Problem
+		if !errors.As(err, &problem) || problem.Status != http.StatusNotFound {
+			return renderAPIError(streams, options.json, err)
+		}
+	}
+	expected := int64(0)
+	if current.DesiredGeneration > 0 {
+		expected = current.DesiredGeneration
+	}
+	assignment, err := api.PutAssignment(ctx, nodeID, fmt.Sprintf("\"generation:%d\"", expected), key, operator.AssignmentInput{
+		ReleaseID: releaseID, ReleaseDigest: digest, DeliveryMode: mode, ExpectedGeneration: expected,
+	})
+	if err != nil {
+		return renderAPIError(streams, options.json, err)
+	}
+	if noWait {
+		return renderResult(streams, options.output, assignment)
+	}
+	return waitForConvergence(ctx, api, options, streams, nodeID, assignment.DesiredGeneration, "", timeout, interval)
+}
+
+func runWait(ctx context.Context, args []string, options globalOptions, streams commandIO) int {
+	flags := commandFlags("wait")
+	generation := flags.Int64("generation", -1, "desired generation to observe")
+	condition := flags.String("condition", "", "status condition value")
+	timeout := flags.Duration("timeout", 30*time.Second, "maximum wait duration")
+	interval := flags.Duration("interval", 250*time.Millisecond, "poll interval")
+	if code := parseCommand(flags, args, streams.stderr); code != exitOK {
+		return code
+	}
+	if flags.NArg() != 1 || (*generation < 0 && *condition == "") || *timeout < 0 || *interval <= 0 {
+		return usageError(streams.stderr, "usage: cable wait [--generation N|--condition CONDITION] [--timeout DURATION] NODE_ID")
+	}
+	api, code := configuredClient(options, streams)
+	if code != exitOK {
+		return code
+	}
+	return waitForConvergence(ctx, api, options, streams, flags.Arg(0), *generation, *condition, *timeout, *interval)
+}
+func waitForConvergence(ctx context.Context, api *operator.Client, options globalOptions, streams commandIO, nodeID string, generation int64, condition string, timeout, interval time.Duration) int {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	var last operator.Document
+	for {
+		status, err := api.GetStatus(ctx, nodeID)
+		if err == nil {
+			last = status
+			observed := documentInt64(status, "observedGeneration")
+			if observed == 0 {
+				observed = documentInt64(status, "desiredGenerationSeen")
+			}
+			ok := generation < 0 || observed >= generation
+			if condition != "" {
+				ok = ok && documentCondition(status, condition)
+			}
+			if ok {
+				return renderResult(streams, options.output, map[string]any{
+					"node": nodeID, "generation": observed, "condition": condition, "status": status,
+				})
+			}
+		} else {
+			var problem *operator.Problem
+			if !errors.As(err, &problem) || problem.Status != http.StatusNotFound {
+				return renderAPIError(streams, options.json, err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return waitFailure(ctx, api, options, streams, nodeID, generation, condition, last)
+		case <-deadline.C:
+			return waitFailure(ctx, api, options, streams, nodeID, generation, condition, last)
+		case <-ticker.C:
+		}
+	}
+}
+
+func documentInt64(document operator.Document, key string) int64 {
+	value, ok := document[key]
+	if !ok {
+		return 0
+	}
+	switch typed := value.(type) {
+	case float64:
+		return int64(typed)
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	default:
+		var result int64
+		_, _ = fmt.Sscan(fmt.Sprint(value), &result)
+		return result
+	}
+}
+
+func waitFailure(ctx context.Context, api *operator.Client, options globalOptions, streams commandIO, nodeID string, generation int64, condition string, status operator.Document) int {
+	events, err := api.ListEvents(ctx, nodeID, "")
+	if err != nil {
+		events = operator.EventPage{}
+	}
+	problem := &operator.Problem{Type: "about:blank", Title: "Convergence timeout", Status: http.StatusGatewayTimeout, Detail: fmt.Sprintf("node %s did not reach requested state", nodeID), Extensions: map[string]any{
+		"node": nodeID, "generation": generation, "condition": condition, "statusSnapshot": status, "events": events.Items,
+	}}
+	return renderAPIError(streams, options.json, problem)
+}
+
+func documentCondition(status operator.Document, wanted string) bool {
+	for _, key := range []string{"condition", "state", "status"} {
+		if value, ok := status[key]; ok && fmt.Sprint(value) == wanted {
+			return true
+		}
+	}
+	if conditions, ok := status["conditions"].([]any); ok {
+		for _, value := range conditions {
+			if item, ok := value.(map[string]any); ok && (fmt.Sprint(item["type"]) == wanted || fmt.Sprint(item["status"]) == wanted) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runFixture(args []string, options globalOptions, streams commandIO) int {
+	flags := commandFlags("fixture")
+	root := flags.String("root", "test/fixtures", "fixture root directory")
+	if code := parseCommand(flags, args, streams.stderr); code != exitOK {
+		return code
+	}
+	if flags.NArg() < 1 || (flags.Arg(0) != "list" && flags.Arg(0) != "path") {
+		return usageError(streams.stderr, "usage: cable fixture [--root DIR] <list|path NAME>")
+	}
+	var files []string
+	err := filepath.WalkDir(*root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type().IsRegular() {
+			rel, _ := filepath.Rel(*root, path)
+			files = append(files, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		return renderFailure(streams, options.json, exitIO, fmt.Errorf("read fixtures: %w", err))
+	}
+	sort.Strings(files)
+	if flags.Arg(0) == "list" {
+		if options.output == outputJSONL {
+			for _, file := range files {
+				writeJSONL(streams.stdout, map[string]string{"name": strings.TrimSuffix(file, filepath.Ext(file)), "path": filepath.Join(*root, file)})
+			}
+		} else {
+			return renderResult(streams, options.output, map[string]any{"root": *root, "fixtures": files})
+		}
+		return exitOK
+	}
+	if flags.NArg() != 2 {
+		return usageError(streams.stderr, "usage: cable fixture [--root DIR] path NAME")
+	}
+	name := flags.Arg(1)
+	for _, file := range files {
+		base := strings.TrimSuffix(file, filepath.Ext(file))
+		if base == name || file == name || filepath.Base(base) == name {
+			return renderResult(streams, options.output, map[string]string{"name": base, "path": filepath.Join(*root, file)})
+		}
+	}
+	return renderFailure(streams, options.json, exitNotFound, fmt.Errorf("fixture %q not found", name))
+}
+
+func renderResult(streams commandIO, mode outputMode, value any) int {
+	if mode == outputJSONL {
+		writeJSONL(streams.stdout, value)
+		return exitOK
+	}
+	if mode == outputJSON {
+		writeJSON(streams.stdout, value)
+		return exitOK
+	}
+	if document, ok := value.(operator.Document); ok {
+		printDocument(streams.stdout, document)
+	} else {
+		encoded, _ := json.Marshal(value)
+		fmt.Fprintln(streams.stdout, string(encoded))
 	}
 	return exitOK
 }
@@ -591,6 +957,12 @@ func commandFlags(name string) *flag.FlagSet {
 
 func parseCommand(flags *flag.FlagSet, args []string, stderr io.Writer) int {
 	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintf(stderr, "usage: cable %s\n", flags.Name())
+			flags.SetOutput(stderr)
+			flags.PrintDefaults()
+			return exitOK
+		}
 		fmt.Fprintln(stderr, err)
 		return exitUsage
 	}
@@ -621,44 +993,111 @@ func renderAPIError(streams commandIO, jsonOutput bool, err error) int {
 		code = exitNotFound
 	case http.StatusConflict, http.StatusPreconditionFailed, http.StatusUnprocessableEntity:
 		code = exitConflict
+	case http.StatusGatewayTimeout, http.StatusRequestTimeout:
+		code = exitTimeout
 	}
+	safe := redactProblem(problem)
 	if jsonOutput {
-		writeJSON(streams.stderr, problem)
+		writeJSON(streams.stderr, safe)
 	} else {
-		fmt.Fprintf(streams.stderr, "%s", problem.Title)
-		if problem.Detail != "" {
-			fmt.Fprintf(streams.stderr, ": %s", problem.Detail)
+		fmt.Fprintf(streams.stderr, "%s", safe.Title)
+		if safe.Detail != "" {
+			fmt.Fprintf(streams.stderr, ": %s", safe.Detail)
 		}
-		fmt.Fprintf(streams.stderr, " (HTTP %d)", problem.Status)
-		if problem.CorrelationID != "" {
-			fmt.Fprintf(streams.stderr, " [correlation %s]", problem.CorrelationID)
+		fmt.Fprintf(streams.stderr, " (HTTP %d)", safe.Status)
+		if safe.CorrelationID != "" {
+			fmt.Fprintf(streams.stderr, " [correlation %s]", safe.CorrelationID)
 		}
 		fmt.Fprintln(streams.stderr)
 	}
 	return code
 }
 
+func redactProblem(problem *operator.Problem) *operator.Problem {
+	if problem == nil {
+		return nil
+	}
+	safe := *problem
+	safe.Extensions = redactMap(problem.Extensions)
+	return &safe
+}
+
+func redactMap(values map[string]any) map[string]any {
+	if values == nil {
+		return nil
+	}
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		lower := strings.ToLower(key)
+		if strings.Contains(lower, "secret") || strings.Contains(lower, "token") ||
+			strings.Contains(lower, "password") || strings.Contains(lower, "authorization") ||
+			strings.Contains(lower, "privatekey") {
+			result[key] = "[REDACTED]"
+			continue
+		}
+		result[key] = redactValue(value)
+	}
+	return result
+}
+
+func redactValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return redactMap(typed)
+	case []any:
+		result := make([]any, len(typed))
+		for index := range typed {
+			result[index] = redactValue(typed[index])
+		}
+		return result
+	default:
+		return value
+	}
+}
+
 func renderFailure(streams commandIO, jsonOutput bool, code int, err error) int {
+	message := redactText(err.Error())
 	if jsonOutput {
 		writeJSON(streams.stderr, struct {
 			Error string `json:"error"`
-		}{Error: err.Error()})
+		}{Error: message})
 	} else {
-		fmt.Fprintln(streams.stderr, err)
+		fmt.Fprintln(streams.stderr, message)
 	}
 	return code
 }
 
-func printSecret(output io.Writer, jsonOutput bool, created operator.OneTimeToken) {
-	if jsonOutput {
+func redactText(value string) string {
+	for _, marker := range []string{"secret=", "token=", "password=", "Bearer "} {
+		for {
+			index := strings.Index(strings.ToLower(value), strings.ToLower(marker))
+			if index < 0 {
+				break
+			}
+			start := index + len(marker)
+			end := start
+			for end < len(value) && !strings.ContainsRune(" \t\r\n,;)]}", rune(value[end])) {
+				end++
+			}
+			value = value[:start] + "[REDACTED]" + value[end:]
+		}
+	}
+	return value
+}
+func printSecret(output io.Writer, mode outputMode, created operator.OneTimeToken) {
+	if mode == outputJSONL {
+		writeJSONL(output, created)
+	} else if mode == outputJSON {
 		writeJSON(output, created)
 	} else {
 		fmt.Fprintf(output, "ID: %s\nExpires: %s\nSecret: %s\n", created.ID, created.ExpiresAt, created.Secret)
 	}
 }
 
-func printAsset(output io.Writer, jsonOutput bool, asset operator.Asset) {
-	if jsonOutput {
+func printAsset(output io.Writer, mode outputMode, asset operator.Asset) {
+	if mode == outputJSONL {
+		writeJSONL(output, asset)
+	} else if mode == outputJSON {
 		writeJSON(output, asset)
 	} else {
 		fmt.Fprintf(output, "Asset: %s (%s)\nArtifact: %s (%d bytes, %s)\n", asset.Name, asset.ID, asset.Artifact.Digest, asset.Artifact.Size, asset.Artifact.MediaType)
@@ -684,12 +1123,33 @@ func writeJSON(output io.Writer, value any) {
 	_ = encoder.Encode(value)
 }
 
+func writeJSONL(output io.Writer, value any) {
+	encoder := json.NewEncoder(output)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(value)
+}
+
 func usageError(stderr io.Writer, message string) int {
 	fmt.Fprintln(stderr, message)
 	return exitUsage
 }
 
 func writeUsage(output io.Writer) {
-	fmt.Fprintln(output, "usage: cable [--json] [--config PATH] [--allow-insecure-loopback] <command>")
-	fmt.Fprintln(output, "commands: login, config, token, enrollment-token, recovery-token, node, media, release, assignment, status, events")
+	fmt.Fprintln(output, "usage: cable [global flags] <command>")
+	fmt.Fprintln(output, "global flags: --output human|json|jsonl, --json, --config PATH, --server URL, --token TOKEN, --allow-insecure-loopback")
+	fmt.Fprintln(output, "commands: login, config, token, enrollment-token, recovery-token, node, media, release, assignment, status, events, play, wait, fixture")
+	fmt.Fprintln(output, "exit codes: 0 success, 2 usage, 3 config, 4 auth, 5 not found, 6 conflict, 7 API, 8 I/O, 9 timeout")
+}
+func writeCommandUsage(output io.Writer, command string) {
+	switch command {
+	case "play":
+		fmt.Fprintln(output, "usage: cable play [--file FILE|--asset ASSET_ID|--release-file FILE] [--timeout DURATION] NODE_ID")
+	case "wait":
+		fmt.Fprintln(output, "usage: cable wait [--generation N|--condition CONDITION] [--timeout DURATION] NODE_ID")
+	case "fixture":
+		fmt.Fprintln(output, "usage: cable fixture [--root DIR] <list|path NAME>")
+	default:
+		fmt.Fprintf(output, "usage: cable %s ...\n", command)
+	}
+	fmt.Fprintln(output, "output: --output human|json|jsonl (or legacy --json)")
 }

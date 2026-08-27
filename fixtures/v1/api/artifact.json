@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "getPlayerArtifact",
+  "request": {"method": "GET", "path": "/player/artifacts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/content", "security": "nodeMTLS", "headers": {"Range": "bytes=0-15", "If-Range": "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""}},
+  "response": {"status": 206, "mediaType": "image/jpeg", "headers": {"Accept-Ranges": "bytes", "Content-Range": "bytes 0-15/483", "ETag": "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""}, "body": {"fixture": "phase1.jpg", "offset": 0, "length": 16}}
+}

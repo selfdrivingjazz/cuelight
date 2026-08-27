@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "postPlayerReport",
+  "request": {"method": "POST", "path": "/player/reports", "security": "nodeMTLS", "body": {"eventEpoch": "00000000-0000-4000-8000-000000000050", "sequence": 1, "desiredGenerationSeen": 1, "observedGeneration": 1, "renderingReleaseDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "candidateReleaseDigest": null, "healthyReleaseDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "lastKnownGoodReleaseDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "conditions": [{"type": "Ready", "status": true, "reason": "Playing", "message": "fixture active"}]}},
+  "response": {"status": 204, "mediaType": "", "body": null}
+}

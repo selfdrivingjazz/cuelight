@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "putNodeAssignment",
+  "request": {"method": "PUT", "path": "/nodes/00000000-0000-4000-8000-000000000001/assignment", "security": "operatorToken", "headers": {"Idempotency-Key": "fixture-assignment-0001", "If-Match": "\"generation-0\""}, "body": {"releaseId": "00000000-0000-4000-8000-000000000030", "releaseDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "deliveryMode": "stream", "expectedGeneration": 0}},
+  "response": {"status": 200, "mediaType": "application/json", "body": {"id": "00000000-0000-4000-8000-000000000040", "nodeId": "00000000-0000-4000-8000-000000000001", "releaseId": "00000000-0000-4000-8000-000000000030", "releaseDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "deliveryMode": "stream", "expectedGeneration": 0, "desiredGeneration": 1}}
+}

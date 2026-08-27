@@ -1,0 +1,1 @@
+{"schemaVersion":"1.0","name":"old-generation","description":"Reject an assignment that would move a node backwards.","steps":[{"action":"assign","fixture":"phase1.jpg","generation":2},{"action":"assign","fixture":"phase1.png","generation":1}],"expected":{"terminal":"rejected","error":"generation_conflict","observedGeneration":2,"stateUnchanged":true,"cleanup":"deterministic"}}

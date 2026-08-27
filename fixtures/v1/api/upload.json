@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "createUpload",
+  "request": {"method": "POST", "path": "/uploads", "security": "operatorToken", "headers": {"Idempotency-Key": "fixture-upload-0001"}, "body": {"name": "phase1.jpg", "length": 483, "mediaType": "image/jpeg"}},
+  "response": {"status": 201, "mediaType": "application/json", "body": {"id": "00000000-0000-4000-8000-000000000010", "length": 483, "offset": 0, "state": "open"}}
+}

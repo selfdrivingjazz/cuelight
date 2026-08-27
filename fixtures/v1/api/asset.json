@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "operation": "getAsset",
+  "request": {"method": "GET", "path": "/assets/00000000-0000-4000-8000-000000000020", "security": "operatorToken"},
+  "response": {"status": 200, "mediaType": "application/json", "body": {"id": "00000000-0000-4000-8000-000000000020", "name": "phase1.jpg", "artifact": {"digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 483, "mediaType": "image/jpeg"}}}
+}
