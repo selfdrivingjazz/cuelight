@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Asset, type Node, type components } from "@cable/api-client";
 import { Breadcrumbs, Button, Card, CardContent, CardHeader, CardTitle, TanStackDataTable, EmptyState, ErrorState, MobileNav, MobileSidebar, Pagination, Sidebar, Skeleton, StatusBadge, type NavigationLink } from "@cable/controller-ui";
 import "@cable/controller-ui/styles.css";
-import { api, ApiRequestError, readApiResult } from "./api";
+import { api, ApiRequestError, getControllerHealth, readApiResult } from "./api";
 import { AccessScreen, useAuth } from "./auth";
 import { CableChannelDetail, CableDeploymentsPage, CableDeploymentDetail, CableReleaseAssignmentPage, RevisionDetailPage, ShellBuildsPage, uploadSelectedFile } from "./cable";
 
@@ -25,6 +25,7 @@ const queryKeys = {
   nodes: (search: PageSearch) => ["controller", "nodes", search] as const,
   node: (nodeId: string) => ["controller", "node", nodeId] as const,
   nodeStatus: (nodeId: string) => ["controller", "node-status", nodeId] as const,
+  nodeCapabilities: (nodeId: string) => ["controller", "node-capabilities", nodeId] as const,
   nodeAssignment: (nodeId: string) => ["controller", "node-assignment", nodeId] as const,
   nodeEvents: (nodeId: string, cursor?: string) => ["controller", "node-events", nodeId, cursor] as const,
   assets: (search: PageSearch) => ["controller", "assets", search] as const,
@@ -38,6 +39,7 @@ function pageSearch(search: PageSearch) { return { cursor: search.cursor, limit:
 async function listNodes(search: NodeSearch) { return readApiResult(await api.GET("/nodes", { params: { query: pageSearch(search) } })); }
 async function getNode(nodeId: string) { return readApiResult(await api.GET("/nodes/{nodeId}", { params: { path: { nodeId } } })); }
 async function getNodeStatus(nodeId: string) { return readApiResult(await api.GET("/nodes/{nodeId}/status", { params: { path: { nodeId } } })); }
+async function getNodeCapabilities(nodeId: string) { return readApiResult(await api.GET("/nodes/{nodeId}/capabilities", { params: { path: { nodeId } } })); }
 async function getNodeAssignment(nodeId: string) { return readApiResult(await api.GET("/nodes/{nodeId}/assignment", { params: { path: { nodeId } } })); }
 async function listNodeEvents(nodeId: string, cursor?: string) { return readApiResult(await api.GET("/nodes/{nodeId}/events", { params: { path: { nodeId }, query: { cursor, limit: 50 } } })); }
 async function listAssets(search: PageSearch) { return readApiResult(await api.GET("/assets", { params: { query: pageSearch(search) } })); }
@@ -65,9 +67,23 @@ function normalizePageSearch(search: Record<string, unknown>): PageSearch { retu
 function SearchBox({ value, onChange, label }: { value: string; onChange: (value: string) => void; label: string }) { return <label className="max-w-sm text-sm"><span className="sr-only">{label}</span><input className="mt-2 h-9 w-full rounded-md border border-border bg-background px-3" value={value} onChange={(event) => onChange(event.currentTarget.value)} placeholder={label} /></label>; }
 
 function OverviewPage() {
-  const health = useQuery({ queryKey: queryKeys.health, queryFn: async () => readApiResult(await api.GET("/health")) });
+  const health = useQuery({ queryKey: queryKeys.health, queryFn: getControllerHealth });
   const nodes = useQuery({ queryKey: queryKeys.nodes({ limit: 1 }), queryFn: () => listNodes({ limit: 1 }) });
-  return <PageFrame breadcrumbs={[{ label: "Overview" }]}><PageHeader title="Overview" description="A focused view of controller health and work requiring attention." /><div className="grid gap-4 md:grid-cols-3">{health.isPending || nodes.isPending ? <LoadingCard /> : health.isError ? <QueryError error={health.error} retry={() => void health.refetch()} /> : nodes.isError ? <QueryError error={nodes.error} retry={() => void nodes.refetch()} /> : <><Card><CardHeader><CardTitle>Controller</CardTitle></CardHeader><CardContent><p className="text-3xl font-semibold">{health.data.status === "ok" ? "Healthy" : "Degraded"}</p><p className="text-sm text-muted-foreground">Version {health.data.version}</p></CardContent></Card><Card><CardHeader><CardTitle>Fleet</CardTitle></CardHeader><CardContent><p className="text-3xl font-semibold">{nodes.data.items.length ? "Available" : "0"}</p><p className="text-sm text-muted-foreground">{nodes.data.items.length ? "nodes registered" : "registered nodes"}</p><Link className="mt-4 inline-block text-sm text-primary hover:underline" to="/nodes">View nodes</Link></CardContent></Card><Card><CardHeader><CardTitle>Operations</CardTitle></CardHeader><CardContent><p className="text-3xl font-semibold">—</p><p className="text-sm text-muted-foreground">Review node activity for current events</p><Link className="mt-4 inline-block text-sm text-primary hover:underline" to="/activity">Open activity</Link></CardContent></Card></>}</div></PageFrame>;
+  let content: React.ReactNode;
+  if (health.isPending || nodes.isPending) {
+    content = <LoadingCard />;
+  } else if (health.isError) {
+    content = <QueryError error={health.error} retry={() => void health.refetch()} />;
+  } else if (nodes.isError) {
+    content = <QueryError error={nodes.error} retry={() => void nodes.refetch()} />;
+  } else {
+    content = <>
+      <Card><CardHeader><CardTitle>Controller</CardTitle></CardHeader><CardContent><p className="text-3xl font-semibold">{health.data.status === "ok" ? "Healthy" : "Degraded"}</p><p className="text-sm text-muted-foreground">Version {health.data.version}</p></CardContent></Card>
+      <Card><CardHeader><CardTitle>Fleet</CardTitle></CardHeader><CardContent><p className="text-3xl font-semibold">{nodes.data.items.length > 0 ? "Available" : "Empty"}</p><p className="text-sm text-muted-foreground">Registered node inventory</p><Link className="mt-4 inline-block text-sm text-primary hover:underline" to="/nodes">View nodes</Link></CardContent></Card>
+      <Card><CardHeader><CardTitle>Operations</CardTitle></CardHeader><CardContent><p className="text-3xl font-semibold">—</p><p className="text-sm text-muted-foreground">Review node activity for current events</p><Link className="mt-4 inline-block text-sm text-primary hover:underline" to="/activity">Open activity</Link></CardContent></Card>
+    </>;
+  }
+  return <PageFrame breadcrumbs={[{ label: "Overview" }]}><PageHeader title="Overview" description="A focused view of controller health and work requiring attention." /><div className="grid gap-4 md:grid-cols-3">{content}</div></PageFrame>;
 }
 
 function NodesPage() { const search = useSearch({ from: "/nodes" }); const navigate = useNavigate({ from: "/nodes" }); const query = useQuery({ queryKey: queryKeys.nodes(search), queryFn: () => listNodes(search) }); const setSearch = (value: string) => navigate({ search: (previous) => ({ ...previous, search: value || undefined, cursor: undefined }) }); if (query.isPending) return <RoutePending />; if (query.isError) return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Fleet" }]}><QueryError error={query.error} retry={() => void query.refetch()} /></PageFrame>; const data = query.data; return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Fleet" }, { label: "Nodes" }]}><PageHeader title="Nodes" description="Monitor credentials, generations, and observed renderer state." /><Card><CardHeader className="gap-3"><CardTitle>Registered nodes</CardTitle><SearchBox value={search.search ?? ""} onChange={setSearch} label="Search by name or ID" /></CardHeader><CardContent className="space-y-4"><TanStackDataTable caption="Registered nodes" rows={data.items} rowKey={(node) => node.id} empty={<EmptyState title="No matching nodes" description="The controller returned no nodes matching this search." />} columns={[{ key: "name", header: "Node", render: (node: Node) => <Link className="font-medium text-primary hover:underline" to="/nodes/$nodeId" params={{ nodeId: node.id }}>{node.name}</Link> }, { key: "id", header: "ID", render: (node: Node) => <span className="font-mono text-xs">{node.id}</span> }, { key: "credential", header: "Credential", render: (node: Node) => <StatusBadge tone={node.credentialState === "active" ? "success" : "warning"}>{node.credentialState}</StatusBadge> }, { key: "generation", header: "Generation", render: (node: Node) => <span className="tabular-nums">{node.observedGeneration ?? "—"}/{node.desiredGeneration ?? "—"}</span> }]} /><Pagination page={data.page} onPrevious={() => navigate({ search: (previous) => ({ ...previous, cursor: data.page.previousCursor ?? undefined }) })} onNext={() => navigate({ search: (previous) => ({ ...previous, cursor: data.page.nextCursor ?? undefined }) })} /></CardContent></Card></PageFrame>; }
@@ -77,25 +93,51 @@ type NodeTab = typeof nodeTabs[number]["slug"];
 type NodeStatus = components["schemas"]["NodeReport"];
 type NodeAssignmentData = components["schemas"]["Assignment"];
 type NodeEvent = components["schemas"]["NodeEvent"];
+type NodeCapabilities = components["schemas"]["CapabilityReport"];
 function NodeDetailPage({ nodeId, tab = "" }: { nodeId: string; tab?: NodeTab }) {
   const node = useQuery({ queryKey: queryKeys.node(nodeId), queryFn: () => getNode(nodeId) });
-  const status = useQuery({ queryKey: queryKeys.nodeStatus(nodeId), queryFn: () => getNodeStatus(nodeId), enabled: tab === "" });
+  const needsStatus = tab === "" || tab === "playback" || tab === "cache";
+  const status = useQuery({ queryKey: queryKeys.nodeStatus(nodeId), queryFn: () => getNodeStatus(nodeId), enabled: needsStatus });
+  const capabilities = useQuery({ queryKey: queryKeys.nodeCapabilities(nodeId), queryFn: () => getNodeCapabilities(nodeId), enabled: tab === "capabilities" });
   const assignment = useQuery({ queryKey: queryKeys.nodeAssignment(nodeId), queryFn: () => getNodeAssignment(nodeId), enabled: tab === "assignment" });
   const events = useQuery({ queryKey: queryKeys.nodeEvents(nodeId), queryFn: () => listNodeEvents(nodeId), enabled: tab === "events" });
   if (node.isPending) return <RoutePending />;
   if (node.isError) return <PageFrame breadcrumbs={[{ label: "Nodes", href: "/nodes" }, { label: nodeId }]}><QueryError error={node.error} retry={() => void node.refetch()} /></PageFrame>;
   const detail = node.data;
   const tabTitle = nodeTabs.find((item) => item.slug === tab)?.label ?? "Overview";
+  const statusContent = status.isPending ? <LoadingCard /> : status.isError ? <QueryError error={status.error} retry={() => void status.refetch()} /> : tab === "playback" ? <NodePlayback status={status.data} /> : tab === "cache" ? <NodeCache status={status.data} /> : <NodeOverview node={detail} status={status.data} />;
   return <PageFrame breadcrumbs={[{ label: "Fleet", href: "/nodes" }, { label: detail.name }, ...(tab ? [{ label: tabTitle }] : [])]}>
     <PageHeader title={detail.name} description={`Node ID ${detail.id}`}><StatusBadge tone={detail.credentialState === "active" ? "success" : "warning"}>{detail.credentialState}</StatusBadge></PageHeader>
     <nav aria-label="Node sections" className="flex gap-1 overflow-x-auto border-b border-border pb-px">{nodeTabs.map((item) => <Link key={item.slug || "overview"} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm ${item.slug === tab ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`} to={item.slug ? `/nodes/$nodeId/${item.slug}` : "/nodes/$nodeId"} params={{ nodeId }} aria-current={item.slug === tab ? "page" : undefined}>{item.label}</Link>)}</nav>
-    {tab === "" && (status.isPending ? <LoadingCard /> : status.isError ? <QueryError error={status.error} retry={() => void status.refetch()} /> : <NodeOverview node={detail} status={status.data} />)}
+    {needsStatus && statusContent}
+    {tab === "capabilities" && (capabilities.isPending ? <LoadingCard /> : capabilities.isError ? <QueryError error={capabilities.error} retry={() => void capabilities.refetch()} /> : <NodeCapabilityDetails capabilities={capabilities.data} />)}
     {tab === "assignment" && (assignment.isPending ? <LoadingCard /> : assignment.isError ? <QueryError error={assignment.error} retry={() => void assignment.refetch()} /> : <NodeAssignment assignment={assignment.data} />)}
     {tab === "events" && (events.isPending ? <LoadingCard /> : events.isError ? <QueryError error={events.error} retry={() => void events.refetch()} /> : <NodeEvents events={events.data.items} />)}
-    {tab !== "" && tab !== "assignment" && tab !== "events" && <EmptyState title={`${tabTitle} data unavailable`} description={`The controller API does not currently expose ${tabTitle.toLocaleLowerCase()} data for a node.`} />}
   </PageFrame>;
 }
-function NodeOverview({ node, status }: { node: Node; status: NodeStatus }) { return <div className="grid gap-4 md:grid-cols-2"><Card><CardHeader><CardTitle>Generation</CardTitle></CardHeader><CardContent><dl className="space-y-3 text-sm"><div className="flex justify-between"><dt className="text-muted-foreground">Desired generation</dt><dd>{node.desiredGeneration ?? "—"}</dd></div><div className="flex justify-between"><dt className="text-muted-foreground">Observed generation</dt><dd>{node.observedGeneration ?? "—"}</dd></div><div className="flex justify-between"><dt className="text-muted-foreground">Last report sequence</dt><dd>{status.sequence}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>Renderer state</CardTitle></CardHeader><CardContent><dl className="space-y-3 break-all text-sm"><div><dt className="text-muted-foreground">Rendering release</dt><dd>{status.renderingReleaseDigest ?? "—"}</dd></div><div><dt className="text-muted-foreground">Healthy release</dt><dd>{status.healthyReleaseDigest ?? "—"}</dd></div></dl></CardContent></Card></div>; }
+function NodeOverview({ node, status }: { node: Node; status: NodeStatus }) {
+  return <div className="grid gap-4 md:grid-cols-2">
+    <Card><CardHeader><CardTitle>Generation</CardTitle></CardHeader><CardContent><dl className="space-y-3 text-sm">
+      <div className="flex justify-between"><dt className="text-muted-foreground">Desired generation</dt><dd>{node.desiredGeneration ?? "—"}</dd></div>
+      <div className="flex justify-between"><dt className="text-muted-foreground">Observed generation</dt><dd>{node.observedGeneration ?? "—"}</dd></div>
+      <div className="flex justify-between"><dt className="text-muted-foreground">Last report sequence</dt><dd>{status.sequence}</dd></div>
+    </dl></CardContent></Card>
+    <Card><CardHeader><CardTitle>Renderer state</CardTitle></CardHeader><CardContent><dl className="space-y-3 break-all text-sm">
+      <div><dt className="text-muted-foreground">Presentation</dt><dd>{status.presentationKind || "—"}</dd></div>
+      <div><dt className="text-muted-foreground">Rendering release</dt><dd>{status.renderingReleaseDigest ?? "—"}</dd></div>
+      <div><dt className="text-muted-foreground">Healthy release</dt><dd>{status.healthyReleaseDigest ?? "—"}</dd></div>
+    </dl></CardContent></Card>
+  </div>;
+}
+function NodePlayback({ status }: { status: NodeStatus }) {
+  return <Card><CardHeader><CardTitle>Playback health</CardTitle></CardHeader><CardContent className="space-y-4"><dl className="grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-muted-foreground">Presentation</dt><dd>{status.presentationKind || "—"}</dd></div><div><dt className="text-muted-foreground">Healthy release</dt><dd className="break-all font-mono">{status.healthyReleaseDigest ?? "—"}</dd></div></dl><TanStackDataTable caption="Playback conditions" rows={status.conditions} rowKey={(condition) => condition.type} empty={<EmptyState title="No playback conditions" description="The node has not reported playback conditions." />} columns={[{ key: "condition", header: "Condition", render: (condition) => condition.type }, { key: "status", header: "Status", render: (condition) => <StatusBadge tone={condition.status ? "success" : "danger"}>{condition.status ? "Ready" : "Not ready"}</StatusBadge> }, { key: "reason", header: "Reason", render: (condition) => condition.reason }]} /></CardContent></Card>;
+}
+function NodeCache({ status }: { status: NodeStatus }) {
+  return <Card><CardHeader><CardTitle>Cache activation</CardTitle></CardHeader><CardContent><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt className="text-muted-foreground">Candidate release</dt><dd className="break-all font-mono">{status.candidateReleaseDigest ?? "None"}</dd></div><div><dt className="text-muted-foreground">Last known good</dt><dd className="break-all font-mono">{status.lastKnownGoodReleaseDigest ?? "—"}</dd></div></dl></CardContent></Card>;
+}
+function NodeCapabilityDetails({ capabilities }: { capabilities: NodeCapabilities }) {
+  return <Card><CardHeader><CardTitle>Reported capabilities</CardTitle></CardHeader><CardContent><dl className="grid gap-4 text-sm sm:grid-cols-3"><div><dt className="text-muted-foreground">Platform</dt><dd>{capabilities.platform} / {capabilities.architecture}</dd></div><div><dt className="text-muted-foreground">Protocol</dt><dd>{capabilities.protocolVersion}</dd></div><div><dt className="text-muted-foreground">Renderer</dt><dd>{capabilities.rendererVersion}</dd></div><div><dt className="text-muted-foreground">Profile</dt><dd>{capabilities.profileId}</dd></div><div><dt className="text-muted-foreground">Features</dt><dd>{capabilities.features?.join(", ") || "None"}</dd></div><div><dt className="text-muted-foreground">Media types</dt><dd>{capabilities.acceptedMediaTypes?.join(", ") || "None"}</dd></div></dl></CardContent></Card>;
+}
 function NodeAssignment({ assignment }: { assignment: NodeAssignmentData }) { return <Card><CardHeader><CardTitle>Desired assignment</CardTitle></CardHeader><CardContent><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt className="text-muted-foreground">Release</dt><dd className="font-mono break-all">{assignment.releaseId}</dd></div><div><dt className="text-muted-foreground">Release digest</dt><dd className="font-mono break-all">{assignment.releaseDigest}</dd></div><div><dt className="text-muted-foreground">Delivery mode</dt><dd>{assignment.deliveryMode}</dd></div><div><dt className="text-muted-foreground">Desired generation</dt><dd>{assignment.desiredGeneration}</dd></div></dl></CardContent></Card>; }
 function NodeEvents({ events }: { events: NodeEvent[] }) { return <Card><CardHeader><CardTitle>Recent events</CardTitle></CardHeader><CardContent><TanStackDataTable caption="Node events" rows={events} rowKey={(event) => event.id} empty={<EmptyState title="No events" description="The controller has not recorded events for this node." />} columns={[{ key: "sequence", header: "Sequence", render: (event) => <span className="tabular-nums">{event.sequence}</span> }, { key: "type", header: "Type", render: (event) => event.type }, { key: "occurred", header: "Occurred", render: (event) => <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleString()}</time> }]} /></CardContent></Card>; }
 function PaginatedResource<T extends { id: string }>({ title, description, search, data, onSearch, onPrevious, onNext, columns, empty }: { title: string; description: string; search: PageSearch; data: { items: T[]; page: { previousCursor: string | null; nextCursor: string | null } }; onSearch: (value: string) => void; onPrevious: () => void; onNext: () => void; columns: Array<{ key: string; header: string; render: (row: T) => React.ReactNode }>; empty: React.ReactNode }) { return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: title }]}><PageHeader title={title} description={description} /><Card><CardHeader className="gap-3"><CardTitle>{title}</CardTitle><SearchBox value={search.search ?? ""} onChange={onSearch} label={`Search ${title.toLocaleLowerCase()}`} /></CardHeader><CardContent className="space-y-4"><TanStackDataTable caption={title} rows={data.items} rowKey={(item) => item.id} columns={columns} empty={empty} /><Pagination page={data.page} onPrevious={onPrevious} onNext={onNext} /></CardContent></Card></PageFrame>; }
@@ -116,7 +158,7 @@ function UploadsPage() {
     onSuccess: () => { setFile(undefined); void client.invalidateQueries({ queryKey: ["controller", "uploads"] }); },
   });
   if (query.isPending) return <RoutePending />;
-  const canCreateUpload = operator.isSuccess && (operator.data.capabilities["uploads:create"] === true || operator.data.scopes.includes("uploads:write") || operator.data.scopes.includes("admin"));
+  const canCreateUpload = operator.isSuccess && (operator.data.capabilities.media_write === true || operator.data.scopes.includes("media_write"));
   return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Library", href: "/assets" }, { label: "Uploads" }]}>
     <PageHeader title="Uploads" description="Stream a selected file through a resumable upload before it becomes an immutable asset." />
     <div className={`grid gap-4 ${canCreateUpload ? "lg:grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]" : ""}`}>

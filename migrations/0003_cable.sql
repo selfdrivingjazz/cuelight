@@ -4,7 +4,7 @@ CREATE TABLE cable_deployments (
   name text NOT NULL,
   timezone text NOT NULL,
   theme text NOT NULL CHECK (theme IN ('nebula','gallery','noir')),
-  guide_horizon interval NOT NULL DEFAULT interval '24 hours',
+  guide_horizon_seconds bigint NOT NULL DEFAULT 86400 CHECK (guide_horizon_seconds > 0),
   guide_density text NOT NULL DEFAULT 'comfortable',
   placard_defaults jsonb NOT NULL DEFAULT '{}'::jsonb,
   fallback_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,

@@ -153,6 +153,20 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/NodeReport"}
         default: {$ref: "#/components/responses/Problem"}
+  /nodes/{nodeId}/capabilities:
+    get:
+      tags: [operator]
+      operationId: getNodeCapabilities
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      parameters: [{$ref: "#/components/parameters/NodeId"}]
+      responses:
+        "200":
+          description: Latest player capability report.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CapabilityReport"}
+        default: {$ref: "#/components/responses/Problem"}
   /nodes/{nodeId}/recovery-tokens:
     post:
       tags: [operator]
@@ -1113,7 +1127,7 @@ components:
         name: {type: string, minLength: 1}
         timezone: {type: string, minLength: 1}
         theme: {type: string, enum: [nebula, gallery, noir]}
-        guideHorizon: {type: integer, format: int64, minimum: 0}
+        guideHorizonSeconds: {type: integer, format: int64, minimum: 3600, maximum: 2678400, default: 86400}
         guideDensity: {type: string}
         placardDefaults:
           type: object
@@ -1124,13 +1138,13 @@ components:
     CableDeployment:
       type: object
       additionalProperties: false
-      required: [id, name, timezone, theme, guideHorizon, guideDensity, version, createdBy, updatedBy, createdAt, updatedAt]
+      required: [id, name, timezone, theme, guideHorizonSeconds, guideDensity, version, createdBy, updatedBy, createdAt, updatedAt]
       properties:
         id: {$ref: "#/components/schemas/Id"}
         name: {type: string}
         timezone: {type: string}
         theme: {type: string, enum: [nebula, gallery, noir]}
-        guideHorizon: {type: integer, format: int64, minimum: 0}
+        guideHorizonSeconds: {type: integer, format: int64, minimum: 3600, maximum: 2678400}
         guideDensity: {type: string}
         placardDefaults:
           type: object
@@ -1570,11 +1584,10 @@ components:
         payload: {$ref: "#/components/schemas/ReleasePayload"}
     AssignmentInput:
       type: object
-      required: [releaseId, releaseDigest, presentationKind, deliveryMode, expectedGeneration]
+      required: [releaseId, releaseDigest, deliveryMode, expectedGeneration]
       properties:
         releaseId: {$ref: "#/components/schemas/Id"}
         releaseDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
-        presentationKind: {type: string, enum: [media, cable]}
         deliveryMode: {type: string, enum: [stream, cache_then_play]}
         expectedGeneration: {type: integer, format: int64, minimum: 0}
     Assignment:
@@ -1586,6 +1599,7 @@ components:
             id: {$ref: "#/components/schemas/Id"}
             nodeId: {$ref: "#/components/schemas/Id"}
             desiredGeneration: {type: integer, format: int64, minimum: 1}
+            presentationKind: {type: string, enum: [media, cable]}
     EnrollPlayerInput:
       type: object
       required: [token, publicKey]
@@ -1617,6 +1631,8 @@ components:
         protocolVersion: {type: string}
         rendererVersion: {type: string}
         profileId: {type: string}
+        features: {type: array, items: {type: string}, uniqueItems: true}
+        acceptedMediaTypes: {type: array, items: {type: string}, uniqueItems: true}
         freeBytes: {type: integer, format: int64, minimum: 0}
         outputReady: {type: boolean}
         clockReliable: {type: boolean}

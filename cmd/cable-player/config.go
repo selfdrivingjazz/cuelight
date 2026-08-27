@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -126,7 +127,7 @@ func (c playerConfig) runtimeConfig(publisherKey []byte) playerruntime.Config {
 }
 
 func capabilityReport(c playerConfig) playerclient.CapabilityReport {
-	return playerclient.CapabilityReport{Platform: goruntime.GOOS, Architecture: goruntime.GOARCH, ProtocolVersion: release.ProtocolV1, RendererVersion: c.RendererVersion, ProfileID: c.ProfileID, OutputReady: true, ClockReliable: true}
+	return playerclient.CapabilityReport{Platform: goruntime.GOOS, Architecture: goruntime.GOARCH, ProtocolVersion: release.ProtocolV1, RendererVersion: c.RendererVersion, ProfileID: c.ProfileID, Features: slices.Clone(c.Features), AcceptedMediaTypes: slices.Clone(c.AcceptedMediaTypes), OutputReady: true, ClockReliable: true}
 }
 
 func env(lookup func(string) (string, bool), name string) string {

@@ -27,7 +27,7 @@ var OperationScopes = map[string]string{
 	"createEnrollmentToken": ScopeNodeEnroll, "listAdminTokens": ScopeSecurityAdmin,
 	"revokeAdminToken": ScopeSecurityAdmin, "listNodes": ScopeNodeRead,
 	"getNode": ScopeNodeRead, "updateNode": ScopeNodeWrite,
-	"getNodeStatus": ScopeNodeRead, "createNodeRecoveryToken": ScopeSecurityAdmin,
+	"getNodeStatus": ScopeNodeRead, "getNodeCapabilities": ScopeNodeRead, "createNodeRecoveryToken": ScopeSecurityAdmin,
 	"getNodeAssignment": ScopeAssignmentRead, "putNodeAssignment": ScopeAssignmentWrite,
 	"listNodeEvents": ScopeNodeRead, "createUpload": ScopeMediaWrite,
 	"listUploads": ScopeMediaRead, "headUpload": ScopeMediaWrite,
@@ -47,6 +47,7 @@ var OperationScopes = map[string]string{
 	"registerCableShellBuild": ScopeCableWrite, "getCableShellBuild": ScopeCableRead,
 	"listCableRevisions": ScopeCableRead, "getCableRevision": ScopeCableRead,
 	"previewCableCompile": ScopeCableRead, "publishCableRevision": ScopeCableWrite,
+	"publishCableRelease": ScopeCableWrite,
 }
 
 type Handler struct{ deps Dependencies }
@@ -63,9 +64,11 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("GET /nodes/{nodeId}", h.authorized(ScopeNodeRead, h.getNode))
 	mux.Handle("PATCH /nodes/{nodeId}", h.authorized(ScopeNodeWrite, h.updateNode))
 	mux.Handle("GET /nodes/{nodeId}/status", h.authorized(ScopeNodeRead, h.getNodeStatus))
+	mux.Handle("GET /nodes/{nodeId}/capabilities", h.authorized(ScopeNodeRead, h.getNodeCapabilities))
 	mux.Handle("POST /nodes/{nodeId}/recovery-tokens", h.authorized(ScopeSecurityAdmin, h.createNodeRecoveryToken))
 	mux.Handle("GET /nodes/{nodeId}/assignment", h.authorized(ScopeAssignmentRead, h.getNodeAssignment))
 	mux.Handle("PUT /nodes/{nodeId}/assignment", h.authorized(ScopeAssignmentWrite, h.putNodeAssignment))
+	mux.Handle("GET /nodes/{nodeId}/events", h.authorized(ScopeNodeRead, h.listNodeEvents))
 	mux.Handle("POST /uploads", h.authorized(ScopeMediaWrite, h.createUpload))
 	mux.Handle("GET /uploads", h.authorized(ScopeMediaRead, h.listUploads))
 	mux.Handle("HEAD /uploads/{uploadId}", h.authorized(ScopeMediaWrite, h.headUpload))
@@ -398,6 +401,19 @@ func (h *Handler) getNodeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+func (h *Handler) getNodeCapabilities(w http.ResponseWriter, r *http.Request) {
+	service, ok := h.deps.Nodes.(NodeCapabilityService)
+	if !ok {
+		writeError(w, errors.New("node capability service is not configured"))
+		return
+	}
+	value, err := service.GetNodeCapabilities(r.Context(), r.PathValue("nodeId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 func (h *Handler) createNodeRecoveryToken(w http.ResponseWriter, r *http.Request) {
 	key, err := idempotencyKey(r)

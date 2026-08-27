@@ -26,14 +26,16 @@ type Enrollment struct {
 }
 
 type CapabilityReport struct {
-	Platform        string `json:"platform"`
-	Architecture    string `json:"architecture"`
-	ProtocolVersion string `json:"protocolVersion"`
-	RendererVersion string `json:"rendererVersion"`
-	ProfileID       string `json:"profileId"`
-	FreeBytes       int64  `json:"freeBytes,omitempty"`
-	OutputReady     bool   `json:"outputReady"`
-	ClockReliable   bool   `json:"clockReliable"`
+	Platform           string   `json:"platform"`
+	Architecture       string   `json:"architecture"`
+	ProtocolVersion    string   `json:"protocolVersion"`
+	RendererVersion    string   `json:"rendererVersion"`
+	ProfileID          string   `json:"profileId"`
+	Features           []string `json:"features,omitempty"`
+	AcceptedMediaTypes []string `json:"acceptedMediaTypes,omitempty"`
+	FreeBytes          int64    `json:"freeBytes,omitempty"`
+	OutputReady        bool     `json:"outputReady"`
+	ClockReliable      bool     `json:"clockReliable"`
 }
 
 type Assignment struct {

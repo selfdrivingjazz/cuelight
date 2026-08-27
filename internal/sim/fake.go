@@ -12,6 +12,7 @@ import (
 
 	"github.com/jmill/cable/internal/player/renderer"
 	"github.com/jmill/cable/internal/player/runtime"
+	"github.com/jmill/cable/internal/release"
 )
 
 // FakeOutput models the physical output and disk budget independently, so
@@ -120,12 +121,21 @@ func (r *FakeRenderer) SetFailures(config RendererConfig) {
 	r.config = config
 	r.mu.Unlock()
 }
-func validateCandidate(c renderer.Candidate) error {
-	if c.ReleaseDigest == "" || c.Source == "" {
-		return errors.New("fake candidate is incomplete")
+func validateCandidate(candidate renderer.Candidate) error {
+	if candidate.ReleaseDigest == "" {
+		return errors.New("fake candidate release digest is required")
 	}
-	if c.Fit != "fit" && c.Fit != "fill" {
-		return errors.New("fake candidate fit is invalid")
+	if candidate.Kind == release.PresentationCable {
+		if candidate.ShellPath == "" || candidate.RevisionPath == "" || candidate.ShellBuildDigest == "" || candidate.RevisionArtifactDigest == "" || candidate.Entrypoint == "" || len(candidate.ArtifactPaths) < 2 {
+			return errors.New("fake Cable candidate is incomplete")
+		}
+		return nil
+	}
+	if candidate.Source == "" {
+		return errors.New("fake media candidate source is required")
+	}
+	if candidate.Fit != "fit" && candidate.Fit != "fill" {
+		return errors.New("fake media candidate fit is invalid")
 	}
 	return nil
 }

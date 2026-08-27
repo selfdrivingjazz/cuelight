@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"strings"
 
 	"github.com/jmill/cable/internal/media/localcas"
@@ -227,11 +228,13 @@ func (s *Service) CompleteUpload(ctx context.Context, mutation Mutation, uploadI
 		s.failUpload(ctx, upload.ID, "media probe did not certify content")
 		return Asset{}, ErrMediaUncertified
 	}
-	if certification.MediaType != upload.MediaType {
+	declaredType := canonicalMediaType(upload.MediaType)
+	observedType := canonicalMediaType(certification.MediaType)
+	if observedType != declaredType {
 		s.failUpload(ctx, upload.ID, "probed media type differs from declared media type")
 		return Asset{}, fmt.Errorf("%w: declared %q, observed %q", ErrMediaTypeMismatch, upload.MediaType, certification.MediaType)
 	}
-	artifact := Artifact{Digest: object.Digest, Size: object.Size, MediaType: certification.MediaType, State: ArtifactReady}
+	artifact := Artifact{Digest: object.Digest, Size: object.Size, MediaType: observedType, State: ArtifactReady}
 	assetID := s.newID()
 	if strings.TrimSpace(assetID) == "" {
 		return Asset{}, errors.New("media ID generator returned an empty asset ID")
@@ -267,4 +270,19 @@ func validateText(field, value string, maximum int) error {
 		return &ValidationError{Field: field, Reason: fmt.Sprintf("must be at most %d bytes", maximum)}
 	}
 	return nil
+}
+
+func canonicalMediaType(value string) string {
+	parsed, _, err := mime.ParseMediaType(strings.TrimSpace(value))
+	if err != nil {
+		parsed = strings.ToLower(strings.TrimSpace(value))
+	}
+	switch parsed {
+	case "application/x-gzip":
+		return "application/gzip"
+	case "application/x-tar":
+		return "application/tar"
+	default:
+		return parsed
+	}
 }

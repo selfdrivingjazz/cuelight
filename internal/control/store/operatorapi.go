@@ -198,6 +198,21 @@ func (a *OperatorAdapter) GetNodeStatus(ctx context.Context, id string) (playerc
 	}
 	return report, nil
 }
+func (a *OperatorAdapter) GetNodeCapabilities(ctx context.Context, id string) (playerclient.CapabilityReport, error) {
+	var payload []byte
+	err := a.Store.q(ctx).QueryRowContext(ctx, `SELECT report FROM node_capability_reports WHERE node_id = $1`, id).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return playerclient.CapabilityReport{}, pkiNotFound()
+	}
+	if err != nil {
+		return playerclient.CapabilityReport{}, wrap("read node capabilities", err)
+	}
+	var report playerclient.CapabilityReport
+	if err := json.Unmarshal(payload, &report); err != nil {
+		return playerclient.CapabilityReport{}, wrap("decode node capabilities", err)
+	}
+	return report, nil
+}
 func (a *OperatorAdapter) ListNodeEvents(ctx context.Context, id, cursor string) ([]playerclient.NodeEvent, *string, error) {
 	s := a.Store
 	sequence := int64(0)

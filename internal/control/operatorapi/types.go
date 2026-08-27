@@ -118,6 +118,9 @@ type NodeService interface {
 	GetNodeStatus(context.Context, string) (playerclient.NodeReport, error)
 	ListNodeEvents(context.Context, string, string) ([]playerclient.NodeEvent, *string, error)
 }
+type NodeCapabilityService interface {
+	GetNodeCapabilities(context.Context, string) (playerclient.CapabilityReport, error)
+}
 
 type AssignmentService interface {
 	GetAssignment(context.Context, string) (assignment.Assignment, error)

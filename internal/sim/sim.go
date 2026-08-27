@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -140,6 +141,11 @@ func (c *Config) defaults() {
 	if c.Capabilities.ProfileID == "" {
 		c.Capabilities.ProfileID = "sim"
 	}
+	if len(c.Features) == 0 {
+		c.Features = []string{"chromium"}
+	}
+	c.Capabilities.Features = slices.Clone(c.Features)
+	c.Capabilities.AcceptedMediaTypes = slices.Clone(c.AcceptedMediaTypes)
 }
 
 func New(config Config) (*Simulator, error) {

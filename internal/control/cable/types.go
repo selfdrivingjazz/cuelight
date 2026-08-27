@@ -71,19 +71,19 @@ type ShellBuildPage struct {
 }
 
 type CableDeployment struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Timezone         string            `json:"timezone"`
-	Theme            string            `json:"theme"`
-	GuideHorizon     time.Duration     `json:"guideHorizon"`
-	GuideDensity     string            `json:"guideDensity"`
-	PlacardDefaults  map[string]string `json:"placardDefaults,omitempty"`
-	FallbackMetadata map[string]string `json:"fallbackMetadata,omitempty"`
-	Version          int64             `json:"version"`
-	CreatedBy        string            `json:"createdBy"`
-	UpdatedBy        string            `json:"updatedBy"`
-	CreatedAt        time.Time         `json:"createdAt"`
-	UpdatedAt        time.Time         `json:"updatedAt"`
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	Timezone            string            `json:"timezone"`
+	Theme               string            `json:"theme"`
+	GuideHorizonSeconds int64             `json:"guideHorizonSeconds"`
+	GuideDensity        string            `json:"guideDensity"`
+	PlacardDefaults     map[string]string `json:"placardDefaults,omitempty"`
+	FallbackMetadata    map[string]string `json:"fallbackMetadata,omitempty"`
+	Version             int64             `json:"version"`
+	CreatedBy           string            `json:"createdBy"`
+	UpdatedBy           string            `json:"updatedBy"`
+	CreatedAt           time.Time         `json:"createdAt"`
+	UpdatedAt           time.Time         `json:"updatedAt"`
 }
 
 type Channel struct {
@@ -205,7 +205,7 @@ type RevisionArtifactStore interface {
 
 type DeploymentInput struct {
 	Name, Timezone, Theme             string
-	GuideHorizon                      time.Duration
+	GuideHorizonSeconds               int64
 	GuideDensity                      string
 	PlacardDefaults, FallbackMetadata map[string]string
 }

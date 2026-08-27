@@ -361,3 +361,12 @@ func (r *fakeRepository) RegisterAsset(_ context.Context, _ Mutation, asset Asse
 	r.assets[asset.ID] = asset
 	return asset, nil
 }
+
+func TestCanonicalMediaTypeAcceptsStandardAndLegacyArchiveAliases(t *testing.T) {
+	if canonicalMediaType("application/gzip") != canonicalMediaType("application/x-gzip") {
+		t.Fatal("gzip aliases are not equivalent")
+	}
+	if canonicalMediaType("application/tar") != canonicalMediaType("application/x-tar") {
+		t.Fatal("tar aliases are not equivalent")
+	}
+}

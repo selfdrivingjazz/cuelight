@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
+	"github.com/jmill/cable/internal/control/cable"
 	"github.com/jmill/cable/internal/control/persistence"
 	controlplayerapi "github.com/jmill/cable/internal/control/playerapi"
 	controlrelease "github.com/jmill/cable/internal/control/release"
@@ -381,10 +383,16 @@ func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
 
 	candidate := published.Envelope.Digest
 	accepted, err := repository.RecordReport(ctx, nodeOne, playerclient.NodeReport{
-		EventEpoch: nodeOne, Sequence: 1, DesiredGenerationSeen: 2, ObservedGeneration: 2, CandidateReleaseDigest: &candidate,
+		EventEpoch: nodeOne, Sequence: 1, DesiredGenerationSeen: 2, ObservedGeneration: 2,
+		PresentationKind: canonical.PresentationCable, CandidateReleaseDigest: &candidate,
+		Conditions: []playerclient.Condition{{Type: "PlaybackHealthy", Status: true, Reason: "CandidateCommitted"}},
 	})
 	if err != nil || !accepted {
 		t.Fatalf("fresh report accepted=%v err=%v", accepted, err)
+	}
+	storedReport, err := NewOperatorAdapter(repository).GetNodeStatus(ctx, nodeOne)
+	if err != nil || storedReport.PresentationKind != canonical.PresentationCable || len(storedReport.Conditions) != 1 || storedReport.Conditions[0].Reason != "CandidateCommitted" {
+		t.Fatalf("stored wire report = %#v, %v", storedReport, err)
 	}
 	stale := playerclient.NodeReport{EventEpoch: nodeOne, Sequence: 1, DesiredGenerationSeen: 2, ObservedGeneration: 0}
 	accepted, err = repository.RecordReport(ctx, nodeOne, stale)
@@ -452,5 +460,64 @@ func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
 	body.Close()
 	if err != nil || string(content) != "player" {
 		t.Fatalf("CAS content = %q err=%v", content, err)
+	}
+}
+
+func TestPostgresCableAuthoringAndRevisionRoundTrip(t *testing.T) {
+	repository, db := newPostgresTestStore(t)
+	ctx := context.Background()
+	actorID := "00000000-0000-4000-8000-000000000031"
+	assetID := "00000000-0000-4000-8000-000000000032"
+	assetDigest := strings.Repeat("a", 64)
+	shellDigest := strings.Repeat("b", 64)
+	revisionDigest := strings.Repeat("c", 64)
+	if err := repository.EnsureActor(ctx, actorID, "Cable author"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO artifacts(digest,size_bytes,media_type,state) VALUES($1,68,'image/png','ready'),($2,1024,'application/gzip','ready')`, assetDigest, shellDigest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO assets(id,name) VALUES($1,'programme')`, assetID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO asset_artifacts(asset_id,artifact_digest,role) VALUES($1,$2,'original')`, assetID, assetDigest); err != nil {
+		t.Fatal(err)
+	}
+	mutation := cable.Mutation{ActorID: actorID, IdempotencyKey: "cable-authoring", Now: time.Now().UTC()}
+	deployment, err := repository.CreateDeployment(ctx, mutation, cable.DeploymentInput{Name: "Integration Cable", Timezone: "America/New_York", Theme: "gallery", GuideHorizonSeconds: 86400, GuideDensity: "hour"})
+	if err != nil || deployment.GuideHorizonSeconds != 86400 {
+		t.Fatalf("deployment = %#v, %v", deployment, err)
+	}
+	channel, err := repository.CreateChannel(ctx, mutation, cable.ChannelInput{DeploymentID: deployment.ID, Number: 7, Name: "Gallery", Callsign: "GALL", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 8, 27, 18, 0, 0, 0, time.UTC)
+	if _, err := repository.CreateProgramEntry(ctx, mutation, cable.ProgramInput{ChannelID: channel.ID, AssetID: assetID, StartsAt: start, EndsAt: start.Add(time.Hour), Title: "Night Geometry", Fit: "fill", Volume: 1}); err != nil {
+		t.Fatal(err)
+	}
+	shell, err := repository.RegisterShellBuild(ctx, mutation, cable.ShellBuildInput{Digest: shellDigest, Entrypoint: "index.html", ArtifactDigests: []string{shellDigest}, BridgeProtocol: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RegisterCableRevisionArtifact(ctx, revisionDigest, 32); err != nil {
+		t.Fatal(err)
+	}
+	revision := cable.CableRevision{
+		ID: revisionDigest, Digest: revisionDigest, DeploymentID: deployment.ID, DeploymentVersion: deployment.Version,
+		ShellBuildID: shell.ID, ShellBuildDigest: shellDigest, Entrypoint: "index.html", BridgeProtocol: "1",
+		Timezone: deployment.Timezone, Theme: deployment.Theme, GeneratedAt: start, Window: cable.RevisionWindow{StartsAt: start, EndsAt: start.Add(time.Hour)},
+		JSON: []byte(`{"schema":"cable.revision.v1"}`), ArtifactDigests: []string{assetDigest, shellDigest, revisionDigest}, CreatedBy: actorID, CreatedAt: start,
+	}
+	if err := repository.CreateRevision(ctx, revision); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.Revision(ctx, revisionDigest)
+	if err != nil || stored.Theme != "gallery" || len(stored.ArtifactDigests) != 3 || stored.Errors == nil || stored.Warnings == nil {
+		t.Fatalf("revision = %#v, %v", stored, err)
+	}
+	page, err := repository.ListRevisions(ctx, deployment.ID, "", 10)
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != revisionDigest {
+		t.Fatalf("revision page = %#v, %v", page, err)
 	}
 }

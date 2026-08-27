@@ -2,9 +2,10 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const pageInfo = { nextCursor: null, previousCursor: null, hasMore: false };
 const node = { id: "11111111-1111-1111-1111-111111111111", name: "Lobby display", credentialState: "active", desiredGeneration: 4, observedGeneration: 4 };
-const deployment = { id: "22222222-2222-2222-2222-222222222222", name: "Atrium Cable", timezone: "America/New_York", theme: "gallery", guideHorizon: 86_400_000_000_000, guideDensity: "hour", version: 3, createdBy: "33333333-3333-3333-3333-333333333333", updatedBy: "33333333-3333-3333-3333-333333333333", createdAt: "2026-08-27T10:00:00Z", updatedAt: "2026-08-27T12:00:00Z" };
+const deployment = { id: "22222222-2222-2222-2222-222222222222", name: "Atrium Cable", timezone: "America/New_York", theme: "gallery", guideHorizonSeconds: 86_400, guideDensity: "hour", version: 3, createdBy: "33333333-3333-3333-3333-333333333333", updatedBy: "33333333-3333-3333-3333-333333333333", createdAt: "2026-08-27T10:00:00Z", updatedAt: "2026-08-27T12:00:00Z" };
 
 async function installControllerApi(page: Page) {
+  await page.route("**/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", version: "browser-test" }) }));
   await page.route("**/api/v1/**", async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");

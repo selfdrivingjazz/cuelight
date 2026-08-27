@@ -32,6 +32,12 @@ func normalizeDeploymentInput(in cable.DeploymentInput) (cable.DeploymentInput, 
 	if err != nil {
 		return cable.DeploymentInput{}, err
 	}
+	if in.GuideHorizonSeconds == 0 {
+		in.GuideHorizonSeconds = 24 * 60 * 60
+	}
+	if in.GuideHorizonSeconds < 60*60 || in.GuideHorizonSeconds > 31*24*60*60 {
+		return cable.DeploymentInput{}, &cable.ValidationError{Field: "guideHorizonSeconds", Reason: "must be between one hour and 31 days"}
+	}
 	return in, nil
 }
 
@@ -101,7 +107,7 @@ func (s *Store) CreateDeployment(ctx context.Context, m cable.Mutation, in cable
 	}
 	p, _ := cj(in.PlacardDefaults)
 	f, _ := cj(in.FallbackMetadata)
-	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_deployments(id,name,timezone,theme,guide_horizon,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$9,$10,$10)`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizon, in.GuideDensity, p, f, m.ActorID, ct(m))
+	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_deployments(id,name,timezone,theme,guide_horizon_seconds,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$9,$10,$10)`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizonSeconds, in.GuideDensity, p, f, m.ActorID, ct(m))
 	if e != nil {
 		return cable.CableDeployment{}, ce("create cable deployment", e)
 	}
@@ -110,7 +116,7 @@ func (s *Store) CreateDeployment(ctx context.Context, m cable.Mutation, in cable
 func (s *Store) Deployment(ctx context.Context, id string) (cable.CableDeployment, error) {
 	var d cable.CableDeployment
 	var p, f []byte
-	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,name,timezone,theme,guide_horizon,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at FROM cable_deployments WHERE id=$1`, id).Scan(&d.ID, &d.Name, &d.Timezone, &d.Theme, &d.GuideHorizon, &d.GuideDensity, &p, &f, &d.Version, &d.CreatedBy, &d.UpdatedBy, &d.CreatedAt, &d.UpdatedAt)
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,name,timezone,theme,guide_horizon_seconds,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at FROM cable_deployments WHERE id=$1`, id).Scan(&d.ID, &d.Name, &d.Timezone, &d.Theme, &d.GuideHorizonSeconds, &d.GuideDensity, &p, &f, &d.Version, &d.CreatedBy, &d.UpdatedBy, &d.CreatedAt, &d.UpdatedAt)
 	if e != nil {
 		return d, ce("get cable deployment", e)
 	}
@@ -131,7 +137,7 @@ func (s *Store) UpdateDeployment(ctx context.Context, m cable.Mutation, id strin
 	}
 	p, _ := cj(in.PlacardDefaults)
 	f, _ := cj(in.FallbackMetadata)
-	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_deployments SET name=$2,timezone=$3,theme=$4,guide_horizon=$5,guide_density=$6,placard_defaults=$7,fallback_metadata=$8,version=version+1,updated_by=$9,updated_at=$10 WHERE id=$1 AND version=$11`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizon, in.GuideDensity, p, f, m.ActorID, ct(m), m.ExpectedVersion)
+	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_deployments SET name=$2,timezone=$3,theme=$4,guide_horizon_seconds=$5,guide_density=$6,placard_defaults=$7,fallback_metadata=$8,version=version+1,updated_by=$9,updated_at=$10 WHERE id=$1 AND version=$11`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizonSeconds, in.GuideDensity, p, f, m.ActorID, ct(m), m.ExpectedVersion)
 	if e != nil {
 		return cable.CableDeployment{}, ce("update cable deployment", e)
 	}
@@ -143,7 +149,7 @@ func (s *Store) UpdateDeployment(ctx context.Context, m cable.Mutation, id strin
 }
 func (s *Store) ListDeployments(ctx context.Context, cursor string, limit int) (cable.DeploymentPage, error) {
 	limit = cl(limit)
-	q := `SELECT id,name,timezone,theme,guide_horizon,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at FROM cable_deployments`
+	q := `SELECT id,name,timezone,theme,guide_horizon_seconds,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at FROM cable_deployments`
 	args := []any{}
 	if cursor != "" {
 		q += ` WHERE id>$1`
@@ -160,7 +166,7 @@ func (s *Store) ListDeployments(ctx context.Context, cursor string, limit int) (
 	for rows.Next() {
 		var d cable.CableDeployment
 		var p, f []byte
-		if e = rows.Scan(&d.ID, &d.Name, &d.Timezone, &d.Theme, &d.GuideHorizon, &d.GuideDensity, &p, &f, &d.Version, &d.CreatedBy, &d.UpdatedBy, &d.CreatedAt, &d.UpdatedAt); e != nil {
+		if e = rows.Scan(&d.ID, &d.Name, &d.Timezone, &d.Theme, &d.GuideHorizonSeconds, &d.GuideDensity, &p, &f, &d.Version, &d.CreatedBy, &d.UpdatedBy, &d.CreatedAt, &d.UpdatedAt); e != nil {
 			return out, e
 		}
 		dj(p, &d.PlacardDefaults)
@@ -194,7 +200,7 @@ func (s *Store) CreateChannel(ctx context.Context, m cable.Mutation, in cable.Ch
 	if e != nil {
 		return cable.Channel{}, e
 	}
-	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_channels(id,deployment_id,number,name,callsign,description,accent,artwork_asset_id,enabled,standby,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9,$10,1,$11,$11)`, id, in.DeploymentID, in.Number, in.Name, in.Callsign, in.Description, in.Accent, in.ArtworkAssetID, in.Enabled, in.Standby, ct(m))
+	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_channels(id,deployment_id,number,name,callsign,description,accent,artwork_asset_id,enabled,standby,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,'')::uuid,$9,$10,1,$11,$11)`, id, in.DeploymentID, in.Number, in.Name, in.Callsign, in.Description, in.Accent, in.ArtworkAssetID, in.Enabled, in.Standby, ct(m))
 	if e != nil {
 		if pgConflict(e) {
 			return cable.Channel{}, cable.ErrConflict
@@ -215,7 +221,7 @@ func (s *Store) UpdateChannel(ctx context.Context, m cable.Mutation, id string, 
 	if m.ExpectedVersion <= 0 || in.Number <= 0 {
 		return cable.Channel{}, cable.ErrInvalidArgument
 	}
-	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_channels SET number=$2,name=$3,callsign=$4,description=$5,accent=$6,artwork_asset_id=NULLIF($7,''),enabled=$8,standby=$9,version=version+1,updated_at=$10 WHERE id=$1 AND version=$11`, id, in.Number, in.Name, in.Callsign, in.Description, in.Accent, in.ArtworkAssetID, in.Enabled, in.Standby, ct(m), m.ExpectedVersion)
+	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_channels SET number=$2,name=$3,callsign=$4,description=$5,accent=$6,artwork_asset_id=NULLIF($7,'')::uuid,enabled=$8,standby=$9,version=version+1,updated_at=$10 WHERE id=$1 AND version=$11`, id, in.Number, in.Name, in.Callsign, in.Description, in.Accent, in.ArtworkAssetID, in.Enabled, in.Standby, ct(m), m.ExpectedVersion)
 	if e != nil {
 		if pgConflict(e) {
 			return cable.Channel{}, cable.ErrConflict
@@ -292,7 +298,7 @@ func (s *Store) CreateProgramEntry(ctx context.Context, m cable.Mutation, in cab
 	if e != nil {
 		return cable.ProgramEntry{}, e
 	}
-	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_program_entries(id,channel_id,asset_id,starts_at,ends_at,title,subtitle,tag,artist,description,artwork_asset_id,fit,loop,mute,volume,placard_policy,availability_policy,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12,$13,$14,$15,$16,$17,1,$18,$18)`, id, in.ChannelID, in.AssetID, in.StartsAt.UTC(), in.EndsAt.UTC(), in.Title, in.Subtitle, in.Tag, in.Artist, in.Description, in.ArtworkAssetID, in.Fit, in.Loop, in.Mute, in.Volume, in.PlacardPolicy, in.AvailabilityPolicy, ct(m))
+	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_program_entries(id,channel_id,asset_id,starts_at,ends_at,title,subtitle,tag,artist,description,artwork_asset_id,fit,loop,mute,volume,placard_policy,availability_policy,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,'')::uuid,$12,$13,$14,$15,$16,$17,1,$18,$18)`, id, in.ChannelID, in.AssetID, in.StartsAt.UTC(), in.EndsAt.UTC(), in.Title, in.Subtitle, in.Tag, in.Artist, in.Description, in.ArtworkAssetID, in.Fit, in.Loop, in.Mute, in.Volume, in.PlacardPolicy, in.AvailabilityPolicy, ct(m))
 	if e != nil {
 		return cable.ProgramEntry{}, ce("create program entry", e)
 	}
@@ -324,7 +330,7 @@ func (s *Store) UpdateProgramEntry(ctx context.Context, m cable.Mutation, id str
 	if overlap {
 		return cable.ProgramEntry{}, cable.ErrOverlap
 	}
-	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_program_entries SET asset_id=$2,starts_at=$3,ends_at=$4,title=$5,subtitle=$6,tag=$7,artist=$8,description=$9,artwork_asset_id=NULLIF($10,''),fit=$11,loop=$12,mute=$13,volume=$14,placard_policy=$15,availability_policy=$16,version=version+1,updated_at=$17 WHERE id=$1 AND version=$18`, id, in.AssetID, in.StartsAt.UTC(), in.EndsAt.UTC(), in.Title, in.Subtitle, in.Tag, in.Artist, in.Description, in.ArtworkAssetID, in.Fit, in.Loop, in.Mute, in.Volume, in.PlacardPolicy, in.AvailabilityPolicy, ct(m), m.ExpectedVersion)
+	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_program_entries SET asset_id=$2,starts_at=$3,ends_at=$4,title=$5,subtitle=$6,tag=$7,artist=$8,description=$9,artwork_asset_id=NULLIF($10,'')::uuid,fit=$11,loop=$12,mute=$13,volume=$14,placard_policy=$15,availability_policy=$16,version=version+1,updated_at=$17 WHERE id=$1 AND version=$18`, id, in.AssetID, in.StartsAt.UTC(), in.EndsAt.UTC(), in.Title, in.Subtitle, in.Tag, in.Artist, in.Description, in.ArtworkAssetID, in.Fit, in.Loop, in.Mute, in.Volume, in.PlacardPolicy, in.AvailabilityPolicy, ct(m), m.ExpectedVersion)
 	if e != nil {
 		return cable.ProgramEntry{}, ce("update program entry", e)
 	}
@@ -508,7 +514,15 @@ func (s *Store) CreateRevision(ctx context.Context, r cable.CableRevision) error
 	if r.ID == "" {
 		r.ID = r.Digest
 	}
-	_, e := s.q(ctx).ExecContext(ctx, `INSERT INTO cable_revisions(id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,theme,generated_at,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, r.ID, r.DeploymentID, r.DeploymentVersion, r.ShellBuildID, r.Digest, r.ShellBuildDigest, r.Entrypoint, r.BridgeProtocol, r.Timezone, r.Theme, r.GeneratedAt.UTC(), r.Window.StartsAt.UTC(), r.Window.EndsAt.UTC(), r.JSON, r.ArtifactDigests, r.Errors, r.Warnings, r.CreatedBy, r.CreatedAt.UTC())
+	errorItems := r.Errors
+	if errorItems == nil {
+		errorItems = []string{}
+	}
+	warningItems := r.Warnings
+	if warningItems == nil {
+		warningItems = []string{}
+	}
+	_, e := s.q(ctx).ExecContext(ctx, `INSERT INTO cable_revisions(id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,theme,generated_at,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, r.ID, r.DeploymentID, r.DeploymentVersion, r.ShellBuildID, r.Digest, r.ShellBuildDigest, r.Entrypoint, r.BridgeProtocol, r.Timezone, r.Theme, r.GeneratedAt.UTC(), r.Window.StartsAt.UTC(), r.Window.EndsAt.UTC(), r.JSON, r.ArtifactDigests, errorItems, warningItems, r.CreatedBy, r.CreatedAt.UTC())
 	if e != nil {
 		if pgConflict(e) {
 			return cable.ErrConflict
@@ -519,12 +533,24 @@ func (s *Store) CreateRevision(ctx context.Context, r cable.CableRevision) error
 }
 func (s *Store) Revision(ctx context.Context, id string) (cable.CableRevision, error) {
 	var r cable.CableRevision
-	var doc []byte
-	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,theme,generated_at,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at FROM cable_revisions WHERE id=$1`, id).Scan(&r.ID, &r.DeploymentID, &r.DeploymentVersion, &r.ShellBuildID, &r.Digest, &r.ShellBuildDigest, &r.Entrypoint, &r.BridgeProtocol, &r.Timezone, &r.Theme, &r.GeneratedAt, &r.Window.StartsAt, &r.Window.EndsAt, &doc, &r.ArtifactDigests, &r.Errors, &r.Warnings, &r.CreatedBy, &r.CreatedAt)
+	var document, artifactDigests, errorItems, warningItems []byte
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,theme,generated_at,window_start,window_end,document,array_to_json(artifact_digests),array_to_json(errors),array_to_json(warnings),created_by,created_at FROM cable_revisions WHERE id=$1`, id).Scan(&r.ID, &r.DeploymentID, &r.DeploymentVersion, &r.ShellBuildID, &r.Digest, &r.ShellBuildDigest, &r.Entrypoint, &r.BridgeProtocol, &r.Timezone, &r.Theme, &r.GeneratedAt, &r.Window.StartsAt, &r.Window.EndsAt, &document, &artifactDigests, &errorItems, &warningItems, &r.CreatedBy, &r.CreatedAt)
 	if e != nil {
 		return r, ce("get cable revision", e)
 	}
-	r.JSON = doc
+	for name, value := range map[string]struct {
+		data   []byte
+		target *[]string
+	}{
+		"artifact digests": {artifactDigests, &r.ArtifactDigests},
+		"errors":           {errorItems, &r.Errors},
+		"warnings":         {warningItems, &r.Warnings},
+	} {
+		if err := json.Unmarshal(value.data, value.target); err != nil {
+			return r, fmt.Errorf("decode cable revision %s: %w", name, err)
+		}
+	}
+	r.JSON = document
 	return r, nil
 }
 func (s *Store) ListRevisions(ctx context.Context, did, cursor string, limit int) (cable.RevisionPage, error) {

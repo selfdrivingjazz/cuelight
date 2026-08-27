@@ -132,6 +132,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getNodeCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/nodes/{nodeId}/recovery-tokens": {
         parameters: {
             query?: never;
@@ -755,8 +771,11 @@ export interface components {
             timezone: string;
             /** @enum {string} */
             theme: "nebula" | "gallery" | "noir";
-            /** Format: int64 */
-            guideHorizon?: number;
+            /**
+             * Format: int64
+             * @default 86400
+             */
+            guideHorizonSeconds: number;
             guideDensity?: string;
             placardDefaults?: {
                 [key: string]: string;
@@ -772,7 +791,7 @@ export interface components {
             /** @enum {string} */
             theme: "nebula" | "gallery" | "noir";
             /** Format: int64 */
-            guideHorizon: number;
+            guideHorizonSeconds: number;
             guideDensity: string;
             placardDefaults?: {
                 [key: string]: string;
@@ -1133,8 +1152,6 @@ export interface components {
             releaseId: components["schemas"]["Id"];
             releaseDigest: string;
             /** @enum {string} */
-            presentationKind: "media" | "cable";
-            /** @enum {string} */
             deliveryMode: "stream" | "cache_then_play";
             /** Format: int64 */
             expectedGeneration: number;
@@ -1144,6 +1161,8 @@ export interface components {
             nodeId: components["schemas"]["Id"];
             /** Format: int64 */
             desiredGeneration: number;
+            /** @enum {string} */
+            presentationKind?: "media" | "cable";
         };
         EnrollPlayerInput: {
             token: string;
@@ -1167,6 +1186,8 @@ export interface components {
             protocolVersion: string;
             rendererVersion: string;
             profileId: string;
+            features?: string[];
+            acceptedMediaTypes?: string[];
             /** Format: int64 */
             freeBytes?: number;
             outputReady?: boolean;
@@ -1461,6 +1482,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeReport"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getNodeCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest player capability report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityReport"];
                 };
             };
             default: components["responses"]["Problem"];

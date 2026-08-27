@@ -190,6 +190,14 @@ func (t *assignmentTransaction) assignment(query string, arguments ...any) (assi
 // RecordObservation accepts only the current event epoch and a strictly newer
 // sequence, so stale reports can never influence authorization replacement.
 func (s *Store) RecordObservation(ctx context.Context, nodeID string, observation assignment.Observation) (bool, error) {
+	report, err := json.Marshal(observation)
+	if err != nil {
+		return false, err
+	}
+	return s.recordObservation(ctx, nodeID, observation, report)
+}
+
+func (s *Store) recordObservation(ctx context.Context, nodeID string, observation assignment.Observation, report []byte) (bool, error) {
 	accepted := false
 	err := s.inTransaction(ctx, func(txCtx context.Context, tx *sql.Tx) error {
 		var epoch string
@@ -210,10 +218,6 @@ func (s *Store) RecordObservation(ctx context.Context, nodeID string, observatio
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return wrap("read observation sequence", err)
-		}
-		report, err := json.Marshal(observation)
-		if err != nil {
-			return err
 		}
 		_, err = tx.ExecContext(txCtx, `
 			INSERT INTO node_report_snapshots (node_id, event_epoch, sequence, report, updated_at)

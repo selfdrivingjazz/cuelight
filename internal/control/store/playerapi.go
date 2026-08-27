@@ -182,7 +182,11 @@ func (s *Store) RecordReport(ctx context.Context, nodeID string, report client.N
 		HealthyReleaseDigest:       reportDigest(report.HealthyReleaseDigest),
 		LastKnownGoodReleaseDigest: reportDigest(report.LastKnownGoodReleaseDigest),
 	}
-	accepted, err := s.RecordObservation(ctx, nodeID, observation)
+	payload, err := json.Marshal(report)
+	if err != nil {
+		return false, err
+	}
+	accepted, err := s.recordObservation(ctx, nodeID, observation, payload)
 	if errors.Is(err, ErrStaleObservation) {
 		return false, nil
 	}
