@@ -10,6 +10,7 @@ import (
 type EnrollmentRequest struct {
 	Token     string `json:"token"`
 	PublicKey string `json:"publicKey"`
+	Name      string `json:"name,omitempty"`
 }
 
 type ClientCredential struct {

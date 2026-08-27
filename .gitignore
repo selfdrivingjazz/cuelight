@@ -14,3 +14,6 @@
 **/test-results/
 **/playwright-report/
 /apps/cable-web/cable-shell.tar.gz
+/apps/node-desktop/dist-electron/
+/apps/node-desktop/release/
+/apps/node-desktop/resources/bin/

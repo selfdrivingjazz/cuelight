@@ -1606,6 +1606,7 @@ components:
       properties:
         token: {type: string, writeOnly: true}
         publicKey: {type: string, contentEncoding: base64}
+        name: {type: string, minLength: 1, maxLength: 120}
     ClientCredential:
       type: object
       required: [certificate, expiresAt]

@@ -17,6 +17,7 @@ type Candidate struct {
 	Kind                release.PresentationKind
 	ReleaseDigest       string
 	Source              string
+	MediaType           string
 	Fit                 string
 	Loop                bool
 	Muted               bool

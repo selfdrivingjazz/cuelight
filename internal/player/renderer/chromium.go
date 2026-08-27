@@ -13,9 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -30,40 +28,47 @@ type ChromiumConfig struct {
 	Timeout      time.Duration
 	ExtraArgs    []string
 	Output       io.Writer
+	Launcher     BrowserLauncher
 }
 
 // Chromium owns the local shell server and the browser process. It never
 // forwards control-plane credentials to Chromium; the browser sees only the
 // loopback bridge URL.
 type Chromium struct {
-	BinaryPath   string
 	RuntimeRoot  string
 	LoopbackAddr string
 	Timeout      time.Duration
-	ExtraArgs    []string
 	Output       io.Writer
+	launcher     BrowserLauncher
 
-	mu          sync.Mutex
-	server      *http.Server
-	listener    net.Listener
-	process     *exec.Cmd
-	processDone chan struct{}
-	pending     *chromiumState
-	current     *chromiumState
+	mu       sync.Mutex
+	server   *http.Server
+	listener net.Listener
+	session  BrowserSession
+	pending  *chromiumState
+	current  *chromiumState
 }
 
 type chromiumState struct {
 	candidate    Candidate
 	root         string
 	profile      string
+	entrypoint   string
+	healthPath   string
 	presentation []byte
 	media        map[string]string
 	ready        bool
 }
 
 func NewChromium(config ChromiumConfig) (*Chromium, error) {
-	if config.BinaryPath == "" || config.RuntimeRoot == "" {
-		return nil, errors.New("Chromium binary and runtime root are required")
+	if config.RuntimeRoot == "" {
+		return nil, errors.New("Chromium runtime root is required")
+	}
+	if config.Launcher == nil {
+		if config.BinaryPath == "" {
+			return nil, errors.New("Chromium binary or browser launcher is required")
+		}
+		config.Launcher = ExecBrowserLauncher{BinaryPath: config.BinaryPath, ExtraArgs: config.ExtraArgs, Output: config.Output}
 	}
 	if config.LoopbackAddr == "" {
 		config.LoopbackAddr = "127.0.0.1:0"
@@ -74,12 +79,15 @@ func NewChromium(config ChromiumConfig) (*Chromium, error) {
 	if host, _, err := net.SplitHostPort(config.LoopbackAddr); err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 		return nil, errors.New("Chromium bridge must bind a loopback IP address")
 	}
-	return &Chromium{BinaryPath: config.BinaryPath, RuntimeRoot: config.RuntimeRoot, LoopbackAddr: config.LoopbackAddr, Timeout: config.Timeout, ExtraArgs: slices.Clone(config.ExtraArgs), Output: config.Output}, nil
+	return &Chromium{RuntimeRoot: config.RuntimeRoot, LoopbackAddr: config.LoopbackAddr, Timeout: config.Timeout, Output: config.Output, launcher: config.Launcher}, nil
 }
 
 func (c *Chromium) Prepare(_ context.Context, candidate Candidate) error {
+	if candidate.Kind == release.PresentationMedia {
+		return c.prepareMedia(candidate)
+	}
 	if candidate.Kind != release.PresentationCable {
-		return errors.New("Chromium requires a cable candidate")
+		return errors.New("Chromium requires a media or Cable candidate")
 	}
 	if candidate.ReleaseDigest == "" || candidate.ShellPath == "" || candidate.RevisionPath == "" || candidate.Entrypoint == "" || candidate.BridgeProtocol == "" {
 		return errors.New("cable candidate is incomplete")
@@ -138,7 +146,69 @@ func (c *Chromium) Prepare(_ context.Context, candidate Candidate) error {
 	}
 	c.mu.Lock()
 	removeChromiumState(c.pending)
-	c.pending = &chromiumState{candidate: candidate, root: root, profile: profile, presentation: presentation, media: media}
+	c.pending = &chromiumState{candidate: candidate, root: root, profile: profile, entrypoint: candidate.Entrypoint, healthPath: "/bridge/v1/presentation", presentation: presentation, media: media}
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Chromium) prepareMedia(candidate Candidate) error {
+	if candidate.ReleaseDigest == "" || candidate.Source == "" {
+		return errors.New("media candidate is incomplete")
+	}
+	if candidate.MediaType != "video/mp4" && candidate.MediaType != "image/jpeg" && candidate.MediaType != "image/png" && candidate.MediaType != "image/webp" {
+		return fmt.Errorf("unsupported browser media type %q", candidate.MediaType)
+	}
+	if candidate.Fit != "fit" && candidate.Fit != "fill" {
+		return errors.New("media fit must be fit or fill")
+	}
+	if candidate.Volume < 0 || candidate.Volume > 100 {
+		return errors.New("media volume must be between 0 and 100")
+	}
+	root, err := os.MkdirTemp(c.RuntimeRoot, "media-")
+	if err != nil {
+		return fmt.Errorf("create media runtime root: %w", err)
+	}
+	source := candidate.Source
+	media := make(map[string]string)
+	if !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") {
+		info, statErr := os.Stat(source)
+		if statErr != nil || info.IsDir() {
+			_ = os.RemoveAll(root)
+			return errors.New("cached media source is unavailable")
+		}
+		media["current"] = source
+		source = "/bridge/v1/media/current"
+	}
+	kind := "img"
+	if candidate.MediaType == "video/mp4" {
+		kind = "video"
+	}
+	config, err := json.Marshal(struct {
+		Kind        string `json:"kind"`
+		Source      string `json:"source"`
+		Fit         string `json:"fit"`
+		Loop        bool   `json:"loop"`
+		Muted       bool   `json:"muted"`
+		Volume      int    `json:"volume"`
+		Orientation int    `json:"orientation"`
+	}{kind, source, candidate.Fit, candidate.Loop, candidate.Muted, candidate.Volume, candidate.Orientation})
+	if err != nil {
+		_ = os.RemoveAll(root)
+		return err
+	}
+	document := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,#root{width:100%;height:100%;margin:0;background:#000;overflow:hidden}#root{display:grid;place-items:center}video,img{width:100%;height:100%;background:#000}</style></head><body><div id="root"></div><script>const c=` + string(config) + `;const m=document.createElement(c.kind);m.src=c.source;m.style.objectFit=c.fit==="fill"?"cover":"contain";m.style.transform="rotate("+c.orientation+"deg)";m.addEventListener(c.kind==="video"?"canplay":"load",()=>fetch("/bridge/v1/ready",{method:"POST"}),{once:true});m.addEventListener("error",()=>document.body.dataset.playerError="true");if(c.kind==="video"){m.autoplay=true;m.playsInline=true;m.loop=c.loop;m.muted=c.muted;m.volume=c.volume/100;m.play().catch(()=>{});}document.getElementById("root").appendChild(m);</script></body></html>`
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte(document), 0o600); err != nil {
+		_ = os.RemoveAll(root)
+		return err
+	}
+	profile := root + ".profile"
+	if err := os.MkdirAll(profile, 0o700); err != nil {
+		_ = os.RemoveAll(root)
+		return err
+	}
+	c.mu.Lock()
+	removeChromiumState(c.pending)
+	c.pending = &chromiumState{candidate: candidate, root: root, profile: profile, entrypoint: "index.html", healthPath: "/", media: media}
 	c.mu.Unlock()
 	return nil
 }
@@ -151,11 +221,11 @@ func (c *Chromium) Start(ctx context.Context, candidate Candidate) error {
 		return errors.New("cable candidate was not prepared")
 	}
 	if c.server != nil {
-		oldServer, oldProcess := c.server, c.process
-		c.server, c.listener, c.process, c.processDone = nil, nil, nil, nil
+		oldServer, oldSession := c.server, c.session
+		c.server, c.listener, c.session = nil, nil, nil
 		c.mu.Unlock()
-		if oldProcess != nil && oldProcess.Process != nil {
-			_ = oldProcess.Process.Kill()
+		if oldSession != nil {
+			_ = oldSession.Stop(context.Background())
 		}
 		_ = oldServer.Shutdown(context.Background())
 		c.mu.Lock()
@@ -182,26 +252,18 @@ func (c *Chromium) Start(ctx context.Context, candidate Candidate) error {
 	c.mu.Unlock()
 	go func() { _ = server.Serve(listener) }()
 	base := "http://" + listener.Addr().String()
-	entryURL := base + "/" + strings.TrimPrefix(filepath.ToSlash(candidate.Entrypoint), "/")
-	args := []string{"--kiosk", "--app=" + entryURL, "--no-first-run", "--no-default-browser-check", "--user-data-dir=" + state.profile}
-	args = append(args, c.ExtraArgs...)
-	args = append(args, entryURL)
-	cmd := exec.Command(c.BinaryPath, args...)
-	cmd.Env = os.Environ()
-	cmd.Stdout = c.Output
-	cmd.Stderr = c.Output
-	if err := cmd.Start(); err != nil {
+	entryURL := base + "/" + strings.TrimPrefix(filepath.ToSlash(state.entrypoint), "/")
+	session, err := c.launcher.Launch(ctx, entryURL, state.profile)
+	if err != nil {
 		_ = server.Shutdown(context.Background())
 		c.mu.Lock()
 		c.server, c.listener = nil, nil
 		c.mu.Unlock()
-		return fmt.Errorf("launch Chromium: %w", err)
+		return err
 	}
-	done := make(chan struct{})
 	c.mu.Lock()
-	c.process, c.processDone = cmd, done
+	c.session = session
 	c.mu.Unlock()
-	go func() { _ = cmd.Wait(); close(done) }()
 	if err := c.waitReady(ctx); err != nil {
 		_ = c.abortPending(context.Background())
 		return err
@@ -218,7 +280,7 @@ func (c *Chromium) waitReady(ctx context.Context) error {
 	defer cancel()
 	for {
 		c.mu.Lock()
-		listener, done := c.listener, c.processDone
+		listener, session := c.listener, c.session
 		ready := c.pending != nil && c.pending.ready
 		c.mu.Unlock()
 		if listener == nil {
@@ -227,11 +289,13 @@ func (c *Chromium) waitReady(ctx context.Context) error {
 		if ready {
 			return nil
 		}
-		if done != nil {
-			select {
-			case <-done:
+		if session != nil {
+			alive, err := session.Alive(checkCtx)
+			if err != nil {
+				return err
+			}
+			if !alive {
 				return errors.New("Chromium exited before bridge readiness")
-			default:
 			}
 		}
 		select {
@@ -244,11 +308,11 @@ func (c *Chromium) waitReady(ctx context.Context) error {
 
 func (c *Chromium) abortPending(ctx context.Context) error {
 	c.mu.Lock()
-	server, process, pending := c.server, c.process, c.pending
-	c.server, c.listener, c.process, c.processDone, c.pending = nil, nil, nil, nil, nil
+	server, session, pending := c.server, c.session, c.pending
+	c.server, c.listener, c.session, c.pending = nil, nil, nil, nil
 	c.mu.Unlock()
-	if process != nil && process.Process != nil {
-		_ = process.Process.Kill()
+	if session != nil {
+		_ = session.Stop(ctx)
 	}
 	var result error
 	if server != nil {
@@ -273,12 +337,12 @@ func (c *Chromium) Commit(_ context.Context, candidate Candidate) error {
 
 func (c *Chromium) Stop(ctx context.Context) error {
 	c.mu.Lock()
-	server, process, current, pending := c.server, c.process, c.current, c.pending
-	c.server, c.listener, c.process, c.processDone, c.current, c.pending = nil, nil, nil, nil, nil, nil
+	server, session, current, pending := c.server, c.session, c.current, c.pending
+	c.server, c.listener, c.session, c.current, c.pending = nil, nil, nil, nil, nil
 	c.mu.Unlock()
 	var result error
-	if process != nil && process.Process != nil {
-		_ = process.Process.Kill()
+	if session != nil {
+		result = errors.Join(result, session.Stop(ctx))
 	}
 	if server != nil {
 		result = errors.Join(result, server.Shutdown(ctx))
@@ -352,7 +416,7 @@ func (c *Chromium) serveStatic(w http.ResponseWriter, r *http.Request, state *ch
 	}
 	relative := strings.TrimPrefix(r.URL.Path, "/")
 	if relative == "" {
-		relative = state.candidate.Entrypoint
+		relative = state.entrypoint
 	}
 	path, err := safeJoin(state.root, relative)
 	if err != nil {
@@ -379,24 +443,26 @@ func (c *Chromium) Health(ctx context.Context, candidate Candidate) (Status, err
 	if state == nil {
 		state = c.pending
 	}
-	listener, done := c.listener, c.processDone
+	listener, session := c.listener, c.session
 	ready := state != nil && state.ready
 	c.mu.Unlock()
 	if state == nil || listener == nil || !ready {
 		return Status{ReleaseDigest: candidate.ReleaseDigest, Candidate: candidate}, nil
 	}
-	if done != nil {
-		select {
-		case <-done:
+	if session != nil {
+		alive, err := session.Alive(ctx)
+		if err != nil {
+			return Status{}, err
+		}
+		if !alive {
 			return Status{ReleaseDigest: candidate.ReleaseDigest, Path: listener.Addr().String(), Candidate: candidate}, nil
-		default:
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+listener.Addr().String()+"/bridge/v1/presentation", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+listener.Addr().String()+state.healthPath, nil)
 	if err != nil {
 		return Status{}, err
 	}
-	response, err := http.DefaultClient.Do(req)
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return Status{}, err
 	}

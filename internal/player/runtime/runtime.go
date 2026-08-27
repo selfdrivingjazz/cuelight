@@ -364,6 +364,7 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 		candidate.Fit, candidate.Loop, candidate.Muted, candidate.Volume = playback.Fit, playback.Loop, playback.Muted, playback.Volume
 		candidate.ImageDurationSecond, candidate.Orientation = playback.ImageDurationSecond, playback.Orientation
 		artifact := envelope.Payload.Artifacts[0]
+		candidate.MediaType = artifact.MediaType
 		if mode == DeliveryStream {
 			if r.deps.Streamer == nil {
 				return candidate, nil, ErrUnsafeStreamSource

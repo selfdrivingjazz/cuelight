@@ -169,7 +169,7 @@ func newPKIHandler(service *pki.Service, maxBody int64) http.Handler {
 				return
 			}
 			if r.URL.Path == "/player/enroll" {
-				result, err := service.Enroll(r.Context(), pki.EnrollRequest{Token: input.Token, IdempotencyKey: key, Credential: pki.CredentialRequest{PublicKey: publicKey}})
+				result, err := service.Enroll(r.Context(), pki.EnrollRequest{Token: input.Token, IdempotencyKey: key, Name: input.Name, Credential: pki.CredentialRequest{PublicKey: publicKey}})
 				if err != nil {
 					writePKIError(w, err)
 					return

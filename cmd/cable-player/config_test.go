@@ -33,6 +33,20 @@ func TestLoadConfigValidatesRequiredAndLoopbackInputs(t *testing.T) {
 		t.Fatalf("non-loopback error = %v", err)
 	}
 }
+func TestLoadConfigAcceptsAuthenticatedDesktopRendererWithoutMPV(t *testing.T) {
+	values := validEnvironment()
+	delete(values, "CABLE_PLAYER_MPV_SOCKET")
+	values["CABLE_PLAYER_RENDERER_MODE"] = "desktop"
+	values["CABLE_PLAYER_DESKTOP_RENDERER_URL"] = "http://127.0.0.1:4179"
+	values["CABLE_PLAYER_DESKTOP_RENDERER_TOKEN"] = "renderer-secret"
+	config, err := loadConfig(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.RendererMode != "desktop" || config.MPVSocketPath != "" {
+		t.Fatalf("desktop config = %+v", config)
+	}
+}
 
 func TestLoadConfigRejectsUnsafeTiming(t *testing.T) {
 	values := validEnvironment()

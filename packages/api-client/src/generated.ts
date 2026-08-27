@@ -1167,6 +1167,7 @@ export interface components {
         EnrollPlayerInput: {
             token: string;
             publicKey: string;
+            name?: string;
         };
         ClientCredential: {
             certificate: string;

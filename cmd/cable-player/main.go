@@ -9,7 +9,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,7 +16,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jmill/cable/internal/media/localcas"
@@ -34,12 +32,19 @@ func main() {
 		fmt.Printf("cable-player %s\n", version)
 		return
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals()...)
+	defer stop()
+	if len(os.Args) >= 2 && os.Args[1] == "provision" {
+		if err := runProvision(ctx, os.Args[2:], os.LookupEnv, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: cable-player [--version]")
+		fmt.Fprintln(os.Stderr, "usage: cable-player [--version] | cable-player provision [flags]")
 		os.Exit(2)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	if err := run(ctx, os.LookupEnv); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -103,13 +108,29 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		listener.Close()
 		return fmt.Errorf("create Chromium runtime root: %w", err)
 	}
-	mpv := &renderer.MPV{SocketPath: config.MPVSocketPath, Timeout: config.MPVTimeout}
-	chromium, err := renderer.NewChromium(renderer.ChromiumConfig{BinaryPath: config.ChromiumBinaryPath, RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, ExtraArgs: config.ChromiumArgs, Output: os.Stderr})
-	if err != nil {
-		listener.Close()
-		return fmt.Errorf("create Chromium renderer: %w", err)
+	var mediaRenderer, cableRenderer renderer.Adapter
+	if config.RendererMode == "desktop" {
+		launcher, err := renderer.NewHTTPBrowserLauncher(config.DesktopRendererURL, config.DesktopRendererToken, &http.Client{Timeout: config.ChromiumTimeout})
+		if err != nil {
+			listener.Close()
+			return fmt.Errorf("create desktop browser launcher: %w", err)
+		}
+		browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, Launcher: launcher, Output: os.Stderr})
+		if err != nil {
+			listener.Close()
+			return fmt.Errorf("create desktop renderer: %w", err)
+		}
+		mediaRenderer, cableRenderer = browserRenderer, browserRenderer
+	} else {
+		mediaRenderer = &renderer.MPV{SocketPath: config.MPVSocketPath, Timeout: config.MPVTimeout}
+		browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{BinaryPath: config.ChromiumBinaryPath, RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, ExtraArgs: config.ChromiumArgs, Output: os.Stderr})
+		if err != nil {
+			listener.Close()
+			return fmt.Errorf("create Chromium renderer: %w", err)
+		}
+		cableRenderer = browserRenderer
 	}
-	composite, err := renderer.NewComposite(mpv, chromium)
+	composite, err := renderer.NewComposite(mediaRenderer, cableRenderer)
 	if err != nil {
 		listener.Close()
 		return fmt.Errorf("create renderer dispatcher: %w", err)
@@ -216,18 +237,4 @@ func (s *loopbackStreamer) Renew(_ context.Context, source string, ttl time.Dura
 		return errors.New("stream source does not belong to loopback proxy")
 	}
 	return s.proxy.Renew(parsed.Path, ttl)
-}
-
-type filesystemCapacity struct{ path string }
-
-func (c filesystemCapacity) AvailableBytes(context.Context) (int64, error) {
-	var stats syscall.Statfs_t
-	if err := syscall.Statfs(c.path, &stats); err != nil {
-		return 0, fmt.Errorf("inspect player cache capacity: %w", err)
-	}
-	blocks, size := uint64(stats.Bavail), uint64(stats.Bsize)
-	if size != 0 && blocks > math.MaxInt64/size {
-		return math.MaxInt64, nil
-	}
-	return int64(blocks * size), nil
 }

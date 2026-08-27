@@ -26,6 +26,9 @@ type playerConfig struct {
 	RendererVersion        string
 	StatePath              string
 	CASPath                string
+	RendererMode           string
+	DesktopRendererURL     string
+	DesktopRendererToken   string
 	MPVSocketPath          string
 	ChromiumBinaryPath     string
 	ChromiumRuntimeRoot    string
@@ -54,8 +57,10 @@ func loadConfig(lookup func(string) (string, bool)) (playerConfig, error) {
 		PublisherKeyID: env(lookup, "CABLE_PLAYER_PUBLISHER_KEY_ID"), PublisherPublicKeyPath: env(lookup, "CABLE_PLAYER_PUBLISHER_PUBLIC_KEY_PATH"),
 		EventEpoch: env(lookup, "CABLE_PLAYER_EVENT_EPOCH"), ProfileID: env(lookup, "CABLE_PLAYER_PROFILE_ID"), RendererVersion: env(lookup, "CABLE_PLAYER_RENDERER_VERSION"),
 		StatePath: env(lookup, "CABLE_PLAYER_STATE_PATH"), CASPath: env(lookup, "CABLE_PLAYER_CAS_PATH"), MPVSocketPath: env(lookup, "CABLE_PLAYER_MPV_SOCKET"),
-		ChromiumBinaryPath: envDefault(lookup, "CABLE_PLAYER_CHROMIUM_BINARY", "chromium"), ChromiumRuntimeRoot: envDefault(lookup, "CABLE_PLAYER_CHROMIUM_RUNTIME_ROOT", "/var/lib/cable/chromium"),
-		ChromiumArgs: listEnv(lookup, "CABLE_PLAYER_CHROMIUM_ARGS"), LoopbackAddress: envDefault(lookup, "CABLE_PLAYER_LOOPBACK_ADDR", "127.0.0.1:0"),
+		RendererMode: envDefault(lookup, "CABLE_PLAYER_RENDERER_MODE", "appliance"), DesktopRendererURL: env(lookup, "CABLE_PLAYER_DESKTOP_RENDERER_URL"),
+		DesktopRendererToken: env(lookup, "CABLE_PLAYER_DESKTOP_RENDERER_TOKEN"), ChromiumBinaryPath: envDefault(lookup, "CABLE_PLAYER_CHROMIUM_BINARY", "chromium"),
+		ChromiumRuntimeRoot: envDefault(lookup, "CABLE_PLAYER_CHROMIUM_RUNTIME_ROOT", "/var/lib/cable/chromium"),
+		ChromiumArgs:        listEnv(lookup, "CABLE_PLAYER_CHROMIUM_ARGS"), LoopbackAddress: envDefault(lookup, "CABLE_PLAYER_LOOPBACK_ADDR", "127.0.0.1:0"),
 		Features: listEnv(lookup, "CABLE_PLAYER_FEATURES"), AcceptedMediaTypes: listEnv(lookup, "CABLE_PLAYER_ACCEPTED_MEDIA_TYPES"),
 		Probation: 30 * time.Second, PollWait: 30 * time.Second, ReconnectMinimum: time.Second, ReconnectMaximum: 30 * time.Second,
 		PartialGrace: time.Hour, StreamTTL: 10 * time.Minute, MPVTimeout: 5 * time.Second, ChromiumTimeout: 15 * time.Second,
@@ -86,12 +91,21 @@ func (c playerConfig) validate() error {
 		{"CABLE_PLAYER_NODE_CERT_PATH", c.NodeCertificatePath}, {"CABLE_PLAYER_NODE_KEY_PATH", c.NodePrivateKeyPath},
 		{"CABLE_PLAYER_PUBLISHER_KEY_ID", c.PublisherKeyID}, {"CABLE_PLAYER_PUBLISHER_PUBLIC_KEY_PATH", c.PublisherPublicKeyPath},
 		{"CABLE_PLAYER_EVENT_EPOCH", c.EventEpoch}, {"CABLE_PLAYER_PROFILE_ID", c.ProfileID}, {"CABLE_PLAYER_RENDERER_VERSION", c.RendererVersion},
-		{"CABLE_PLAYER_STATE_PATH", c.StatePath}, {"CABLE_PLAYER_CAS_PATH", c.CASPath}, {"CABLE_PLAYER_MPV_SOCKET", c.MPVSocketPath},
+		{"CABLE_PLAYER_STATE_PATH", c.StatePath}, {"CABLE_PLAYER_CAS_PATH", c.CASPath},
 	}
 	for _, field := range required {
 		if field.value == "" {
 			return &configError{field.name, "is required"}
 		}
+	}
+	if c.RendererMode != "appliance" && c.RendererMode != "desktop" {
+		return &configError{"CABLE_PLAYER_RENDERER_MODE", "must be appliance or desktop"}
+	}
+	if c.RendererMode == "appliance" && c.MPVSocketPath == "" {
+		return &configError{"CABLE_PLAYER_MPV_SOCKET", "is required in appliance mode"}
+	}
+	if c.RendererMode == "desktop" && (c.DesktopRendererURL == "" || c.DesktopRendererToken == "") {
+		return &configError{"desktop renderer", "URL and token are required in desktop mode"}
 	}
 	parsed, err := url.Parse(c.ControlURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
