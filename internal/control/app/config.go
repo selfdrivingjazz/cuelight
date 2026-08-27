@@ -19,6 +19,12 @@ const (
 	defaultIdleTimeout         = 60 * time.Second
 	defaultShutdownTimeout     = 15 * time.Second
 	defaultMaxHeaderBytes      = 64 << 10
+	defaultMaxBodyBytes        = 4 << 20
+	defaultMaxUploadBytes      = 8 << 30
+	defaultMaxChunkBytes       = 16 << 20
+	defaultMaxLocalMediaBytes  = 8 << 30
+	defaultMaxEvents           = 100
+	defaultMaxWait             = 30 * time.Second
 )
 
 type Config struct {
@@ -28,7 +34,15 @@ type Config struct {
 	TLSCertificatePath      string
 	TLSPrivateKeyPath       string
 	PublisherPrivateKeyPath string
+	PublisherKeyID          string
 	CASPath                 string
+	CAPath                  string
+	CAKeyPath               string
+	SealKeyPath             string
+	TemporaryRoot           string
+	MediaRoots              []string
+	ProtocolVersion         string
+	PlaybackProfile         string
 	DatabaseTimeout         time.Duration
 	DatabaseMaxConnections  int
 	DatabaseMaxIdle         int
@@ -37,6 +51,12 @@ type Config struct {
 	IdleTimeout             time.Duration
 	ShutdownTimeout         time.Duration
 	MaxHeaderBytes          int
+	MaxBodyBytes            int64
+	MaxUploadBytes          int64
+	MaxChunkBytes           int64
+	MaxLocalMediaBytes      int64
+	MaxEvents               int
+	MaxWait                 time.Duration
 }
 
 type ConfigError struct {
@@ -56,7 +76,14 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		TLSCertificatePath:      env(lookup, "CABLE_CONTROL_TLS_CERT_PATH"),
 		TLSPrivateKeyPath:       env(lookup, "CABLE_CONTROL_TLS_KEY_PATH"),
 		PublisherPrivateKeyPath: env(lookup, "CABLE_CONTROL_PUBLISHER_KEY_PATH"),
+		PublisherKeyID:          env(lookup, "CABLE_CONTROL_PUBLISHER_KEY_ID"),
 		CASPath:                 env(lookup, "CABLE_CONTROL_CAS_PATH"),
+		CAPath:                  env(lookup, "CABLE_CONTROL_CA_PATH"),
+		CAKeyPath:               env(lookup, "CABLE_CONTROL_CA_KEY_PATH"),
+		SealKeyPath:             env(lookup, "CABLE_CONTROL_SEAL_KEY_PATH"),
+		TemporaryRoot:           env(lookup, "CABLE_CONTROL_TEMP_ROOT"),
+		ProtocolVersion:         envOrDefault(lookup, "CABLE_CONTROL_PROTOCOL_VERSION", "1.0"),
+		PlaybackProfile:         envOrDefault(lookup, "CABLE_CONTROL_PLAYBACK_PROFILE", "default"),
 		DatabaseTimeout:         defaultDatabaseTimeout,
 		DatabaseMaxConnections:  defaultDatabaseConnections,
 		DatabaseMaxIdle:         defaultDatabaseIdle,
@@ -65,6 +92,12 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		IdleTimeout:             defaultIdleTimeout,
 		ShutdownTimeout:         defaultShutdownTimeout,
 		MaxHeaderBytes:          defaultMaxHeaderBytes,
+		MaxBodyBytes:            defaultMaxBodyBytes,
+		MaxUploadBytes:          defaultMaxUploadBytes,
+		MaxChunkBytes:           defaultMaxChunkBytes,
+		MaxLocalMediaBytes:      defaultMaxLocalMediaBytes,
+		MaxEvents:               defaultMaxEvents,
+		MaxWait:                 defaultMaxWait,
 	}
 	var err error
 	if config.DatabaseTimeout, err = durationEnv(lookup, "CABLE_CONTROL_DATABASE_TIMEOUT", config.DatabaseTimeout); err != nil {
@@ -91,12 +124,29 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	if config.MaxHeaderBytes, err = intEnv(lookup, "CABLE_CONTROL_MAX_HEADER_BYTES", config.MaxHeaderBytes); err != nil {
 		return Config{}, err
 	}
+	if config.MaxBodyBytes, err = int64Env(lookup, "CABLE_CONTROL_MAX_BODY_BYTES", config.MaxBodyBytes); err != nil {
+		return Config{}, err
+	}
+	if config.MaxUploadBytes, err = int64Env(lookup, "CABLE_CONTROL_MAX_UPLOAD_BYTES", config.MaxUploadBytes); err != nil {
+		return Config{}, err
+	}
+	if config.MaxChunkBytes, err = int64Env(lookup, "CABLE_CONTROL_MAX_CHUNK_BYTES", config.MaxChunkBytes); err != nil {
+		return Config{}, err
+	}
+	if config.MaxLocalMediaBytes, err = int64Env(lookup, "CABLE_CONTROL_MAX_LOCAL_MEDIA_BYTES", config.MaxLocalMediaBytes); err != nil {
+		return Config{}, err
+	}
+	if config.MaxEvents, err = intEnv(lookup, "CABLE_CONTROL_MAX_EVENTS", config.MaxEvents); err != nil {
+		return Config{}, err
+	}
+	if config.MaxWait, err = durationEnv(lookup, "CABLE_CONTROL_MAX_WAIT", config.MaxWait); err != nil {
+		return Config{}, err
+	}
 	if err := config.Validate(); err != nil {
 		return Config{}, err
 	}
 	return config, nil
 }
-
 func (config Config) Validate() error {
 	required := []struct {
 		name  string
@@ -147,7 +197,43 @@ func (config Config) Validate() error {
 	if config.MaxHeaderBytes < 4<<10 || config.MaxHeaderBytes > 1<<20 {
 		return &ConfigError{Field: "CABLE_CONTROL_MAX_HEADER_BYTES", Reason: "must be between 4096 and 1048576"}
 	}
+	if config.MaxBodyBytes < 1<<10 || config.MaxBodyBytes > 64<<20 {
+		return &ConfigError{Field: "CABLE_CONTROL_MAX_BODY_BYTES", Reason: "must be between 1024 and 67108864"}
+	}
+	if config.MaxUploadBytes <= 0 || config.MaxUploadBytes > 1<<40 {
+		return &ConfigError{Field: "CABLE_CONTROL_MAX_UPLOAD_BYTES", Reason: "must be between 1 and 1099511627776"}
+	}
+	if config.MaxChunkBytes <= 0 || config.MaxChunkBytes > config.MaxUploadBytes {
+		return &ConfigError{Field: "CABLE_CONTROL_MAX_CHUNK_BYTES", Reason: "must be positive and no greater than max upload bytes"}
+	}
+	if config.MaxLocalMediaBytes <= 0 || config.MaxLocalMediaBytes > config.MaxUploadBytes {
+		return &ConfigError{Field: "CABLE_CONTROL_MAX_LOCAL_MEDIA_BYTES", Reason: "must be positive and no greater than max upload bytes"}
+	}
+	if config.MaxEvents < 1 || config.MaxEvents > 10000 {
+		return &ConfigError{Field: "CABLE_CONTROL_MAX_EVENTS", Reason: "must be between 1 and 10000"}
+	}
+	if err := boundedDuration("CABLE_CONTROL_MAX_WAIT", config.MaxWait, 0, 5*time.Minute); err != nil {
+		return err
+	}
+	if strings.TrimSpace(config.ProtocolVersion) == "" || strings.TrimSpace(config.PlaybackProfile) == "" {
+		return &ConfigError{Field: "CABLE_CONTROL_PROTOCOL_VERSION", Reason: "protocol version and playback profile are required"}
+	}
 	return nil
+}
+
+func csvEnv(lookup func(string) (string, bool), name string) []string {
+	raw := env(lookup, name)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func env(lookup func(string) (string, bool), name string) string {
@@ -180,6 +266,17 @@ func intEnv(lookup func(string) (string, bool), name string, fallback int) (int,
 		return fallback, nil
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, &ConfigError{Field: name, Reason: "must be an integer"}
+	}
+	return parsed, nil
+}
+func int64Env(lookup func(string) (string, bool), name string, fallback int64) (int64, error) {
+	value := env(lookup, name)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return 0, &ConfigError{Field: name, Reason: "must be an integer"}
 	}

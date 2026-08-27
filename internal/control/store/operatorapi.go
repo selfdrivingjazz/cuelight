@@ -1,0 +1,171 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+
+	"github.com/jmill/cable/internal/control/assignment"
+	"github.com/jmill/cable/internal/control/media"
+	"github.com/jmill/cable/internal/control/operatorapi"
+	"github.com/jmill/cable/internal/control/pki"
+	playerclient "github.com/jmill/cable/internal/player/client"
+	canonical "github.com/jmill/cable/internal/release"
+)
+
+type OperatorAdapter struct{ Store *Store }
+
+func NewOperatorAdapter(repository *Store) *OperatorAdapter {
+	return &OperatorAdapter{Store: repository}
+}
+
+var _ operatorapi.NodeService = (*OperatorAdapter)(nil)
+var _ operatorapi.AssignmentService = (*Store)(nil)
+var _ operatorapi.AssetService = (*Store)(nil)
+
+func (a *OperatorAdapter) ListNodes(ctx context.Context) ([]operatorapi.Node, error) {
+	s := a.Store
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT id::text, name, credential_state, desired_generation, observed_generation FROM nodes ORDER BY created_at, id`)
+	if err != nil {
+		return nil, wrap("list nodes", err)
+	}
+	defer rows.Close()
+	result := make([]operatorapi.Node, 0)
+	for rows.Next() {
+		var node operatorapi.Node
+		if err := rows.Scan(&node.ID, &node.Name, &node.CredentialState, &node.DesiredGeneration, &node.ObservedGeneration); err != nil {
+			return nil, wrap("scan node", err)
+		}
+		result = append(result, node)
+	}
+	return result, wrap("iterate nodes", rows.Err())
+}
+func (a *OperatorAdapter) GetNode(ctx context.Context, id string) (operatorapi.Node, error) {
+	s := a.Store
+	var node operatorapi.Node
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT id::text, name, credential_state, desired_generation, observed_generation FROM nodes WHERE id = $1`, id).Scan(&node.ID, &node.Name, &node.CredentialState, &node.DesiredGeneration, &node.ObservedGeneration)
+	if errors.Is(err, sql.ErrNoRows) {
+		return operatorapi.Node{}, pkiNotFound()
+	}
+	return node, wrap("read node", err)
+}
+
+func (a *OperatorAdapter) UpdateNode(ctx context.Context, id, name, match string) (operatorapi.Node, error) {
+	s := a.Store
+	node, err := a.GetNode(ctx, id)
+	if err != nil {
+		return operatorapi.Node{}, err
+	}
+	want := fmt.Sprintf("\"%s:%d:%d\"", node.ID, node.DesiredGeneration, node.ObservedGeneration)
+	if match != want {
+		return operatorapi.Node{}, operatorapi.ErrPrecondition
+	}
+	_, err = s.q(ctx).ExecContext(ctx, `UPDATE nodes SET name = $2 WHERE id = $1`, id, name)
+	if err != nil {
+		return operatorapi.Node{}, wrap("update node", err)
+	}
+	node.Name = name
+	return node, nil
+}
+func (a *OperatorAdapter) GetNodeStatus(ctx context.Context, id string) (playerclient.NodeReport, error) {
+	s := a.Store
+	var payload []byte
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT report FROM node_report_snapshots WHERE node_id = $1`, id).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return playerclient.NodeReport{}, pkiNotFound()
+	}
+	if err != nil {
+		return playerclient.NodeReport{}, wrap("read node status", err)
+	}
+	var report playerclient.NodeReport
+	if err := json.Unmarshal(payload, &report); err != nil {
+		return playerclient.NodeReport{}, wrap("decode node status", err)
+	}
+	return report, nil
+}
+func (a *OperatorAdapter) ListNodeEvents(ctx context.Context, id, cursor string) ([]playerclient.NodeEvent, *string, error) {
+	s := a.Store
+	sequence := int64(0)
+	if cursor != "" {
+		parsed, err := strconv.ParseInt(cursor, 10, 64)
+		if err != nil || parsed < 0 {
+			return nil, nil, operatorapi.ErrCursorInvalid
+		}
+		sequence = parsed
+	}
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT event FROM node_events WHERE node_id = $1 AND sequence > $2 ORDER BY sequence LIMIT 101`, id, sequence)
+	if err != nil {
+		return nil, nil, wrap("list node events", err)
+	}
+	defer rows.Close()
+	items := make([]playerclient.NodeEvent, 0, 100)
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, nil, wrap("scan node event", err)
+		}
+		var event playerclient.NodeEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			return nil, nil, wrap("decode node event", err)
+		}
+		items = append(items, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, wrap("iterate node events", err)
+	}
+	var next *string
+	if len(items) > 100 {
+		value := strconv.FormatInt(items[99].Sequence, 10)
+		next = &value
+		items = items[:100]
+	}
+	return items, next, nil
+}
+
+func (s *Store) GetAssignment(ctx context.Context, id string) (assignment.Assignment, error) {
+	value, found, err := s.CurrentAssignment(ctx, id)
+	if err != nil {
+		return assignment.Assignment{}, err
+	}
+	if !found {
+		return assignment.Assignment{}, pkiNotFound()
+	}
+	return value, nil
+}
+
+func (s *Store) PutAssignment(ctx context.Context, nodeID string, mutation assignment.Mutation, input assignment.PutInput) (assignment.PutResult, error) {
+	return (assignment.Service{Assignments: s}).Put(ctx, nodeID, mutation, input)
+}
+
+func (s *Store) ListAssets(ctx context.Context) ([]media.Asset, error) {
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT a.id::text, a.name, r.digest, r.size_bytes, r.media_type, r.state FROM assets a JOIN asset_artifacts aa ON aa.asset_id = a.id JOIN artifacts r ON r.digest = aa.artifact_digest WHERE aa.role = 'original' ORDER BY a.created_at, a.id`)
+	if err != nil {
+		return nil, wrap("list assets", err)
+	}
+	defer rows.Close()
+	result := make([]media.Asset, 0)
+	for rows.Next() {
+		var value media.Asset
+		if err := rows.Scan(&value.ID, &value.Name, &value.Artifact.Digest, &value.Artifact.Size, &value.Artifact.MediaType, &value.Artifact.State); err != nil {
+			return nil, wrap("scan asset", err)
+		}
+		result = append(result, value)
+	}
+	return result, wrap("iterate assets", rows.Err())
+}
+
+func (s *Store) GetAsset(ctx context.Context, id string) (media.Asset, error) {
+	value, err := s.asset(ctx, s.q(ctx), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return media.Asset{}, media.ErrNotFound
+	}
+	return value, err
+}
+
+func (s *Store) GetRelease(ctx context.Context, id string) (canonical.EnvelopeV1, error) {
+	return s.LoadRelease(ctx, id)
+}
+func pkiNotFound() error { return pki.ErrNodeNotFound }

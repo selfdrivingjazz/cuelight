@@ -148,6 +148,10 @@ func TestReportDoesNotMutateDesiredAssignment(t *testing.T) {
 func TestEventsRejectConflictsAndPreserveWatermarkEpoch(t *testing.T) {
 	repo := &fakeRepository{acknowledgement: client.EventAcknowledgement{Epoch: "epoch-a", AcknowledgedThrough: 3}}
 	service := testService(repo)
+	duplicate := client.EventBatch{Epoch: "epoch-a", Events: []client.NodeEvent{{ID: "event-1", Epoch: "epoch-a", Sequence: 1, Type: "one"}, {ID: "event-1", Epoch: "epoch-a", Sequence: 1, Type: "one"}}}
+	if _, err := service.AppendEvents(context.Background(), "node-a", duplicate); err != nil {
+		t.Fatalf("duplicate event error = %v", err)
+	}
 	batch := client.EventBatch{Epoch: "epoch-a", Events: []client.NodeEvent{{ID: "event-1", Epoch: "epoch-a", Sequence: 2, Type: "one"}, {ID: "event-2", Epoch: "epoch-a", Sequence: 2, Type: "two"}}}
 	if _, err := service.AppendEvents(context.Background(), "node-a", batch); !errors.Is(err, ErrEventConflict) {
 		t.Fatalf("conflicting event error = %v", err)
@@ -156,6 +160,19 @@ func TestEventsRejectConflictsAndPreserveWatermarkEpoch(t *testing.T) {
 	ack, err := service.AppendEvents(context.Background(), "node-a", batch)
 	if err != nil || ack.Epoch != "epoch-a" || ack.AcknowledgedThrough != 3 {
 		t.Fatalf("event ack = %#v, %v", ack, err)
+	}
+}
+
+func TestEventsPropagateGapAndOverflowEpochErrors(t *testing.T) {
+	repo := &fakeRepository{eventErr: ErrEventGap}
+	service := testService(repo)
+	batch := client.EventBatch{Epoch: "epoch-a", Events: []client.NodeEvent{{ID: "event-1", Epoch: "epoch-a", Sequence: 2, Type: "one"}}}
+	if _, err := service.AppendEvents(context.Background(), "node-a", batch); !errors.Is(err, ErrEventGap) {
+		t.Fatalf("gap error = %v", err)
+	}
+	repo.eventErr = ErrEpochMismatch
+	if _, err := service.AppendEvents(context.Background(), "node-a", batch); !errors.Is(err, ErrEpochMismatch) {
+		t.Fatalf("overflow epoch error = %v", err)
 	}
 }
 

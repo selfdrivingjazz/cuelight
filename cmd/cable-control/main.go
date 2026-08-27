@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/jmill/cable/internal/control/app"
+	"github.com/jmill/cable/internal/control/composition"
 )
 
 var version = "dev"
@@ -21,28 +24,100 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("cable-control", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	showVersion := flags.Bool("version", false, "print version and exit")
-	if err := flags.Parse(args); err != nil {
-		return 2
+	if len(args) == 0 {
+		return runServe(ctx, nil, lookup, stdout, stderr)
 	}
-	if flags.NArg() != 0 {
-		fmt.Fprintf(stderr, "cable-control: unexpected arguments: %v\n", flags.Args())
-		return 2
-	}
-	if *showVersion {
+	if args[0] == "-version" || args[0] == "--version" {
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "cable-control: version does not accept arguments")
+			return 2
+		}
 		fmt.Fprintf(stdout, "cable-control %s\n", version)
 		return 0
+	}
+	switch {
+	case args[0] == "serve":
+		return runServe(ctx, args[1:], lookup, stdout, stderr)
+	case len(args) >= 3 && args[0] == "admin" && args[1] == "token" && args[2] == "create":
+		return runAdminToken(ctx, args[3:], lookup, stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "cable-control: usage: cable-control serve | admin token create\n")
+		return 2
+	}
+}
+
+func runServe(ctx context.Context, args []string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintf(stderr, "cable-control serve: unexpected arguments: %v\n", args)
+		return 2
 	}
 	config, err := app.LoadConfig(lookup)
 	if err != nil {
 		fmt.Fprintf(stderr, "cable-control: %v\n", err)
 		return 2
 	}
-	if err := app.Run(ctx, config, app.Options{Version: version}); err != nil {
+	if err := app.Run(ctx, config, app.Options{Version: version, Handler: composition.HandlerFactory, ConfigureTLS: composition.ConfigureTLS(config)}); err != nil {
 		fmt.Fprintf(stderr, "cable-control: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func runAdminToken(ctx context.Context, args []string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("admin token create", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	actorID := flags.String("actor-id", "", "existing actor UUID (default: generate one)")
+	actorName := flags.String("actor-name", "cable-control administrator", "actor display name")
+	scopeList := flags.String("scopes", "security_admin", "comma-separated token scopes")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintf(stderr, "cable-control admin token create: unexpected arguments: %v\n", flags.Args())
+		return 2
+	}
+	config, err := app.LoadConfig(adminLookup(lookup))
+	if err != nil {
+		fmt.Fprintf(stderr, "cable-control: %v\n", err)
+		return 2
+	}
+	scopes := make([]string, 0)
+	for _, value := range strings.Split(*scopeList, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			scopes = append(scopes, value)
+		}
+	}
+	token, err := composition.BootstrapAdminToken(ctx, config, *actorID, *actorName, scopes)
+	if err != nil {
+		fmt.Fprintf(stderr, "cable-control: %v\n", err)
+		return 1
+	}
+	// The secret is deliberately the only credential field emitted by this mode.
+	if err := json.NewEncoder(stdout).Encode(struct {
+		Secret string `json:"secret"`
+	}{Secret: token.Secret}); err != nil {
+		fmt.Fprintf(stderr, "cable-control: write token: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func adminLookup(lookup func(string) (string, bool)) func(string) (string, bool) {
+	return func(name string) (string, bool) {
+		if value, ok := lookup(name); ok {
+			return value, ok
+		}
+		switch name {
+		case "CABLE_CONTROL_TLS_CERT_PATH":
+			return "admin-mode-unused-cert", true
+		case "CABLE_CONTROL_TLS_KEY_PATH":
+			return "admin-mode-unused-key", true
+		case "CABLE_CONTROL_PUBLISHER_KEY_PATH":
+			return "admin-mode-unused-publisher", true
+		case "CABLE_CONTROL_CAS_PATH":
+			return "admin-mode-unused-cas", true
+		default:
+			return "", false
+		}
+	}
 }
