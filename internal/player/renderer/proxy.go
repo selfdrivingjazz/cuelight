@@ -56,6 +56,25 @@ func (p *Proxy) Grant(digest string, ttl time.Duration) (string, error) {
 	return "/media/" + token + "/" + digest, nil
 }
 
+func (p *Proxy) Renew(path string, ttl time.Duration) error {
+	if ttl <= 0 {
+		return errors.New("positive TTL is required")
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "media" {
+		return errors.New("invalid media capability path")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	grant, ok := p.grants[parts[1]]
+	if !ok || grant.digest != parts[2] || !p.now().Before(grant.expires) {
+		return errors.New("media capability is invalid or expired")
+	}
+	grant.expires = p.now().Add(ttl)
+	p.grants[parts[1]] = grant
+	return nil
+}
+
 func (p *Proxy) Revoke(path string) {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	if len(parts) != 3 {
@@ -86,7 +105,7 @@ func (p *Proxy) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	upstream := *p.upstream
-	upstream.Path = strings.TrimRight(upstream.Path, "/") + "/api/v1/player/artifacts/" + digest + "/content"
+	upstream.Path = strings.TrimRight(upstream.Path, "/") + "/player/artifacts/" + digest + "/content"
 	upstreamRequest, err := http.NewRequestWithContext(request.Context(), request.Method, upstream.String(), nil)
 	if err != nil {
 		http.Error(writer, "build upstream request", http.StatusBadGateway)

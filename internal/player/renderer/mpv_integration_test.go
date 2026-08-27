@@ -19,7 +19,7 @@ func TestMPVRealIPC(t *testing.T) {
 	for _, name := range []string{"phase0.jpg", "phase0.png", "phase0.mp4"} {
 		t.Run(name, func(t *testing.T) {
 			source := filepath.Join(fixtureDirectory, name)
-			candidate := Candidate{ReleaseDigest: strings.Repeat("a", 64), Source: source}
+			candidate := Candidate{ReleaseDigest: strings.Repeat("a", 64), Source: source, Fit: "fit"}
 			if err := adapter.Start(context.Background(), candidate); err != nil {
 				t.Fatal(err)
 			}

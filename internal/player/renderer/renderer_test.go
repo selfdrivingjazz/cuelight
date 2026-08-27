@@ -33,7 +33,7 @@ func TestProxyPreservesRangeAndHidesUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy, err := NewProxy(upstream.URL, upstream.Client())
+	proxy, err := NewProxy(upstream.URL+"/api/v1", upstream.Client())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,8 +77,8 @@ func TestProxyPreservesRangeAndHidesUpstream(t *testing.T) {
 	}
 }
 
-func TestProxyExpiresCapability(t *testing.T) {
-	proxy, err := NewProxy("https://control.invalid", http.DefaultClient)
+func TestProxyRenewsAndExpiresCapability(t *testing.T) {
+	proxy, err := NewProxy("https://control.invalid/api/v1", http.DefaultClient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,12 +88,23 @@ func TestProxyExpiresCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now = now.Add(2 * time.Second)
+	now = now.Add(500 * time.Millisecond)
+	if err := proxy.Renew(path, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	token := strings.Split(path, "/")[2]
+	if got := proxy.grants[token].expires; !got.Equal(now.Add(2 * time.Second)) {
+		t.Fatalf("renewed expiry = %v", got)
+	}
+	now = now.Add(3 * time.Second)
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	writer := httptest.NewRecorder()
 	proxy.ServeHTTP(writer, request)
 	if writer.Code != http.StatusUnauthorized {
 		t.Fatalf("expired capability returned %d", writer.Code)
+	}
+	if err := proxy.Renew(path, time.Second); err == nil {
+		t.Fatal("expired capability renewed")
 	}
 }
 
@@ -107,6 +118,7 @@ func TestMPVAdapterUsesJSONIPC(t *testing.T) {
 
 	var mu sync.Mutex
 	currentPath := ""
+	properties := make(map[string]any)
 	go func() {
 		for {
 			connection, err := listener.Accept()
@@ -128,8 +140,15 @@ func TestMPVAdapterUsesJSONIPC(t *testing.T) {
 				switch command {
 				case "loadfile":
 					currentPath = fmt.Sprint(request.Command[1])
+				case "set_property":
+					properties[fmt.Sprint(request.Command[1])] = request.Command[2]
 				case "get_property":
-					response["data"] = currentPath
+					name := fmt.Sprint(request.Command[1])
+					if name == "path" {
+						response["data"] = currentPath
+					} else {
+						response["data"] = properties[name]
+					}
 				case "stop":
 					currentPath = ""
 				}
@@ -140,7 +159,7 @@ func TestMPVAdapterUsesJSONIPC(t *testing.T) {
 	}()
 
 	adapter := &MPV{SocketPath: socket, Timeout: time.Second}
-	candidate := Candidate{ReleaseDigest: strings.Repeat("a", 64), Source: "http://127.0.0.1/media/token/artifact"}
+	candidate := Candidate{ReleaseDigest: strings.Repeat("a", 64), Source: "http://127.0.0.1/media/token/artifact", Fit: "fill", Loop: true, Muted: true, Volume: 42, ImageDurationSecond: 8, Orientation: 90}
 	if err := adapter.Start(context.Background(), candidate); err != nil {
 		t.Fatal(err)
 	}
@@ -151,6 +170,11 @@ func TestMPVAdapterUsesJSONIPC(t *testing.T) {
 	if !status.Healthy || status.Path != candidate.Source {
 		t.Fatalf("unexpected health: %#v", status)
 	}
+	mu.Lock()
+	if fmt.Sprint(properties["panscan"]) != "1" || properties["loop-file"] != "inf" || properties["mute"] != true || fmt.Sprint(properties["volume"]) != "42" || fmt.Sprint(properties["image-display-duration"]) != "8" || fmt.Sprint(properties["video-rotate"]) != "90" {
+		t.Fatalf("signed playback properties not applied: %#v", properties)
+	}
+	mu.Unlock()
 	if err := adapter.Commit(context.Background(), candidate); err != nil {
 		t.Fatal(err)
 	}
