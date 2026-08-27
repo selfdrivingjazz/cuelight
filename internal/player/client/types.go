@@ -37,13 +37,14 @@ type CapabilityReport struct {
 }
 
 type Assignment struct {
-	ID                 string `json:"id"`
-	NodeID             string `json:"nodeId"`
-	ReleaseID          string `json:"releaseId"`
-	ReleaseDigest      string `json:"releaseDigest"`
-	DeliveryMode       string `json:"deliveryMode"`
-	ExpectedGeneration int64  `json:"expectedGeneration"`
-	DesiredGeneration  int64  `json:"desiredGeneration"`
+	ID                 string                   `json:"id"`
+	NodeID             string                   `json:"nodeId"`
+	ReleaseID          string                   `json:"releaseId"`
+	ReleaseDigest      string                   `json:"releaseDigest"`
+	PresentationKind   release.PresentationKind `json:"presentationKind"`
+	DeliveryMode       string                   `json:"deliveryMode"`
+	ExpectedGeneration int64                    `json:"expectedGeneration"`
+	DesiredGeneration  int64                    `json:"desiredGeneration"`
 }
 
 type AssignmentResult struct {
@@ -60,17 +61,17 @@ type Condition struct {
 	Reason  string `json:"reason"`
 	Message string `json:"message,omitempty"`
 }
-
 type NodeReport struct {
-	EventEpoch                 string      `json:"eventEpoch"`
-	Sequence                   int64       `json:"sequence"`
-	DesiredGenerationSeen      int64       `json:"desiredGenerationSeen"`
-	ObservedGeneration         int64       `json:"observedGeneration"`
-	RenderingReleaseDigest     *string     `json:"renderingReleaseDigest"`
-	CandidateReleaseDigest     *string     `json:"candidateReleaseDigest"`
-	HealthyReleaseDigest       *string     `json:"healthyReleaseDigest"`
-	LastKnownGoodReleaseDigest *string     `json:"lastKnownGoodReleaseDigest"`
-	Conditions                 []Condition `json:"conditions"`
+	EventEpoch                 string                   `json:"eventEpoch"`
+	Sequence                   int64                    `json:"sequence"`
+	DesiredGenerationSeen      int64                    `json:"desiredGenerationSeen"`
+	ObservedGeneration         int64                    `json:"observedGeneration"`
+	PresentationKind           release.PresentationKind `json:"presentationKind"`
+	RenderingReleaseDigest     *string                  `json:"renderingReleaseDigest"`
+	CandidateReleaseDigest     *string                  `json:"candidateReleaseDigest"`
+	HealthyReleaseDigest       *string                  `json:"healthyReleaseDigest"`
+	LastKnownGoodReleaseDigest *string                  `json:"lastKnownGoodReleaseDigest"`
+	Conditions                 []Condition              `json:"conditions"`
 }
 
 type NodeEvent struct {

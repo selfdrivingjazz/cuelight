@@ -26,6 +26,9 @@ type playerConfig struct {
 	StatePath              string
 	CASPath                string
 	MPVSocketPath          string
+	ChromiumBinaryPath     string
+	ChromiumRuntimeRoot    string
+	ChromiumArgs           []string
 	LoopbackAddress        string
 	Features               []string
 	AcceptedMediaTypes     []string
@@ -36,6 +39,7 @@ type playerConfig struct {
 	PartialGrace           time.Duration
 	StreamTTL              time.Duration
 	MPVTimeout             time.Duration
+	ChromiumTimeout        time.Duration
 }
 
 type configError struct{ Field, Reason string }
@@ -49,10 +53,11 @@ func loadConfig(lookup func(string) (string, bool)) (playerConfig, error) {
 		PublisherKeyID: env(lookup, "CABLE_PLAYER_PUBLISHER_KEY_ID"), PublisherPublicKeyPath: env(lookup, "CABLE_PLAYER_PUBLISHER_PUBLIC_KEY_PATH"),
 		EventEpoch: env(lookup, "CABLE_PLAYER_EVENT_EPOCH"), ProfileID: env(lookup, "CABLE_PLAYER_PROFILE_ID"), RendererVersion: env(lookup, "CABLE_PLAYER_RENDERER_VERSION"),
 		StatePath: env(lookup, "CABLE_PLAYER_STATE_PATH"), CASPath: env(lookup, "CABLE_PLAYER_CAS_PATH"), MPVSocketPath: env(lookup, "CABLE_PLAYER_MPV_SOCKET"),
-		LoopbackAddress: envDefault(lookup, "CABLE_PLAYER_LOOPBACK_ADDR", "127.0.0.1:0"),
-		Features:        listEnv(lookup, "CABLE_PLAYER_FEATURES"), AcceptedMediaTypes: listEnv(lookup, "CABLE_PLAYER_ACCEPTED_MEDIA_TYPES"),
+		ChromiumBinaryPath: envDefault(lookup, "CABLE_PLAYER_CHROMIUM_BINARY", "chromium"), ChromiumRuntimeRoot: envDefault(lookup, "CABLE_PLAYER_CHROMIUM_RUNTIME_ROOT", "/var/lib/cable/chromium"),
+		ChromiumArgs: listEnv(lookup, "CABLE_PLAYER_CHROMIUM_ARGS"), LoopbackAddress: envDefault(lookup, "CABLE_PLAYER_LOOPBACK_ADDR", "127.0.0.1:0"),
+		Features: listEnv(lookup, "CABLE_PLAYER_FEATURES"), AcceptedMediaTypes: listEnv(lookup, "CABLE_PLAYER_ACCEPTED_MEDIA_TYPES"),
 		Probation: 30 * time.Second, PollWait: 30 * time.Second, ReconnectMinimum: time.Second, ReconnectMaximum: 30 * time.Second,
-		PartialGrace: time.Hour, StreamTTL: 10 * time.Minute, MPVTimeout: 5 * time.Second,
+		PartialGrace: time.Hour, StreamTTL: 10 * time.Minute, MPVTimeout: 5 * time.Second, ChromiumTimeout: 15 * time.Second,
 	}
 	var err error
 	for _, item := range []struct {
@@ -61,7 +66,8 @@ func loadConfig(lookup func(string) (string, bool)) (playerConfig, error) {
 	}{
 		{"CABLE_PLAYER_PROBATION", &config.Probation}, {"CABLE_PLAYER_POLL_WAIT", &config.PollWait},
 		{"CABLE_PLAYER_RECONNECT_MIN", &config.ReconnectMinimum}, {"CABLE_PLAYER_RECONNECT_MAX", &config.ReconnectMaximum},
-		{"CABLE_PLAYER_PARTIAL_GRACE", &config.PartialGrace}, {"CABLE_PLAYER_STREAM_TTL", &config.StreamTTL}, {"CABLE_PLAYER_MPV_TIMEOUT", &config.MPVTimeout},
+		{"CABLE_PLAYER_PARTIAL_GRACE", &config.PartialGrace}, {"CABLE_PLAYER_STREAM_TTL", &config.StreamTTL},
+		{"CABLE_PLAYER_MPV_TIMEOUT", &config.MPVTimeout}, {"CABLE_PLAYER_CHROMIUM_TIMEOUT", &config.ChromiumTimeout},
 	} {
 		if *item.target, err = durationEnv(lookup, item.name, *item.target); err != nil {
 			return playerConfig{}, err
@@ -101,7 +107,7 @@ func (c playerConfig) validate() error {
 	if len(c.AcceptedMediaTypes) == 0 {
 		return &configError{"CABLE_PLAYER_ACCEPTED_MEDIA_TYPES", "must contain at least one media type"}
 	}
-	if c.Probation <= 0 || c.PollWait < 0 || c.ReconnectMinimum <= 0 || c.ReconnectMaximum < c.ReconnectMinimum || c.PartialGrace < 0 || c.StreamTTL <= c.Probation || c.MPVTimeout <= 0 {
+	if c.Probation <= 0 || c.PollWait < 0 || c.ReconnectMinimum <= 0 || c.ReconnectMaximum < c.ReconnectMinimum || c.PartialGrace < 0 || c.StreamTTL <= c.Probation || c.MPVTimeout <= 0 || c.ChromiumTimeout <= 0 {
 		return &configError{"timing", "durations must be positive, reconnect max must be at least min, and stream TTL must exceed probation"}
 	}
 	if c.NodeCertificatePath == c.NodePrivateKeyPath {

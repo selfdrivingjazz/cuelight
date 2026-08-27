@@ -15,6 +15,17 @@ import (
 var _ controlrelease.Repository = (*Store)(nil)
 var _ controlrelease.ArtifactRepository = (*Store)(nil)
 
+func (s *Store) ReleaseArtifactByDigest(ctx context.Context, digest string) (controlrelease.Artifact, error) {
+	var artifact controlrelease.Artifact
+	err := s.q(ctx).QueryRowContext(ctx, `
+		SELECT digest, size_bytes, media_type, state
+		FROM artifacts WHERE digest = $1`, digest).Scan(&artifact.Digest, &artifact.Size, &artifact.MediaType, &artifact.State)
+	if err != nil {
+		return controlrelease.Artifact{}, wrap("read release artifact", err)
+	}
+	return artifact, nil
+}
+
 func (s *Store) ArtifactsForAsset(ctx context.Context, assetID string) ([]controlrelease.Artifact, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT r.digest, r.size_bytes, r.media_type, r.state

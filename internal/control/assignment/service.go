@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 
 	canonical "github.com/jmill/cable/internal/release"
 )
@@ -162,7 +161,7 @@ func (s Service) Put(ctx context.Context, nodeID string, mutation Mutation, inpu
 		if err := validateReleaseBinding(envelope, input.ReleaseID, input.ReleaseDigest); err != nil {
 			return err
 		}
-		if !slices.Contains(envelope.Payload.Playback.AllowedDeliveryMode, input.DeliveryMode) {
+		if !envelope.Payload.AllowsDeliveryMode(input.DeliveryMode) {
 			return fmt.Errorf("%w: %q", ErrDeliveryMode, input.DeliveryMode)
 		}
 

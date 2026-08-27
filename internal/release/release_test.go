@@ -1,9 +1,11 @@
 package release
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -138,5 +140,45 @@ func TestEnvelopeRoundTrip(t *testing.T) {
 	}
 	if decoded.Digest != envelope.Digest {
 		t.Fatal("round trip changed digest")
+	}
+}
+
+func TestCablePresentationIsTypedAndClosureIsExact(t *testing.T) {
+	shell := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	revision := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	media := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	payload := PayloadV1{
+		SchemaVersion:          SchemaVersion,
+		MinimumProtocolVersion: ProtocolV1,
+		Presentation: Presentation{
+			Kind: PresentationCable,
+			Cable: &CablePresentation{
+				ShellBuildDigest: shell, RevisionArtifactDigest: revision,
+				Entrypoint: "index.html", BridgeProtocol: ProtocolV1,
+				ArtifactClosure: []string{shell, revision, media},
+			},
+		},
+		Artifacts: []Artifact{
+			{Digest: shell, Size: 10, MediaType: "text/html"},
+			{Digest: revision, Size: 20, MediaType: "application/json"},
+			{Digest: media, Size: 30, MediaType: "video/mp4"},
+		},
+	}
+	digest, encoded, err := Digest(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains([]string{string(PresentationCable)}, string(payload.PresentationMode())) {
+		t.Fatalf("presentation kind = %q", payload.PresentationMode())
+	}
+	if !bytes.Contains(encoded, []byte(`"kind":"cable"`)) {
+		t.Fatalf("canonical payload omitted cable discriminator: %s", encoded)
+	}
+	if digest == "" {
+		t.Fatal("missing cable digest")
+	}
+	payload.Presentation.Cable.ArtifactClosure = payload.Presentation.Cable.ArtifactClosure[:2]
+	if _, _, err := Digest(payload); err == nil {
+		t.Fatal("incomplete cable closure accepted")
 	}
 }

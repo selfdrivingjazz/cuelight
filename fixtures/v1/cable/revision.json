@@ -2,6 +2,8 @@
   "schema": "cable.revision.v1",
   "deploymentId": "7d1e8df0-3a9c-4e95-8dd1-86c9d9f1b001",
   "deploymentVersion": 3,
+  "theme": "nebula",
+  "generatedAt": "2026-08-27T00:00:00Z",
   "shellBuildId": "7d1e8df0-3a9c-4e95-8dd1-86c9d9f1a001",
   "shellBuildDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "entrypoint": "index.html",
@@ -15,6 +17,7 @@
     {"id":"7d1e8df0-3a9c-4e95-8dd1-86c9d9f1b102","number":12,"name":"Culture","callsign":"CULT","description":"Arts and culture","accent":"#b34c91","enabled":true,"standby":false,"programs":[]}
   ],
   "artifactDigests": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
   ]

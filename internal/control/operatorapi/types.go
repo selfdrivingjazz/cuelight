@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
+	"github.com/jmill/cable/internal/control/cable"
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
@@ -28,6 +29,8 @@ const (
 	ScopeLocalMediaRead  = "local_media_read"
 	ScopeReleaseRead     = "release_read"
 	ScopeReleaseWrite    = "release_write"
+	ScopeCableRead       = "cable_read"
+	ScopeCableWrite      = "cable_write"
 )
 
 var (
@@ -73,10 +76,13 @@ type Assignment struct {
 }
 
 type Upload struct {
-	ID     string `json:"id"`
-	Length int64  `json:"length"`
-	Offset int64  `json:"offset"`
-	State  string `json:"state"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Length         int64  `json:"length"`
+	Offset         int64  `json:"offset"`
+	MediaType      string `json:"mediaType"`
+	State          string `json:"state"`
+	ArtifactDigest string `json:"artifactDigest,omitempty"`
 }
 
 type Artifact struct {
@@ -127,6 +133,9 @@ type ReleaseService interface {
 	Publish(context.Context, release.Mutation, release.PublishInput) (release.PublishResult, error)
 	GetRelease(context.Context, string) (canonical.EnvelopeV1, error)
 }
+type CableReleaseService interface {
+	Publish(context.Context, release.Mutation, release.CablePublishInput) (release.PublishResult, error)
+}
 
 type UploadPageService interface {
 	ListUploadsPage(context.Context, page.PageRequest) (page.Response[Upload], error)
@@ -166,7 +175,7 @@ func (a ScopeAuthorizer) Authorize(actor auth.Actor, action, resourceType, resou
 		return ErrInvalidRequest
 	}
 	switch resourceType {
-	case "node", "upload", "asset", "release", "token", "enrollment-token", "operator", "assignment", "assignments":
+	case "node", "upload", "asset", "release", "token", "enrollment-token", "operator", "assignment", "assignments", "cable", "deployment", "channel", "program", "shell_build", "revision":
 	default:
 		return fmt.Errorf("%w: unknown resource %q", ErrForbidden, resourceType)
 	}
@@ -251,11 +260,18 @@ type Dependencies struct {
 	Registration interface {
 		Register(context.Context, media.Mutation, string) (media.Asset, error)
 	}
-	Assets        AssetService
-	Releases      ReleaseService
-	MaxJSONBytes  int64
-	MaxChunkBytes int64
-	Idempotency   *IdempotencyCache
+	Assets          AssetService
+	Releases        ReleaseService
+	Uploads         UploadPageService
+	AssignmentPages AssignmentPageService
+	ReleasePages    ReleasePageService
+	Cable           *cable.Service
+	CableRepository cable.Repository
+	CableCompiler   *cable.Compiler
+	CableReleases   CableReleaseService
+	MaxJSONBytes    int64
+	MaxChunkBytes   int64
+	Idempotency     *IdempotencyCache
 }
 
 // IdempotencyCache is only used by adapters that need HTTP-level replay. Domain

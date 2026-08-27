@@ -184,6 +184,7 @@ func (s *Service) getArtifact(w http.ResponseWriter, r *http.Request) {
 	defer content.Body.Close()
 	w.Header().Set("ETag", content.ETag)
 	w.Header().Set("Accept-Ranges", content.AcceptRanges)
+	w.Header().Set("Content-Type", "application/octet-stream")
 	if content.Partial {
 		w.Header().Set("Content-Range", content.ContentRange)
 		w.Header().Set("Content-Length", strconv.FormatInt(content.Size, 10))
@@ -198,6 +199,7 @@ func (s *Service) getArtifact(w http.ResponseWriter, r *http.Request) {
 func artifactHeaders(w http.ResponseWriter, metadata client.ArtifactMetadata) {
 	w.Header().Set("ETag", metadata.ETag)
 	w.Header().Set("Accept-Ranges", metadata.AcceptRanges)
+	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(metadata.Size, 10))
 }
 

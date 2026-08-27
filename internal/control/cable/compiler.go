@@ -13,11 +13,12 @@ import (
 )
 
 type Compiler struct {
-	Repository Repository
-	Artifacts  ArtifactRepository
-	Builds     ShellBuildRepository
-	Authorizer Authorizer
-	Now        func() time.Time
+	Repository        Repository
+	Artifacts         ArtifactRepository
+	Builds            ShellBuildRepository
+	Authorizer        Authorizer
+	RevisionArtifacts RevisionArtifactStore
+	Now               func() time.Time
 }
 
 func (c Compiler) now() time.Time {
@@ -46,10 +47,19 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 	if err := c.authorize(ctx, actor, "cable.preview", "deployment", deploymentID); err != nil {
 		return CableRevision{}, err
 	}
-	if err := ValidateWindow(window); err != nil {
+	var err error
+	if window, err = NormalizeWindow(window); err != nil {
 		return CableRevision{}, err
 	}
 	d, err := c.Repository.Deployment(ctx, deploymentID)
+	if err != nil {
+		return CableRevision{}, err
+	}
+	d.Theme, err = NormalizeTheme(d.Theme)
+	if err != nil {
+		return CableRevision{}, err
+	}
+	d.Timezone, err = NormalizeTimezone(d.Timezone)
 	if err != nil {
 		return CableRevision{}, err
 	}
@@ -65,18 +75,38 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 	if err != nil {
 		return CableRevision{}, err
 	}
-	if b.Digest == "" || b.Entrypoint == "" || b.BridgeProtocol == "" {
+	b.Digest, err = normalizeDigest(b.Digest, "shellBuildDigest")
+	if err != nil {
+		return CableRevision{}, err
+	}
+	b.Entrypoint, err = NormalizeEntrypoint(b.Entrypoint)
+	if err != nil {
+		return CableRevision{}, err
+	}
+	if b.BridgeProtocol = strings.TrimSpace(b.BridgeProtocol); b.BridgeProtocol == "" {
 		return CableRevision{}, fmt.Errorf("%w: shell build %s is incomplete", ErrBuildUnavailable, shellBuildID)
 	}
-	if byDigest, ok := c.Artifacts.(ArtifactByDigestRepository); ok {
-		for _, digest := range b.ArtifactDigests {
-			a, e := byDigest.CableArtifactByDigest(ctx, digest)
-			if e != nil {
-				return CableRevision{}, fmt.Errorf("%w: shell artifact %s", ErrBuildUnavailable, digest)
-			}
-			if a.State != "ready" {
-				return CableRevision{}, fmt.Errorf("%w: shell artifact %s is %s", ErrBuildUnavailable, digest, a.State)
-			}
+	byDigest, ok := c.Artifacts.(ArtifactByDigestRepository)
+	if !ok {
+		return CableRevision{}, fmt.Errorf("%w: shell artifact lookup is unavailable", ErrBuildUnavailable)
+	}
+	shell, e := byDigest.CableArtifactByDigest(ctx, b.Digest)
+	if e != nil || shell.State != "ready" || !isShellBundleMedia(shell.MediaType) {
+		return CableRevision{}, fmt.Errorf("%w: shell bundle %s is unavailable or not a ready tar artifact", ErrBuildUnavailable, b.Digest)
+	}
+	shellDigest, e := normalizeDigest(shell.Digest, "shellBuildDigest")
+	if e != nil || shellDigest != b.Digest {
+		return CableRevision{}, fmt.Errorf("%w: shell bundle digest mismatch", ErrBuildUnavailable)
+	}
+	for i, digest := range b.ArtifactDigests {
+		digest, e = normalizeDigest(digest, "shell artifact digest")
+		if e != nil {
+			return CableRevision{}, fmt.Errorf("%w: %v", ErrBuildUnavailable, e)
+		}
+		b.ArtifactDigests[i] = digest
+		a, e := byDigest.CableArtifactByDigest(ctx, digest)
+		if e != nil || a.State != "ready" {
+			return CableRevision{}, fmt.Errorf("%w: shell artifact %s is unavailable", ErrBuildUnavailable, digest)
 		}
 	}
 	channels, err := c.allChannels(ctx, deploymentID)
@@ -92,8 +122,10 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 	if err := validateChannelOrder(channels); err != nil {
 		return CableRevision{}, err
 	}
-	result := CableRevision{DeploymentID: d.ID, DeploymentVersion: d.Version, ShellBuildID: b.ID, ShellBuildDigest: b.Digest, Entrypoint: b.Entrypoint, BridgeProtocol: b.BridgeProtocol, Timezone: d.Timezone, Window: window, CreatedBy: actor, CreatedAt: c.now()}
+	now := c.now()
+	result := CableRevision{DeploymentID: d.ID, DeploymentVersion: d.Version, ShellBuildID: b.ID, ShellBuildDigest: b.Digest, Entrypoint: b.Entrypoint, BridgeProtocol: b.BridgeProtocol, Timezone: d.Timezone, Theme: d.Theme, Window: window, CreatedBy: actor, CreatedAt: now, GeneratedAt: now}
 	closure := make(map[string]struct{})
+	closure[b.Digest] = struct{}{}
 	for _, digest := range b.ArtifactDigests {
 		if digest == "" {
 			return CableRevision{}, fmt.Errorf("%w: empty shell artifact", ErrBuildUnavailable)
@@ -124,6 +156,26 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 			closure[a.Digest] = struct{}{}
 		}
 		for _, p := range entries {
+			fit := p.Fit
+			if fit == "" {
+				fit = "fit"
+			}
+			placard := p.PlacardPolicy
+			if placard == "" {
+				placard = "default"
+			}
+			placard, e = NormalizePlacardPolicy(placard)
+			if e != nil {
+				return CableRevision{}, fmt.Errorf("program %s: %w", p.ID, e)
+			}
+			availability := p.AvailabilityPolicy
+			if availability == "" {
+				availability = "fail"
+			}
+			availability, e = NormalizeAvailabilityPolicy(availability)
+			if e != nil {
+				return CableRevision{}, fmt.Errorf("program %s: %w", p.ID, e)
+			}
 			if p.EndsAt.Before(window.StartsAt) || p.StartsAt.After(window.EndsAt) {
 				continue
 			}
@@ -132,7 +184,7 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 				return CableRevision{}, e
 			}
 			closure[a.Digest] = struct{}{}
-			rp := RevisionProgram{ID: p.ID, StartsAt: p.StartsAt.UTC(), EndsAt: p.EndsAt.UTC(), AssetID: p.AssetID, ArtifactDigest: a.Digest, MediaType: a.MediaType, Title: p.Title, Subtitle: p.Subtitle, Tag: p.Tag, Artist: p.Artist, Description: p.Description, Fit: p.Fit, PlacardPolicy: p.PlacardPolicy, AvailabilityPolicy: p.AvailabilityPolicy, Loop: p.Loop, Mute: p.Mute, Volume: p.Volume}
+			rp := RevisionProgram{ID: p.ID, StartsAt: p.StartsAt.UTC(), EndsAt: p.EndsAt.UTC(), AssetID: p.AssetID, ArtifactDigest: a.Digest, MediaType: a.MediaType, Title: p.Title, Subtitle: p.Subtitle, Tag: p.Tag, Artist: p.Artist, Description: p.Description, Fit: fit, PlacardPolicy: placard, AvailabilityPolicy: availability, Loop: p.Loop, Mute: p.Mute, Volume: p.Volume}
 			if p.ArtworkAssetID != "" {
 				art, e := c.artifact(ctx, p.ArtworkAssetID)
 				if e != nil {
@@ -150,7 +202,7 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 		result.ArtifactDigests = append(result.ArtifactDigests, digest)
 	}
 	sort.Strings(result.ArtifactDigests)
-	payload := revisionPayload{Schema: "cable.revision.v1", DeploymentID: result.DeploymentID, DeploymentVersion: result.DeploymentVersion, ShellBuildID: result.ShellBuildID, ShellBuildDigest: result.ShellBuildDigest, Entrypoint: result.Entrypoint, BridgeProtocol: result.BridgeProtocol, Timezone: result.Timezone, Window: result.Window, Channels: result.Channels, ArtifactDigests: result.ArtifactDigests}
+	payload := revisionPayload{Schema: "cable.revision.v1", DeploymentID: result.DeploymentID, DeploymentVersion: result.DeploymentVersion, Theme: result.Theme, GeneratedAt: result.GeneratedAt, ShellBuildID: result.ShellBuildID, ShellBuildDigest: result.ShellBuildDigest, Entrypoint: result.Entrypoint, BridgeProtocol: result.BridgeProtocol, Timezone: result.Timezone, Window: result.Window, Channels: result.Channels, ArtifactDigests: result.ArtifactDigests}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return CableRevision{}, fmt.Errorf("marshal cable revision: %w", err)
@@ -167,6 +219,8 @@ type revisionPayload struct {
 	Schema            string            `json:"schema"`
 	DeploymentID      string            `json:"deploymentId"`
 	DeploymentVersion int64             `json:"deploymentVersion"`
+	Theme             string            `json:"theme"`
+	GeneratedAt       time.Time         `json:"generatedAt"`
 	ShellBuildID      string            `json:"shellBuildId"`
 	ShellBuildDigest  string            `json:"shellBuildDigest"`
 	Entrypoint        string            `json:"entrypoint"`
@@ -213,6 +267,19 @@ func (c Compiler) allPrograms(ctx context.Context, id string) ([]ProgramEntry, e
 		cursor = p.Page.NextCursor
 	}
 }
+func normalizeDigest(digest, field string) (string, error) {
+	digest = strings.TrimSpace(digest)
+	if !validDigest(digest) {
+		return "", &ValidationError{field, "must be a lowercase SHA-256 digest"}
+	}
+	return digest, nil
+}
+
+func isShellBundleMedia(mediaType string) bool {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	return mediaType == "application/x-tar" || mediaType == "application/tar" || mediaType == "application/tar+gzip" || mediaType == "application/gzip"
+}
+
 func (c Compiler) artifact(ctx context.Context, assetID string) (Artifact, error) {
 	as, err := c.Artifacts.CableArtifactsForAsset(ctx, assetID)
 	if err != nil {
@@ -223,12 +290,18 @@ func (c Compiler) artifact(ctx context.Context, assetID string) (Artifact, error
 	}
 	sort.Slice(as, func(i, j int) bool { return as[i].Digest < as[j].Digest })
 	for _, a := range as {
-		if a.State == "ready" && a.Digest != "" {
-			if !supportedMedia(a.MediaType) {
-				return Artifact{}, fmt.Errorf("%w: unsupported media type %s", ErrArtifactUnavailable, a.MediaType)
-			}
-			return a, nil
+		if a.State != "ready" {
+			continue
 		}
+		a.Digest, err = normalizeDigest(a.Digest, "artifactDigest")
+		if err != nil {
+			return Artifact{}, fmt.Errorf("%w: %v", ErrArtifactUnavailable, err)
+		}
+		a.MediaType, err = NormalizeMediaType(a.MediaType)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("%w: %v", ErrArtifactUnavailable, err)
+		}
+		return a, nil
 	}
 	return Artifact{}, fmt.Errorf("%w: asset %s is quarantined or missing", ErrArtifactUnavailable, assetID)
 }
@@ -238,6 +311,9 @@ func supportedMedia(mt string) bool {
 func validateChannelOrder(ch []Channel) error {
 	seen := map[int]bool{}
 	for _, v := range ch {
+		if v.ID == "" {
+			return &ValidationError{"channel.id", "is required"}
+		}
 		if v.Number <= 0 {
 			return &ValidationError{"channel.number", "must be positive"}
 		}
@@ -277,6 +353,12 @@ func (c Compiler) Publish(ctx context.Context, m Mutation, deploymentID, shellBu
 	rev, err := c.compileUnprivileged(ctx, m.ActorID, deploymentID, shellBuildID, window)
 	if err != nil {
 		return CableRevision{}, err
+	}
+	if c.RevisionArtifacts == nil {
+		return CableRevision{}, errors.New("revision artifact store is required for publish")
+	}
+	if err := c.RevisionArtifacts.PutRevisionArtifact(ctx, rev.Digest, rev.JSON); err != nil {
+		return CableRevision{}, fmt.Errorf("store cable revision artifact: %w", err)
 	}
 	if err := c.Repository.CreateRevision(ctx, rev); err != nil {
 		return CableRevision{}, err

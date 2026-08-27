@@ -17,9 +17,9 @@ type fakeCableRepo struct {
 
 func TestCompilerDeterministicDigestAndClosure(t *testing.T) {
 	now := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
-	f := &fakeCableRepo{d: CableDeployment{ID: "d", Version: 2, Timezone: "UTC"}, ch: []Channel{{ID: "c", Number: 7, Name: "News", Enabled: true}}, b: ShellBuild{ID: "b", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Entrypoint: "index.html", BridgeProtocol: "1.0", ArtifactDigests: []string{"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}
+	f := &fakeCableRepo{d: CableDeployment{ID: "d", Version: 2, Timezone: "UTC", Theme: "nebula"}, ch: []Channel{{ID: "c", Number: 7, Name: "News", Enabled: true}}, b: ShellBuild{ID: "b", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Entrypoint: "index.html", BridgeProtocol: "1.0", ArtifactDigests: []string{"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}
 	f.p = map[string][]ProgramEntry{"c": {{ID: "p", ChannelID: "c", AssetID: "a", StartsAt: now, EndsAt: now.Add(time.Hour), Title: "Brief"}}}
-	a := fakeCableArtifacts{"a": {{AssetID: "a", Digest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", MediaType: "video/mp4", State: "ready"}}, "shell": {{Digest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MediaType: "text/html", State: "ready"}}}
+	a := fakeCableArtifacts{"a": {{AssetID: "a", Digest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", MediaType: "video/mp4", State: "ready"}}, "shell": {{Digest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MediaType: "text/html", State: "ready"}}, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {{Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MediaType: "application/x-tar", State: "ready"}}, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {{Digest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MediaType: "text/html", State: "ready"}}}
 	c := Compiler{Repository: f, Artifacts: a, Now: func() time.Time { return now }}
 	w := RevisionWindow{StartsAt: now, EndsAt: now.Add(2 * time.Hour)}
 	one, e := c.Compile(context.Background(), "actor", "d", "b", w)
@@ -33,7 +33,7 @@ func TestCompilerDeterministicDigestAndClosure(t *testing.T) {
 	if one.Digest != two.Digest || one.ID != one.Digest {
 		t.Fatalf("non-deterministic digest: %s %s", one.Digest, two.Digest)
 	}
-	if len(one.ArtifactDigests) != 3 {
+	if len(one.ArtifactDigests) != 4 {
 		t.Fatalf("closure=%v", one.ArtifactDigests)
 	}
 }
@@ -111,9 +111,9 @@ func (f fakeCableArtifacts) CableArtifactByDigest(_ context.Context, id string) 
 }
 func TestCompilerRejectsOverlapAndPublishRequiresVersion(t *testing.T) {
 	now := time.Unix(0, 0).UTC()
-	f := &fakeCableRepo{d: CableDeployment{ID: "d", Version: 1, Timezone: "UTC"}, ch: []Channel{{ID: "c", Number: 1}}, b: ShellBuild{ID: "b", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Entrypoint: "index", BridgeProtocol: "1"}}
+	f := &fakeCableRepo{d: CableDeployment{ID: "d", Version: 1, Timezone: "UTC", Theme: "nebula"}, ch: []Channel{{ID: "c", Number: 1}}, b: ShellBuild{ID: "b", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Entrypoint: "index", BridgeProtocol: "1", ArtifactDigests: []string{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
 	f.p = map[string][]ProgramEntry{"c": {{ID: "a", StartsAt: now, EndsAt: now.Add(2 * time.Hour)}, {ID: "b", StartsAt: now.Add(time.Hour), EndsAt: now.Add(3 * time.Hour)}}}
-	a := fakeCableArtifacts{"x": {{Digest: "x", MediaType: "video/mp4", State: "ready"}}}
+	a := fakeCableArtifacts{"x": {{Digest: "x", MediaType: "video/mp4", State: "ready"}}, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {{Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MediaType: "application/x-tar", State: "ready"}}}
 	c := Compiler{Repository: f, Artifacts: a}
 	_, e := c.Preview(context.Background(), "actor", "d", "b", RevisionWindow{StartsAt: now, EndsAt: now.Add(4 * time.Hour)})
 	if !errors.Is(e, ErrOverlap) {

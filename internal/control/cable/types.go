@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 )
 
@@ -30,6 +32,7 @@ type ValidationError struct {
 func (e *ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Reason)
 }
+func (e *ValidationError) Unwrap() error { return ErrInvalidArgument }
 
 func ETag(version int64) string { return fmt.Sprintf("\"v%d\"", version) }
 
@@ -173,17 +176,31 @@ type RevisionProgram struct {
 	Volume             float64   `json:"volume"`
 }
 type CableRevision struct {
-	ID, DeploymentID, ShellBuildID       string
-	DeploymentVersion                    int64
-	Digest, ShellBuildDigest             string
-	Entrypoint, BridgeProtocol, Timezone string
-	Window                               RevisionWindow
-	Channels                             []RevisionChannel
-	ArtifactDigests                      []string
-	JSON                                 []byte
-	Errors, Warnings                     []string
-	CreatedBy                            string
-	CreatedAt                            time.Time
+	ID                string            `json:"id"`
+	DeploymentID      string            `json:"deploymentId"`
+	ShellBuildID      string            `json:"shellBuildId"`
+	DeploymentVersion int64             `json:"deploymentVersion"`
+	Digest            string            `json:"digest"`
+	ShellBuildDigest  string            `json:"shellBuildDigest"`
+	Entrypoint        string            `json:"entrypoint"`
+	BridgeProtocol    string            `json:"bridgeProtocol"`
+	Timezone          string            `json:"timezone"`
+	Theme             string            `json:"theme"`
+	Window            RevisionWindow    `json:"window"`
+	Channels          []RevisionChannel `json:"channels"`
+	ArtifactDigests   []string          `json:"artifactDigests"`
+	JSON              []byte            `json:"json"`
+	Errors            []string          `json:"errors,omitempty"`
+	Warnings          []string          `json:"warnings,omitempty"`
+	CreatedBy         string            `json:"createdBy"`
+	CreatedAt         time.Time         `json:"createdAt"`
+	GeneratedAt       time.Time         `json:"generatedAt"`
+}
+
+// RevisionArtifactStore makes the immutable revision document available from
+// the content-addressed store before its database metadata is published.
+type RevisionArtifactStore interface {
+	PutRevisionArtifact(context.Context, string, []byte) error
 }
 
 type DeploymentInput struct {
@@ -256,6 +273,98 @@ type ShellBuildRepository interface {
 	ShellBuild(context.Context, string) (ShellBuild, error)
 }
 
+const (
+	ThemeNebula  = "nebula"
+	ThemeGallery = "gallery"
+	ThemeNoir    = "noir"
+)
+
+func NormalizeTheme(theme string) (string, error) {
+	theme = strings.ToLower(strings.TrimSpace(theme))
+	switch theme {
+	case ThemeNebula, ThemeGallery, ThemeNoir:
+		return theme, nil
+	default:
+		return "", &ValidationError{"theme", "must be one of nebula, gallery, or noir"}
+	}
+}
+
+func NormalizeTimezone(timezone string) (string, error) {
+	timezone = strings.TrimSpace(timezone)
+	if timezone == "" {
+		return "", &ValidationError{"timezone", "is required"}
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return "", &ValidationError{"timezone", "must be an IANA timezone"}
+	}
+	return loc.String(), nil
+}
+
+func NormalizeEntrypoint(entrypoint string) (string, error) {
+	entrypoint = strings.TrimSpace(strings.ReplaceAll(entrypoint, `\`, "/"))
+	if entrypoint == "" || strings.IndexByte(entrypoint, 0) >= 0 || strings.HasPrefix(entrypoint, "/") {
+		return "", &ValidationError{"entrypoint", "must be a safe relative path"}
+	}
+	clean := path.Clean(entrypoint)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", &ValidationError{"entrypoint", "must be a safe relative path"}
+	}
+	return clean, nil
+}
+
+func NormalizePlacardPolicy(policy string) (string, error) {
+	policy = strings.ToLower(strings.TrimSpace(policy))
+	switch policy {
+	case "default", "always", "start", "never":
+		return policy, nil
+	default:
+		return "", &ValidationError{"placardPolicy", "must be one of default, always, start, or never"}
+	}
+}
+
+func NormalizeAvailabilityPolicy(policy string) (string, error) {
+	policy = strings.ToLower(strings.TrimSpace(policy))
+	switch policy {
+	case "fail", "skip", "fallback", "hold":
+		return policy, nil
+	default:
+		return "", &ValidationError{"availabilityPolicy", "must be one of fail, skip, fallback, or hold"}
+	}
+}
+
+func NormalizeMediaType(mediaType string) (string, error) {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType == "" || strings.ContainsAny(mediaType, " \t\r\n") {
+		return "", &ValidationError{"mediaType", "is invalid"}
+	}
+	if !supportedMedia(mediaType) {
+		return "", &ValidationError{"mediaType", "must be video, image, or audio"}
+	}
+	return mediaType, nil
+}
+
+func validDigest(digest string) bool {
+	if len(digest) != 64 {
+		return false
+	}
+	for _, r := range digest {
+		if !(r >= '0' && r <= '9') && !(r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func NormalizeWindow(w RevisionWindow) (RevisionWindow, error) {
+	if err := ValidateWindow(w); err != nil {
+		return RevisionWindow{}, err
+	}
+	w.StartsAt = w.StartsAt.UTC()
+	w.EndsAt = w.EndsAt.UTC()
+	return w, nil
+}
+
 func ValidateWindow(w RevisionWindow) error {
 	if w.StartsAt.IsZero() || w.EndsAt.IsZero() || !w.EndsAt.After(w.StartsAt) {
 		return &ValidationError{"window", "endsAt must be after startsAt"}
@@ -274,6 +383,15 @@ func ValidateProgram(p ProgramInput) error {
 	}
 	if p.Volume < 0 || p.Volume > 1 {
 		return &ValidationError{"volume", "must be between 0 and 1"}
+	}
+	if p.Fit != "" && p.Fit != "fit" && p.Fit != "fill" {
+		return &ValidationError{"fit", "must be fit or fill"}
+	}
+	if _, err := NormalizePlacardPolicy(p.PlacardPolicy); err != nil {
+		return err
+	}
+	if _, err := NormalizeAvailabilityPolicy(p.AvailabilityPolicy); err != nil {
+		return err
 	}
 	return nil
 }

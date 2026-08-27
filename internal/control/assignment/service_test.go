@@ -263,12 +263,15 @@ func releaseFixture(t *testing.T, number int, deliveryModes ...string) canonical
 	payload := canonical.PayloadV1{
 		SchemaVersion:          canonical.SchemaVersion,
 		MinimumProtocolVersion: canonical.ProtocolV1,
-		Playback: canonical.PlaybackPayload{
-			AssetID:             fmt.Sprintf("asset-%d", number),
-			Fit:                 "fit",
-			Loop:                true,
-			Volume:              80,
-			AllowedDeliveryMode: deliveryModes,
+		Presentation: canonical.Presentation{
+			Kind: canonical.PresentationMedia,
+			Media: &canonical.MediaPresentation{Playback: canonical.PlaybackPayload{
+				AssetID:             fmt.Sprintf("asset-%d", number),
+				Fit:                 "fit",
+				Loop:                true,
+				Volume:              80,
+				AllowedDeliveryMode: deliveryModes,
+			}},
 		},
 		Artifacts: []canonical.Artifact{{
 			Digest:    fmt.Sprintf("%064x", number),

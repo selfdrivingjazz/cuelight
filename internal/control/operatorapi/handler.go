@@ -13,6 +13,7 @@ import (
 
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
+	"github.com/jmill/cable/internal/control/cable"
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
@@ -34,7 +35,18 @@ var OperationScopes = map[string]string{
 	"registerLocalAsset": ScopeLocalMediaRead, "listAssets": ScopeMediaRead,
 	"getAsset": ScopeMediaRead, "publishRelease": ScopeReleaseWrite,
 	"listReleases": ScopeReleaseRead, "getRelease": ScopeReleaseRead,
-	"listAssignments": ScopeAssignmentRead,
+	"listAssignments":      ScopeAssignmentRead,
+	"listCableDeployments": ScopeCableRead, "createCableDeployment": ScopeCableWrite,
+	"getCableDeployment": ScopeCableRead, "updateCableDeployment": ScopeCableWrite,
+	"deleteCableDeployment": ScopeCableWrite, "listCableChannels": ScopeCableRead,
+	"createCableChannel": ScopeCableWrite, "getCableChannel": ScopeCableRead,
+	"updateCableChannel": ScopeCableWrite, "deleteCableChannel": ScopeCableWrite,
+	"listCablePrograms": ScopeCableRead, "createCableProgram": ScopeCableWrite,
+	"getCableProgram": ScopeCableRead, "updateCableProgram": ScopeCableWrite,
+	"deleteCableProgram": ScopeCableWrite, "listCableShellBuilds": ScopeCableRead,
+	"registerCableShellBuild": ScopeCableWrite, "getCableShellBuild": ScopeCableRead,
+	"listCableRevisions": ScopeCableRead, "getCableRevision": ScopeCableRead,
+	"previewCableCompile": ScopeCableRead, "publishCableRevision": ScopeCableWrite,
 }
 
 type Handler struct{ deps Dependencies }
@@ -67,6 +79,30 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("GET /releases/{releaseId}", h.authorized(ScopeReleaseRead, h.getRelease))
 	mux.Handle("GET /assignments", h.authorized(ScopeAssignmentRead, h.listAssignments))
 	mux.Handle("GET /operator/me", h.authorized("", h.getOperatorMe))
+
+	mux.Handle("GET /cable/deployments", h.authorized(ScopeCableRead, h.listCableDeployments))
+	mux.Handle("POST /cable/deployments", h.authorized(ScopeCableWrite, h.createCableDeployment))
+	mux.Handle("GET /cable/deployments/{deploymentId}", h.authorized(ScopeCableRead, h.getCableDeployment))
+	mux.Handle("PATCH /cable/deployments/{deploymentId}", h.authorized(ScopeCableWrite, h.updateCableDeployment))
+	mux.Handle("DELETE /cable/deployments/{deploymentId}", h.authorized(ScopeCableWrite, h.deleteCableDeployment))
+	mux.Handle("GET /cable/deployments/{deploymentId}/channels", h.authorized(ScopeCableRead, h.listCableChannels))
+	mux.Handle("POST /cable/deployments/{deploymentId}/channels", h.authorized(ScopeCableWrite, h.createCableChannel))
+	mux.Handle("GET /cable/channels/{channelId}", h.authorized(ScopeCableRead, h.getCableChannel))
+	mux.Handle("PATCH /cable/channels/{channelId}", h.authorized(ScopeCableWrite, h.updateCableChannel))
+	mux.Handle("DELETE /cable/channels/{channelId}", h.authorized(ScopeCableWrite, h.deleteCableChannel))
+	mux.Handle("GET /cable/channels/{channelId}/programs", h.authorized(ScopeCableRead, h.listCablePrograms))
+	mux.Handle("POST /cable/channels/{channelId}/programs", h.authorized(ScopeCableWrite, h.createCableProgram))
+	mux.Handle("GET /cable/programs/{programId}", h.authorized(ScopeCableRead, h.getCableProgram))
+	mux.Handle("PATCH /cable/programs/{programId}", h.authorized(ScopeCableWrite, h.updateCableProgram))
+	mux.Handle("DELETE /cable/programs/{programId}", h.authorized(ScopeCableWrite, h.deleteCableProgram))
+	mux.Handle("GET /cable/shell-builds", h.authorized(ScopeCableRead, h.listCableShellBuilds))
+	mux.Handle("POST /cable/shell-builds", h.authorized(ScopeCableWrite, h.registerCableShellBuild))
+	mux.Handle("GET /cable/shell-builds/{shellBuildId}", h.authorized(ScopeCableRead, h.getCableShellBuild))
+	mux.Handle("GET /cable/deployments/{deploymentId}/revisions", h.authorized(ScopeCableRead, h.listCableRevisions))
+	mux.Handle("GET /cable/revisions/{revisionId}", h.authorized(ScopeCableRead, h.getCableRevision))
+	mux.Handle("POST /cable/deployments/{deploymentId}/compile-preview", h.authorized(ScopeCableRead, h.previewCableCompile))
+	mux.Handle("POST /cable/deployments/{deploymentId}/publish", h.authorized(ScopeCableWrite, h.publishCableRevision))
+	mux.Handle("POST /cable/revisions/{revisionId}/release", h.authorized(ScopeCableWrite, h.publishCableRelease))
 	return mux
 }
 
@@ -102,7 +138,8 @@ func (h *Handler) authorized(scope string, fn http.HandlerFunc) http.Handler {
 				ScopeAssignmentRead: ScopeAssignmentRead, ScopeAssignmentWrite: ScopeAssignmentWrite,
 				ScopeMediaRead: ScopeMediaRead, ScopeMediaWrite: ScopeMediaWrite,
 				ScopeLocalMediaRead: ScopeLocalMediaRead, ScopeReleaseRead: ScopeReleaseRead,
-				ScopeReleaseWrite: ScopeReleaseWrite, "operator_read": "",
+				ScopeReleaseWrite: ScopeReleaseWrite, ScopeCableRead: ScopeCableRead,
+				ScopeCableWrite: ScopeCableWrite, "operator_read": "",
 			}}
 		}
 		if err := authorizer.Authorize(actor, action, resourceType(r), resourceID(r)); err != nil {
@@ -122,6 +159,18 @@ func resourceType(r *http.Request) string {
 		return "asset"
 	case r.PathValue("releaseId") != "" || strings.HasPrefix(r.URL.Path, "/releases"):
 		return "release"
+	case r.PathValue("deploymentId") != "":
+		return "deployment"
+	case r.PathValue("channelId") != "":
+		return "channel"
+	case r.PathValue("programId") != "":
+		return "program"
+	case r.PathValue("shellBuildId") != "":
+		return "shell_build"
+	case r.PathValue("revisionId") != "":
+		return "revision"
+	case strings.HasPrefix(r.URL.Path, "/cable"):
+		return "cable"
 	case strings.HasPrefix(r.URL.Path, "/assignments"):
 		return "assignment"
 	case strings.HasPrefix(r.URL.Path, "/admin-tokens"):
@@ -134,9 +183,8 @@ func resourceType(r *http.Request) string {
 		return strings.Trim(strings.Split(r.URL.Path, "/")[1], "/")
 	}
 }
-
 func resourceID(r *http.Request) string {
-	for _, key := range []string{"nodeId", "uploadId", "assetId", "releaseId", "tokenId"} {
+	for _, key := range []string{"nodeId", "uploadId", "assetId", "releaseId", "deploymentId", "channelId", "programId", "shellBuildId", "revisionId", "tokenId"} {
 		if value := r.PathValue(key); value != "" {
 			return value
 		}
@@ -446,8 +494,8 @@ func (h *Handler) listNodeEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listUploads(w http.ResponseWriter, r *http.Request) {
-	service, ok := h.deps.Media.(UploadPageService)
-	if !ok {
+	service := h.deps.Uploads
+	if service == nil {
 		writeError(w, errors.New("upload list service is not configured"))
 		return
 	}
@@ -465,8 +513,8 @@ func (h *Handler) listUploads(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listReleases(w http.ResponseWriter, r *http.Request) {
-	service, ok := h.deps.Releases.(ReleasePageService)
-	if !ok {
+	service := h.deps.ReleasePages
+	if service == nil {
 		writeError(w, errors.New("release list service is not configured"))
 		return
 	}
@@ -484,8 +532,8 @@ func (h *Handler) listReleases(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
-	service, ok := h.deps.Assignments.(AssignmentPageService)
-	if !ok {
+	service := h.deps.AssignmentPages
+	if service == nil {
 		writeError(w, errors.New("assignment list service is not configured"))
 		return
 	}
@@ -795,23 +843,31 @@ func writeError(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(Problem{Type: "about:blank", Title: title, Status: status, Detail: err.Error()})
 }
 func statusFor(err error) int {
+	var validation *cable.ValidationError
+	if errors.As(err, &validation) {
+		return http.StatusBadRequest
+	}
 	switch {
 	case errors.Is(err, ErrUnauthorized), errors.Is(err, auth.ErrInvalidCredential), errors.Is(err, auth.ErrTokenRevoked):
 		return http.StatusUnauthorized
-	case errors.Is(err, ErrForbidden), errors.Is(err, auth.ErrInsufficientScope):
+	case errors.Is(err, ErrForbidden), errors.Is(err, auth.ErrInsufficientScope), errors.Is(err, cable.ErrForbidden):
 		return http.StatusForbidden
 	case errors.Is(err, ErrBodyTooLarge), errors.Is(err, ErrChunkTooLarge), errors.Is(err, media.ErrChunkTooLarge):
 		return http.StatusRequestEntityTooLarge
-	case errors.Is(err, ErrPrecondition), errors.Is(err, assignment.ErrGenerationConflict):
+	case errors.Is(err, ErrPrecondition), errors.Is(err, assignment.ErrGenerationConflict), errors.Is(err, cable.ErrConflict):
 		return http.StatusPreconditionFailed
-	case errors.Is(err, media.ErrOffsetMismatch), errors.Is(err, ErrOffsetMismatch):
+	case errors.Is(err, media.ErrOffsetMismatch), errors.Is(err, ErrOffsetMismatch),
+		errors.Is(err, cable.ErrImmutable), errors.Is(err, cable.ErrArtifactUnavailable), errors.Is(err, cable.ErrBuildUnavailable),
+		errors.Is(err, release.ErrArtifactMissing), errors.Is(err, release.ErrArtifactQuarantined),
+		errors.Is(err, release.ErrArtifactIncompatible), errors.Is(err, release.ErrCableRevisionInvalid):
 		return http.StatusConflict
-	case errors.Is(err, auth.ErrNotFound), errors.Is(err, pki.ErrNodeNotFound), errors.Is(err, pki.ErrTokenNotFound), errors.Is(err, media.ErrNotFound):
+	case errors.Is(err, auth.ErrNotFound), errors.Is(err, pki.ErrNodeNotFound), errors.Is(err, pki.ErrTokenNotFound), errors.Is(err, media.ErrNotFound), errors.Is(err, cable.ErrNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrCursorInvalid), errors.Is(err, ErrWaitInvalid),
 		errors.Is(err, page.ErrCursorInvalid), errors.Is(err, page.ErrCursorTampered), errors.Is(err, page.ErrLimitInvalid),
 		errors.Is(err, page.ErrSortInvalid), errors.Is(err, page.ErrOrderInvalid),
-		errors.Is(err, media.ErrInvalidArgument), errors.Is(err, assignment.ErrInvalidAssignment), errors.Is(err, release.ErrInvalidMutation):
+		errors.Is(err, media.ErrInvalidArgument), errors.Is(err, assignment.ErrInvalidAssignment), errors.Is(err, release.ErrInvalidMutation),
+		errors.Is(err, cable.ErrInvalidArgument), errors.Is(err, cable.ErrOverlap):
 		return http.StatusBadRequest
 	case errors.Is(err, assignment.ErrIdempotencyConflict), errors.Is(err, release.ErrIdempotencyConflict), errors.Is(err, pki.ErrIdempotencyConflict):
 		return http.StatusConflict
@@ -829,8 +885,8 @@ func assignmentJSON(v assignment.Assignment) Assignment {
 	return Assignment{ID: v.ID, NodeID: v.NodeID, ReleaseID: v.ReleaseID, ReleaseDigest: v.ReleaseDigest, DeliveryMode: v.DeliveryMode, ExpectedGeneration: v.ExpectedGeneration, DesiredGeneration: v.DesiredGeneration}
 }
 func uploadJSON(v media.Upload) Upload {
-	return Upload{ID: v.ID, Length: v.DeclaredLength, Offset: v.ReceivedLength, State: string(v.State)}
+	return Upload{ID: v.ID, Name: v.Name, Length: v.DeclaredLength, Offset: v.ReceivedLength, MediaType: v.MediaType, State: string(v.State), ArtifactDigest: v.ArtifactDigest}
 }
 func assetJSON(v media.Asset) Asset {
-	return Asset{ID: v.ID, Name: v.Name, Artifact: Artifact{Digest: v.Artifact.Digest, Size: v.Artifact.Size, MediaType: v.Artifact.MediaType}}
+	return Asset{ID: v.ID, Name: v.Name, Artifact: Artifact{Digest: v.Artifact.Digest, Size: v.Artifact.Size, MediaType: v.Artifact.MediaType, State: string(v.Artifact.State)}}
 }

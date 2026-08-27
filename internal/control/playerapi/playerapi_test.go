@@ -122,6 +122,31 @@ func TestAssignmentConditional304AndLongPollCancellation(t *testing.T) {
 	}
 }
 
+func TestAssignmentCarriesReleasePresentationKind(t *testing.T) {
+	repo := &fakeRepository{assignment: validAssignment(), hasAssignment: true}
+	service, err := NewService(repo, fakeLoader{envelope: canonical.EnvelopeV1{
+		ID:     "release-a",
+		Digest: testDigest,
+		Payload: canonical.PayloadV1{
+			SchemaVersion: canonical.SchemaVersion,
+			Presentation: canonical.Presentation{
+				Kind:  canonical.PresentationCable,
+				Cable: &canonical.CablePresentation{},
+			},
+		},
+	}}, fakeCAS{body: "abcdef"}, Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.GetAssignment(context.Background(), "node-a", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Assignment.PresentationKind != canonical.PresentationCable {
+		t.Fatalf("presentation kind = %q", result.Assignment.PresentationKind)
+	}
+}
+
 func TestPlayerReleaseAndArtifactCrossNodeAuthorization(t *testing.T) {
 	repo := &fakeRepository{assignment: validAssignment(), hasAssignment: true, authorized: map[string]bool{"node-a:" + testDigest: true}}
 	service := testService(repo)

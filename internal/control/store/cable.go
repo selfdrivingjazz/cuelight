@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/jmill/cable/internal/control/cable"
+	"strings"
 	"time"
 )
 
@@ -20,6 +22,46 @@ func ct(m cable.Mutation) time.Time {
 	}
 	return m.Now.UTC()
 }
+func normalizeDeploymentInput(in cable.DeploymentInput) (cable.DeploymentInput, error) {
+	var err error
+	in.Theme, err = cable.NormalizeTheme(in.Theme)
+	if err != nil {
+		return cable.DeploymentInput{}, err
+	}
+	in.Timezone, err = cable.NormalizeTimezone(in.Timezone)
+	if err != nil {
+		return cable.DeploymentInput{}, err
+	}
+	return in, nil
+}
+
+func normalizeProgramInput(in cable.ProgramInput) (cable.ProgramInput, error) {
+	var err error
+	if in.PlacardPolicy == "" {
+		in.PlacardPolicy = "default"
+	}
+	in.PlacardPolicy, err = cable.NormalizePlacardPolicy(in.PlacardPolicy)
+	if err != nil {
+		return cable.ProgramInput{}, err
+	}
+	if in.AvailabilityPolicy == "" {
+		in.AvailabilityPolicy = "fail"
+	}
+	in.AvailabilityPolicy, err = cable.NormalizeAvailabilityPolicy(in.AvailabilityPolicy)
+	if err != nil {
+		return cable.ProgramInput{}, err
+	}
+	return in, nil
+}
+
+func validCableDigest(digest string) bool {
+	if len(digest) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil && digest == strings.ToLower(digest)
+}
+
 func cl(n int) int {
 	if n <= 0 {
 		return 25
@@ -46,14 +88,12 @@ func ce(op string, e error) error {
 }
 func pgConflict(e error) bool { return postgresCode(e) == "23505" }
 func (s *Store) CreateDeployment(ctx context.Context, m cable.Mutation, in cable.DeploymentInput) (cable.CableDeployment, error) {
-	if m.ActorID == "" || in.Name == "" || in.Timezone == "" {
+	if m.ActorID == "" || in.Name == "" {
 		return cable.CableDeployment{}, cable.ErrInvalidArgument
 	}
-	if _, e := time.LoadLocation(in.Timezone); e != nil {
-		return cable.CableDeployment{}, cable.ErrInvalidArgument
-	}
-	if in.Theme != "nebula" && in.Theme != "gallery" && in.Theme != "noir" {
-		return cable.CableDeployment{}, cable.ErrInvalidArgument
+	var err error
+	if in, err = normalizeDeploymentInput(in); err != nil {
+		return cable.CableDeployment{}, fmt.Errorf("%w: %v", cable.ErrInvalidArgument, err)
 	}
 	id, e := s.newUUID()
 	if e != nil {
@@ -82,11 +122,12 @@ func (s *Store) UpdateDeployment(ctx context.Context, m cable.Mutation, id strin
 	if m.ExpectedVersion <= 0 {
 		return cable.CableDeployment{}, cable.ErrConflict
 	}
-	if in.Name == "" || in.Timezone == "" {
+	if in.Name == "" {
 		return cable.CableDeployment{}, cable.ErrInvalidArgument
 	}
-	if _, e := time.LoadLocation(in.Timezone); e != nil {
-		return cable.CableDeployment{}, cable.ErrInvalidArgument
+	var err error
+	if in, err = normalizeDeploymentInput(in); err != nil {
+		return cable.CableDeployment{}, fmt.Errorf("%w: %v", cable.ErrInvalidArgument, err)
 	}
 	p, _ := cj(in.PlacardDefaults)
 	f, _ := cj(in.FallbackMetadata)
@@ -192,7 +233,7 @@ func (s *Store) ListChannels(ctx context.Context, did, cursor string, limit int)
 	q := `SELECT id,deployment_id,number,name,callsign,description,accent,COALESCE(artwork_asset_id::text,''),enabled,standby,version,created_at,updated_at FROM cable_channels WHERE deployment_id=$1`
 	args := []any{did}
 	if cursor != "" {
-		q += ` AND id>$2`
+		q += ` AND (number,id) > (SELECT number,id FROM cable_channels WHERE id=$2)`
 		args = append(args, cursor)
 	}
 	q += fmt.Sprintf(` ORDER BY number,id LIMIT $%d`, len(args)+1)
@@ -230,7 +271,14 @@ func (s *Store) DeleteChannel(ctx context.Context, m cable.Mutation, id string) 
 }
 
 func (s *Store) CreateProgramEntry(ctx context.Context, m cable.Mutation, in cable.ProgramInput) (cable.ProgramEntry, error) {
-	if m.ActorID == "" || cable.ValidateProgram(in) != nil {
+	if m.ActorID == "" {
+		return cable.ProgramEntry{}, cable.ErrInvalidArgument
+	}
+	var err error
+	if in, err = normalizeProgramInput(in); err != nil || cable.ValidateProgram(in) != nil {
+		if err != nil {
+			return cable.ProgramEntry{}, fmt.Errorf("%w: %v", cable.ErrInvalidArgument, err)
+		}
 		return cable.ProgramEntry{}, cable.ErrInvalidArgument
 	}
 	var overlap bool
@@ -259,7 +307,14 @@ func (s *Store) ProgramEntry(ctx context.Context, id string) (cable.ProgramEntry
 	return p, nil
 }
 func (s *Store) UpdateProgramEntry(ctx context.Context, m cable.Mutation, id string, in cable.ProgramInput) (cable.ProgramEntry, error) {
-	if m.ExpectedVersion <= 0 || cable.ValidateProgram(in) != nil {
+	if m.ExpectedVersion <= 0 {
+		return cable.ProgramEntry{}, cable.ErrInvalidArgument
+	}
+	var err error
+	if in, err = normalizeProgramInput(in); err != nil || cable.ValidateProgram(in) != nil {
+		if err != nil {
+			return cable.ProgramEntry{}, fmt.Errorf("%w: %v", cable.ErrInvalidArgument, err)
+		}
 		return cable.ProgramEntry{}, cable.ErrInvalidArgument
 	}
 	var overlap bool
@@ -284,7 +339,7 @@ func (s *Store) ListProgramEntries(ctx context.Context, cid, cursor string, limi
 	q := `SELECT id,channel_id,asset_id,starts_at,ends_at,title,subtitle,tag,artist,description,COALESCE(artwork_asset_id::text,''),fit,loop,mute,volume,placard_policy,availability_policy,version,created_at,updated_at FROM cable_program_entries WHERE channel_id=$1`
 	args := []any{cid}
 	if cursor != "" {
-		q += ` AND id>$2`
+		q += ` AND (starts_at,id) > (SELECT starts_at,id FROM cable_program_entries WHERE id=$2)`
 		args = append(args, cursor)
 	}
 	q += fmt.Sprintf(` ORDER BY starts_at,id LIMIT $%d`, len(args)+1)
@@ -322,7 +377,31 @@ func (s *Store) DeleteProgramEntry(ctx context.Context, m cable.Mutation, id str
 }
 
 func (s *Store) RegisterShellBuild(ctx context.Context, m cable.Mutation, in cable.ShellBuildInput) (cable.ShellBuild, error) {
-	if m.ActorID == "" || len(in.Digest) != 64 || in.Entrypoint == "" || in.BridgeProtocol == "" {
+	if m.ActorID == "" || !validCableDigest(strings.TrimSpace(in.Digest)) {
+		return cable.ShellBuild{}, cable.ErrInvalidArgument
+	}
+	var err error
+	in.Digest = strings.TrimSpace(in.Digest)
+	if in.Entrypoint, err = cable.NormalizeEntrypoint(in.Entrypoint); err != nil {
+		return cable.ShellBuild{}, fmt.Errorf("%w: %v", cable.ErrInvalidArgument, err)
+	}
+	in.BridgeProtocol = strings.TrimSpace(in.BridgeProtocol)
+	if in.BridgeProtocol == "" {
+		return cable.ShellBuild{}, cable.ErrInvalidArgument
+	}
+	seen := map[string]bool{}
+	for i, digest := range in.ArtifactDigests {
+		digest = strings.TrimSpace(digest)
+		if !validCableDigest(digest) {
+			return cable.ShellBuild{}, cable.ErrInvalidArgument
+		}
+		if seen[digest] {
+			return cable.ShellBuild{}, cable.ErrInvalidArgument
+		}
+		seen[digest] = true
+		in.ArtifactDigests[i] = digest
+	}
+	if !seen[in.Digest] {
 		return cable.ShellBuild{}, cable.ErrInvalidArgument
 	}
 	meta, _ := cj(in.VersionMetadata)
@@ -401,17 +480,35 @@ func (s *Store) ListShellBuilds(ctx context.Context, cursor string, limit int) (
 	return out, rows.Err()
 }
 func (s *Store) CreateRevision(ctx context.Context, r cable.CableRevision) error {
-	if r.Digest == "" || len(r.JSON) == 0 {
+	if !validCableDigest(r.Digest) || len(r.JSON) == 0 || !validCableDigest(r.ShellBuildDigest) || r.Theme == "" || r.Timezone == "" || r.GeneratedAt.IsZero() {
+		return cable.ErrInvalidArgument
+	}
+	if _, err := cable.NormalizeTheme(r.Theme); err != nil {
+		return cable.ErrInvalidArgument
+	}
+	if _, err := cable.NormalizeTimezone(r.Timezone); err != nil {
+		return cable.ErrInvalidArgument
+	}
+	if _, err := cable.NormalizeEntrypoint(r.Entrypoint); err != nil {
+		return cable.ErrInvalidArgument
+	}
+	if _, err := cable.NormalizeWindow(r.Window); err != nil {
+		return cable.ErrInvalidArgument
+	}
+	foundShell := false
+	for _, digest := range r.ArtifactDigests {
+		if digest == r.ShellBuildDigest {
+			foundShell = true
+			break
+		}
+	}
+	if !foundShell {
 		return cable.ErrInvalidArgument
 	}
 	if r.ID == "" {
-		var e error
-		r.ID, e = s.newUUID()
-		if e != nil {
-			return e
-		}
+		r.ID = r.Digest
 	}
-	_, e := s.q(ctx).ExecContext(ctx, `INSERT INTO cable_revisions(id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, r.ID, r.DeploymentID, r.DeploymentVersion, r.ShellBuildID, r.Digest, r.ShellBuildDigest, r.Entrypoint, r.BridgeProtocol, r.Timezone, r.Window.StartsAt.UTC(), r.Window.EndsAt.UTC(), r.JSON, r.ArtifactDigests, r.Errors, r.Warnings, r.CreatedBy, r.CreatedAt.UTC())
+	_, e := s.q(ctx).ExecContext(ctx, `INSERT INTO cable_revisions(id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,theme,generated_at,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, r.ID, r.DeploymentID, r.DeploymentVersion, r.ShellBuildID, r.Digest, r.ShellBuildDigest, r.Entrypoint, r.BridgeProtocol, r.Timezone, r.Theme, r.GeneratedAt.UTC(), r.Window.StartsAt.UTC(), r.Window.EndsAt.UTC(), r.JSON, r.ArtifactDigests, r.Errors, r.Warnings, r.CreatedBy, r.CreatedAt.UTC())
 	if e != nil {
 		if pgConflict(e) {
 			return cable.ErrConflict
@@ -423,7 +520,7 @@ func (s *Store) CreateRevision(ctx context.Context, r cable.CableRevision) error
 func (s *Store) Revision(ctx context.Context, id string) (cable.CableRevision, error) {
 	var r cable.CableRevision
 	var doc []byte
-	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at FROM cable_revisions WHERE id=$1`, id).Scan(&r.ID, &r.DeploymentID, &r.DeploymentVersion, &r.ShellBuildID, &r.Digest, &r.ShellBuildDigest, &r.Entrypoint, &r.BridgeProtocol, &r.Timezone, &r.Window.StartsAt, &r.Window.EndsAt, &doc, &r.ArtifactDigests, &r.Errors, &r.Warnings, &r.CreatedBy, &r.CreatedAt)
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,theme,generated_at,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at FROM cable_revisions WHERE id=$1`, id).Scan(&r.ID, &r.DeploymentID, &r.DeploymentVersion, &r.ShellBuildID, &r.Digest, &r.ShellBuildDigest, &r.Entrypoint, &r.BridgeProtocol, &r.Timezone, &r.Theme, &r.GeneratedAt, &r.Window.StartsAt, &r.Window.EndsAt, &doc, &r.ArtifactDigests, &r.Errors, &r.Warnings, &r.CreatedBy, &r.CreatedAt)
 	if e != nil {
 		return r, ce("get cable revision", e)
 	}
@@ -487,4 +584,18 @@ func (s *Store) CableArtifactByDigest(ctx context.Context, digest string) (cable
 		return a, ce("get cable artifact", e)
 	}
 	return a, nil
+}
+
+// RegisterCableRevisionArtifact records the already-written immutable revision
+// document in the artifact catalog. The CAS write itself is deliberately owned
+// by the composition adapter.
+func (s *Store) RegisterCableRevisionArtifact(ctx context.Context, digest string, size int64) error {
+	if !validCableDigest(digest) || size <= 0 {
+		return cable.ErrInvalidArgument
+	}
+	_, err := s.q(ctx).ExecContext(ctx, `INSERT INTO artifacts(digest,size_bytes,media_type,state) VALUES($1,$2,'application/vnd.cable.revision+json','ready') ON CONFLICT(digest) DO UPDATE SET size_bytes=EXCLUDED.size_bytes,media_type=EXCLUDED.media_type,state='ready'`, digest, size)
+	if err != nil {
+		return ce("register cable revision artifact", err)
+	}
+	return nil
 }

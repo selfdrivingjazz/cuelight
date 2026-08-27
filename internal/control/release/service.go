@@ -188,9 +188,12 @@ func (s Service) prepare(ctx context.Context, input PublishInput) (PreparedPubli
 	payload := canonical.PayloadV1{
 		SchemaVersion:          canonical.SchemaVersion,
 		MinimumProtocolVersion: profile.MinimumProtocolVersion,
-		Playback:               input.Playback,
-		Artifacts:              canonicalArtifacts,
-		RequiredFeatures:       slices.Clone(profile.RequiredFeatures),
+		Presentation: canonical.Presentation{
+			Kind:  canonical.PresentationMedia,
+			Media: &canonical.MediaPresentation{Playback: input.Playback},
+		},
+		Artifacts:        canonicalArtifacts,
+		RequiredFeatures: slices.Clone(profile.RequiredFeatures),
 	}
 	digest, _, err := canonical.Digest(payload)
 	if err != nil {

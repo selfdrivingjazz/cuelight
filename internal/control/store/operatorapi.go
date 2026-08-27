@@ -65,11 +65,14 @@ func (a *OperatorAdapter) ListNodesPage(ctx context.Context, request page.PageRe
 	}
 	codec := page.DefaultCodec()
 	var pos page.Position
+	var previous *string
 	if request.Cursor != "" {
 		pos, err = codec.Decode(request.Cursor)
 		if err != nil || pos.Resource != "nodes" || pos.Sort != sortKey || pos.Order != request.Order {
 			return page.Response[operatorapi.Node]{}, page.ErrCursorInvalid
 		}
+		previousValue := pos.Previous
+		previous = &previousValue
 	}
 	clauses := []string{"1=1"}
 	args := make([]any, 0, 5)
@@ -118,6 +121,7 @@ func (a *OperatorAdapter) ListNodesPage(ctx context.Context, request page.PageRe
 	}
 	defer rows.Close()
 	items := make([]operatorapi.Node, 0, request.Limit)
+	hasMore := false
 	var lastValue, lastID string
 	for rows.Next() {
 		var item operatorapi.Node
@@ -133,21 +137,23 @@ func (a *OperatorAdapter) ListNodesPage(ctx context.Context, request page.PageRe
 			} else {
 				lastValue = created.UTC().Format(time.RFC3339Nano)
 			}
+		} else {
+			hasMore = true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return page.Response[operatorapi.Node]{}, wrap("iterate nodes page", err)
 	}
-	hasMore := len(items) == request.Limit && lastID != ""
+	hasMore = hasMore && lastID != ""
 	var next *string
 	if hasMore {
-		value, encodeErr := codec.Encode(page.Position{Resource: "nodes", Sort: sortKey, Order: request.Order, Value: lastValue, ID: lastID})
+		value, encodeErr := codec.Encode(page.Position{Resource: "nodes", Sort: sortKey, Order: request.Order, Value: lastValue, ID: lastID, Previous: request.Cursor})
 		if encodeErr != nil {
 			return page.Response[operatorapi.Node]{}, encodeErr
 		}
 		next = &value
 	}
-	return page.NewResponse(items, next, nil, hasMore), nil
+	return page.NewResponse(items, next, previous, hasMore), nil
 }
 func (a *OperatorAdapter) GetNode(ctx context.Context, id string) (operatorapi.Node, error) {
 	s := a.Store
@@ -257,11 +263,14 @@ func (s *Store) ListAssetsPage(ctx context.Context, request page.PageRequest) (p
 	}
 	codec := page.DefaultCodec()
 	var pos page.Position
+	var previous *string
 	if request.Cursor != "" {
 		pos, err = codec.Decode(request.Cursor)
 		if err != nil || pos.Resource != "assets" || pos.Sort != sortKey || pos.Order != request.Order {
 			return page.Response[operatorapi.Asset]{}, page.ErrCursorInvalid
 		}
+		previousValue := pos.Previous
+		previous = &previousValue
 	}
 	clauses := []string{"aa.role = 'original'"}
 	args := make([]any, 0, 5)
@@ -306,6 +315,7 @@ func (s *Store) ListAssetsPage(ctx context.Context, request page.PageRequest) (p
 	}
 	defer rows.Close()
 	items := make([]operatorapi.Asset, 0, request.Limit)
+	hasMore := false
 	var lastValue, lastID string
 	for rows.Next() {
 		var item operatorapi.Asset
@@ -321,21 +331,23 @@ func (s *Store) ListAssetsPage(ctx context.Context, request page.PageRequest) (p
 			} else {
 				lastValue = created.UTC().Format(time.RFC3339Nano)
 			}
+		} else {
+			hasMore = true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return page.Response[operatorapi.Asset]{}, wrap("iterate assets page", err)
 	}
-	hasMore := len(items) == request.Limit && lastID != ""
+	hasMore = hasMore && lastID != ""
 	var next *string
 	if hasMore {
-		value, encodeErr := codec.Encode(page.Position{Resource: "assets", Sort: sortKey, Order: request.Order, Value: lastValue, ID: lastID})
+		value, encodeErr := codec.Encode(page.Position{Resource: "assets", Sort: sortKey, Order: request.Order, Value: lastValue, ID: lastID, Previous: request.Cursor})
 		if encodeErr != nil {
 			return page.Response[operatorapi.Asset]{}, encodeErr
 		}
 		next = &value
 	}
-	return page.NewResponse(items, next, nil, hasMore), nil
+	return page.NewResponse(items, next, previous, hasMore), nil
 }
 
 func (s *Store) PutAssignment(ctx context.Context, nodeID string, mutation assignment.Mutation, input assignment.PutInput) (assignment.PutResult, error) {

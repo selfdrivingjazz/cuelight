@@ -340,6 +340,236 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/cable/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCableDeployments"];
+        put?: never;
+        post: operations["createCableDeployment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/deployments/{deploymentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCableDeployment"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteCableDeployment"];
+        options?: never;
+        head?: never;
+        patch: operations["updateCableDeployment"];
+        trace?: never;
+    };
+    "/cable/deployments/{deploymentId}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        get: operations["listCableChannels"];
+        put?: never;
+        post: operations["createCableChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/channels/{channelId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCableChannel"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteCableChannel"];
+        options?: never;
+        head?: never;
+        patch: operations["updateCableChannel"];
+        trace?: never;
+    };
+    "/cable/channels/{channelId}/programs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        get: operations["listCablePrograms"];
+        put?: never;
+        post: operations["createCableProgram"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/programs/{programId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                programId: components["parameters"]["CableProgramId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCableProgram"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteCableProgram"];
+        options?: never;
+        head?: never;
+        patch: operations["updateCableProgram"];
+        trace?: never;
+    };
+    "/cable/shell-builds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCableShellBuilds"];
+        put?: never;
+        post: operations["registerCableShellBuild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/shell-builds/{shellBuildId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                shellBuildId: components["parameters"]["CableShellBuildId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCableShellBuild"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/deployments/{deploymentId}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        get: operations["listCableRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/revisions/{revisionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                revisionId: components["parameters"]["CableRevisionId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCableRevision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/revisions/{revisionId}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                revisionId: components["parameters"]["CableRevisionId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishCableRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/deployments/{deploymentId}/compile-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["previewCableCompile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/deployments/{deploymentId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishCableRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/player/enroll": {
         parameters: {
             query?: never;
@@ -520,6 +750,252 @@ export interface components {
             previousCursor: string | null;
             hasMore: boolean;
         };
+        CableDeploymentInput: {
+            name: string;
+            timezone: string;
+            /** @enum {string} */
+            theme: "nebula" | "gallery" | "noir";
+            /** Format: int64 */
+            guideHorizon?: number;
+            guideDensity?: string;
+            placardDefaults?: {
+                [key: string]: string;
+            };
+            fallbackMetadata?: {
+                [key: string]: string;
+            };
+        };
+        CableDeployment: {
+            id: components["schemas"]["Id"];
+            name: string;
+            timezone: string;
+            /** @enum {string} */
+            theme: "nebula" | "gallery" | "noir";
+            /** Format: int64 */
+            guideHorizon: number;
+            guideDensity: string;
+            placardDefaults?: {
+                [key: string]: string;
+            };
+            fallbackMetadata?: {
+                [key: string]: string;
+            };
+            /** Format: int64 */
+            version: number;
+            createdBy: components["schemas"]["Id"];
+            updatedBy: components["schemas"]["Id"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CableChannelInput: {
+            number: number;
+            name: string;
+            callsign?: string;
+            description?: string;
+            accent?: string;
+            artworkAssetId?: components["schemas"]["Id"];
+            enabled?: boolean;
+            standby?: boolean;
+        };
+        CableChannel: {
+            id: components["schemas"]["Id"];
+            deploymentId: components["schemas"]["Id"];
+            number: number;
+            name: string;
+            callsign: string;
+            description: string;
+            accent: string;
+            artworkAssetId?: components["schemas"]["Id"];
+            enabled: boolean;
+            standby: boolean;
+            /** Format: int64 */
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CableProgramInput: {
+            assetId: components["schemas"]["Id"];
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+            title?: string;
+            subtitle?: string;
+            tag?: string;
+            artist?: string;
+            description?: string;
+            artworkAssetId?: components["schemas"]["Id"];
+            placardPolicy?: string;
+            fit?: string;
+            availabilityPolicy?: string;
+            loop?: boolean;
+            mute?: boolean;
+            /** Format: double */
+            volume?: number;
+        };
+        CableProgram: {
+            id: components["schemas"]["Id"];
+            channelId: components["schemas"]["Id"];
+            assetId: components["schemas"]["Id"];
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+            title: string;
+            subtitle: string;
+            tag: string;
+            artist: string;
+            description: string;
+            artworkAssetId?: components["schemas"]["Id"];
+            placardPolicy: string;
+            fit: string;
+            availabilityPolicy: string;
+            loop: boolean;
+            mute: boolean;
+            /** Format: double */
+            volume: number;
+            /** Format: int64 */
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CableShellBuildInput: {
+            digest: string;
+            entrypoint: string;
+            artifactDigests: string[];
+            versionMetadata?: {
+                [key: string]: string;
+            };
+            bridgeProtocol: string;
+        };
+        CableShellBuild: {
+            id: components["schemas"]["Id"];
+            digest: string;
+            entrypoint: string;
+            artifactDigests: string[];
+            versionMetadata?: {
+                [key: string]: string;
+            };
+            bridgeProtocol: string;
+            createdBy: components["schemas"]["Id"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CableRevisionWindow: {
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+        };
+        CableRevisionProgram: {
+            id: components["schemas"]["Id"];
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+            assetId: components["schemas"]["Id"];
+            artifactDigest: string;
+            mediaType: string;
+            title?: string;
+            subtitle?: string;
+            tag?: string;
+            artist?: string;
+            description?: string;
+            artworkDigest?: string;
+            fit?: string;
+            placardPolicy?: string;
+            availabilityPolicy?: string;
+            loop: boolean;
+            mute: boolean;
+            /** Format: double */
+            volume: number;
+        };
+        CableRevisionChannel: {
+            id: components["schemas"]["Id"];
+            number: number;
+            name: string;
+            callsign?: string;
+            description?: string;
+            accent?: string;
+            artworkDigest?: string;
+            enabled: boolean;
+            standby: boolean;
+            programs: components["schemas"]["CableRevisionProgram"][];
+        };
+        CableRevisionDocument: {
+            /** @constant */
+            schema: "cable.revision.v1";
+            deploymentId: components["schemas"]["Id"];
+            /** Format: int64 */
+            deploymentVersion: number;
+            /** @enum {string} */
+            theme: "nebula" | "gallery" | "noir";
+            /** Format: date-time */
+            generatedAt: string;
+            shellBuildId: components["schemas"]["Id"];
+            shellBuildDigest: string;
+            entrypoint: string;
+            bridgeProtocol: string;
+            timezone: string;
+            window: components["schemas"]["CableRevisionWindow"];
+            channels: components["schemas"]["CableRevisionChannel"][];
+            artifactDigests: string[];
+        };
+        CableRevision: {
+            id: components["schemas"]["Id"];
+            deploymentId: components["schemas"]["Id"];
+            /** Format: int64 */
+            deploymentVersion: number;
+            /** @enum {string} */
+            theme: "nebula" | "gallery" | "noir";
+            /** Format: date-time */
+            generatedAt: string;
+            shellBuildId: components["schemas"]["Id"];
+            digest: string;
+            shellBuildDigest: string;
+            entrypoint: string;
+            bridgeProtocol: string;
+            timezone: string;
+            window: components["schemas"]["CableRevisionWindow"];
+            channels: components["schemas"]["CableRevisionChannel"][];
+            artifactDigests: string[];
+            json?: string;
+            errors?: string[];
+            warnings?: string[];
+            createdBy: components["schemas"]["Id"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CableDeploymentPage: {
+            items: components["schemas"]["CableDeployment"][];
+            page: components["schemas"]["PageInfo"];
+        };
+        CableChannelPage: {
+            items: components["schemas"]["CableChannel"][];
+            page: components["schemas"]["PageInfo"];
+        };
+        CableProgramPage: {
+            items: components["schemas"]["CableProgram"][];
+            page: components["schemas"]["PageInfo"];
+        };
+        CableShellBuildPage: {
+            items: components["schemas"]["CableShellBuild"][];
+            page: components["schemas"]["PageInfo"];
+        };
+        CableRevisionPage: {
+            items: components["schemas"]["CableRevision"][];
+            page: components["schemas"]["PageInfo"];
+        };
+        CableCompileRequest: {
+            shellBuildId: components["schemas"]["Id"];
+            window: components["schemas"]["CableRevisionWindow"];
+        };
         NodePage: {
             items: components["schemas"]["Node"][];
             page: components["schemas"]["PageInfo"];
@@ -575,12 +1051,15 @@ export interface components {
         };
         Upload: {
             id: components["schemas"]["Id"];
+            name: string;
             /** Format: int64 */
             length: number;
             /** Format: int64 */
             offset: number;
+            mediaType: string;
             /** @enum {string} */
             state: "open" | "finalizing" | "complete" | "failed";
+            artifactDigest?: string;
         };
         Artifact: {
             digest: string;
@@ -607,17 +1086,42 @@ export interface components {
             orientation: 0 | 90 | 180 | 270;
             allowedDeliveryModes: ("stream" | "cache_then_play")[];
         };
+        MediaPresentation: {
+            playback: components["schemas"]["PlaybackPayload"];
+        };
+        CablePresentation: {
+            shellBuildDigest: string;
+            revisionArtifactDigest: string;
+            entrypoint: string;
+            bridgeProtocol: string;
+            artifactClosure: string[];
+        };
+        ReleasePresentation: {
+            /** @enum {string} */
+            kind: "media" | "cable";
+            media?: components["schemas"]["MediaPresentation"];
+            cable?: components["schemas"]["CablePresentation"];
+        } & ({
+            /** @constant */
+            kind: "media";
+            media: components["schemas"]["MediaPresentation"];
+        } | {
+            /** @constant */
+            kind: "cable";
+            cable: components["schemas"]["CablePresentation"];
+        });
         PublishReleaseInput: {
             playback: components["schemas"]["PlaybackPayload"];
         };
         ReleasePayload: {
-            /** @constant */
-            schemaVersion: "1.0";
+            /** @enum {string} */
+            schemaVersion: "1.0" | "1.1";
             minimumProtocolVersion: string;
-            playback: components["schemas"]["PlaybackPayload"];
+            presentation?: components["schemas"]["ReleasePresentation"];
+            playback?: components["schemas"]["PlaybackPayload"];
             artifacts: components["schemas"]["Artifact"][];
             requiredFeatures: string[];
-        };
+        } & (unknown | unknown);
         ReleaseEnvelope: {
             id: components["schemas"]["Id"];
             digest: string;
@@ -628,6 +1132,8 @@ export interface components {
         AssignmentInput: {
             releaseId: components["schemas"]["Id"];
             releaseDigest: string;
+            /** @enum {string} */
+            presentationKind: "media" | "cable";
             /** @enum {string} */
             deliveryMode: "stream" | "cache_then_play";
             /** Format: int64 */
@@ -675,6 +1181,8 @@ export interface components {
             desiredGenerationSeen: number;
             /** Format: int64 */
             observedGeneration: number;
+            /** @enum {string|null} */
+            presentationKind: "media" | "cable" | null;
             renderingReleaseDigest?: string | null;
             candidateReleaseDigest?: string | null;
             healthyReleaseDigest?: string | null;
@@ -723,6 +1231,11 @@ export interface components {
         UploadId: components["schemas"]["Id"];
         AssetId: components["schemas"]["Id"];
         ReleaseId: components["schemas"]["Id"];
+        CableDeploymentId: components["schemas"]["Id"];
+        CableChannelId: components["schemas"]["Id"];
+        CableProgramId: components["schemas"]["Id"];
+        CableShellBuildId: components["schemas"]["Id"];
+        CableRevisionId: components["schemas"]["Id"];
         /** @description Opaque, server-issued keyset cursor. */
         PageCursor: string;
         PageLimit: number;
@@ -1375,6 +1888,627 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReleaseEnvelope"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCableDeployments: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cable deployments in deterministic keyset order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableDeploymentPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createCableDeployment: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableDeploymentInput"];
+            };
+        };
+        responses: {
+            /** @description Cable deployment created. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableDeployment"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableDeployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cable deployment. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableDeployment"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteCableDeployment: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cable deployment deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateCableDeployment: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableDeploymentInput"];
+            };
+        };
+        responses: {
+            /** @description Cable deployment updated. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableDeployment"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCableChannels: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Channels belonging to the deployment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableChannelPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createCableChannel: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableChannelInput"];
+            };
+        };
+        responses: {
+            /** @description Cable channel created. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableChannel"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cable channel. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableChannel"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteCableChannel: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cable channel deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateCableChannel: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableChannelInput"];
+            };
+        };
+        responses: {
+            /** @description Cable channel updated. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableChannel"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCablePrograms: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Program entries belonging to the channel. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableProgramPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createCableProgram: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableProgramInput"];
+            };
+        };
+        responses: {
+            /** @description Cable program entry created. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableProgram"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableProgram: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                programId: components["parameters"]["CableProgramId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cable program entry. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableProgram"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteCableProgram: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                programId: components["parameters"]["CableProgramId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cable program entry deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateCableProgram: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                programId: components["parameters"]["CableProgramId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableProgramInput"];
+            };
+        };
+        responses: {
+            /** @description Cable program entry updated. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableProgram"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCableShellBuilds: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registered Cable shell builds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableShellBuildPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    registerCableShellBuild: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableShellBuildInput"];
+            };
+        };
+        responses: {
+            /** @description Cable shell build registered. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableShellBuild"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableShellBuild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                shellBuildId: components["parameters"]["CableShellBuildId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registered Cable shell build. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableShellBuild"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCableRevisions: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable Cable revisions for the deployment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableRevisionPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableRevision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                revisionId: components["parameters"]["CableRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable Cable revision. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableRevision"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    publishCableRelease: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                revisionId: components["parameters"]["CableRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Previously published signed release returned for an idempotent replay. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseEnvelope"];
+                };
+            };
+            /** @description Signed release published for the Cable revision. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseEnvelope"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewCableCompile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableCompileRequest"];
+            };
+        };
+        responses: {
+            /** @description Preview Cable revision; it is not persisted. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableRevision"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    publishCableRevision: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                deploymentId: components["parameters"]["CableDeploymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableCompileRequest"];
+            };
+        };
+        responses: {
+            /** @description Published immutable Cable revision. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableRevision"];
                 };
             };
             default: components["responses"]["Problem"];

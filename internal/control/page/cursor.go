@@ -38,6 +38,7 @@ type Position struct {
 	Order    string `json:"order,omitempty"`
 	Value    string `json:"value,omitempty"`
 	ID       string `json:"id,omitempty"`
+	Previous string `json:"previous,omitempty"`
 	Sequence int64  `json:"sequence,omitempty"`
 }
 

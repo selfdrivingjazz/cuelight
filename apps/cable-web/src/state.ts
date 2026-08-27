@@ -3,6 +3,7 @@ import type { Occurrence, Presentation } from "./presentation";
 export type RuntimeState =
   | { kind: "boot" }
   | { kind: "revision-loading" }
+  | { kind: "error"; message: string }
   | { kind: "ready"; presentation: Presentation; selectedId: string | null; mode: "guide" | "player" | "placard" }
   | { kind: "stale-offline"; presentation: Presentation; selectedId: string | null }
   | { kind: "empty-lineup"; presentation: Presentation }
@@ -11,9 +12,13 @@ export type RuntimeState =
   | { kind: "player-ready"; presentation: Presentation; occurrence: Occurrence }
   | { kind: "player-failure"; presentation: Presentation; occurrence: Occurrence; message: string }
   | { kind: "diagnostics"; presentation: Presentation };
-
+ 
 export type RuntimeAction =
+  | { type: "START_REVISION_LOAD" }
+  | { type: "REVISION_FAILED"; message: string }
+  | { type: "RETRY_REVISION" }
   | { type: "SYNC_REVISION"; presentation: Presentation }
+  | { type: "SELECT_CHANNEL"; channelId: string }
   | { type: "SELECT_PROGRAM"; occurrence: Occurrence }
   | { type: "TUNE_LIVE"; occurrence: Occurrence }
   | { type: "ARTIFACT_READY" }
@@ -28,8 +33,20 @@ export const initialRuntimeState: RuntimeState = { kind: "boot" };
 
 export function runtimeReducer(state: RuntimeState, action: RuntimeAction): RuntimeState {
   switch (action.type) {
+    case "START_REVISION_LOAD":
+    case "RETRY_REVISION":
+      return { kind: "revision-loading" };
+    case "REVISION_FAILED":
+      return { kind: "error", message: action.message };
     case "SYNC_REVISION":
-      return action.presentation.occurrences.length === 0 ? { kind: "empty-lineup", presentation: action.presentation } : action.presentation.bridge.state !== "online" || action.presentation.revision.stale ? { kind: "stale-offline", presentation: action.presentation, selectedId: null } : { kind: "ready", presentation: action.presentation, selectedId: null, mode: "guide" };
+      return action.presentation.occurrences.length === 0
+        ? { kind: "empty-lineup", presentation: action.presentation }
+        : action.presentation.bridge.state !== "online" || action.presentation.revision.stale
+          ? { kind: "stale-offline", presentation: action.presentation, selectedId: null }
+          : { kind: "ready", presentation: action.presentation, selectedId: null, mode: "guide" };
+    case "SELECT_CHANNEL":
+      if (state.kind !== "ready" && state.kind !== "stale-offline") return state;
+      return { ...state, selectedId: action.channelId };
     case "SELECT_PROGRAM":
       if (state.kind !== "ready" && state.kind !== "stale-offline") return state;
       return { kind: "warming", presentation: state.presentation, occurrence: action.occurrence };
@@ -50,10 +67,17 @@ export function runtimeReducer(state: RuntimeState, action: RuntimeAction): Runt
       return { kind: "player-opening", presentation: state.presentation, occurrence: state.occurrence };
     case "BACK_TO_GUIDE":
       if (!("presentation" in state)) return state;
+      if (state.kind === "stale-offline") return state;
       return { kind: "ready", presentation: state.presentation, selectedId: null, mode: "guide" };
     case "OPEN_PLACARD":
       if (!("presentation" in state)) return state;
-      return { kind: "ready", presentation: state.presentation, selectedId: null, mode: "placard" };
+      if (state.kind === "stale-offline") return state;
+      return {
+        kind: "ready",
+        presentation: state.presentation,
+        selectedId: state.kind === "ready" ? state.selectedId : null,
+        mode: "placard",
+      };
     case "OPEN_DIAGNOSTICS":
       if (!("presentation" in state)) return state;
       return { kind: "diagnostics", presentation: state.presentation };

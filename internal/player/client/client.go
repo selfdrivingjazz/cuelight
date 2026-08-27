@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jmill/cable/internal/release"
 )
 
 const (
@@ -174,6 +176,9 @@ func (c *Client) GetAssignment(ctx context.Context, etag string, wait time.Durat
 	var assignment Assignment
 	if err := decodeJSON(response.Body, &assignment); err != nil {
 		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid JSON body"}
+	}
+	if assignment.PresentationKind != release.PresentationMedia && assignment.PresentationKind != release.PresentationCable {
+		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid presentation kind"}
 	}
 	return AssignmentResult{Assignment: assignment, ETag: responseETag}, nil
 }

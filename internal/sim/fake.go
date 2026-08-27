@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sync"
 	"time"
 
@@ -80,14 +81,14 @@ func (r *FakeRenderer) Health(_ context.Context, c renderer.Candidate) (renderer
 	if r.config.FailHealth {
 		return renderer.Status{}, errors.New("fake renderer probation failure")
 	}
-	healthy := r.running && r.current == c && (r.output == nil || r.output.Ready())
+	healthy := r.running && reflect.DeepEqual(r.current, c) && (r.output == nil || r.output.Ready())
 	return renderer.Status{ReleaseDigest: c.ReleaseDigest, Healthy: healthy, Path: c.Source, Candidate: c}, nil
 }
 func (r *FakeRenderer) Commit(_ context.Context, c renderer.Candidate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.commits++
-	if !r.running || r.current != c {
+	if !r.running || !reflect.DeepEqual(r.current, c) {
 		return errors.New("fake candidate is not current")
 	}
 	return nil

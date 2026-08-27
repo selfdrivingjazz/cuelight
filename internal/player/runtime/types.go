@@ -12,6 +12,7 @@ import (
 	playerclient "github.com/jmill/cable/internal/player/client"
 	"github.com/jmill/cable/internal/player/renderer"
 	playerstate "github.com/jmill/cable/internal/player/state"
+	"github.com/jmill/cable/internal/release"
 )
 
 const (
@@ -113,6 +114,7 @@ type Dependencies struct {
 type Snapshot struct {
 	DesiredGenerationSeen uint64
 	ObservedGeneration    uint64
+	PresentationKind      release.PresentationKind
 	RenderingDigest       string
 	CandidateDigest       string
 	HealthyDigest         string

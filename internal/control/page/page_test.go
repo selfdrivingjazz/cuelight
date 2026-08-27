@@ -23,12 +23,12 @@ func TestCodecRejectsTamperingAndWrongSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := codec.Encode(Position{Resource: "nodes", Sort: "createdAt", Order: "asc", Value: "2026-01-01T00:00:00Z", ID: "n1"})
+	token, err := codec.Encode(Position{Resource: "nodes", Sort: "createdAt", Order: "asc", Value: "2026-01-01T00:00:00Z", ID: "n1", Previous: "prior-page"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	decoded, err := codec.Decode(token)
-	if err != nil || decoded.ID != "n1" {
+	if err != nil || decoded.ID != "n1" || decoded.Previous != "prior-page" {
 		t.Fatalf("decode = %#v, %v", decoded, err)
 	}
 	parts := strings.Split(token, ".")

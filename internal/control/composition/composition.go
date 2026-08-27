@@ -22,6 +22,7 @@ import (
 
 	"github.com/jmill/cable/internal/control/app"
 	"github.com/jmill/cable/internal/control/auth"
+	controlcable "github.com/jmill/cable/internal/control/cable"
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/operatorapi"
 	"github.com/jmill/cable/internal/control/persistence"
@@ -102,10 +103,36 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		return nil, err
 	}
 	releaseService := releaseAdapter{service: controlrelease.Service{Releases: repository, Artifacts: repository, Profiles: staticProfile{minimum: config.ProtocolVersion}, Signer: signer}, repository: repository}
+	cableService := &controlcable.Service{Repository: repository}
+	revisionArtifacts := revisionArtifactAdapter{cas: cas, repository: repository}
+	cableCompiler := &controlcable.Compiler{Repository: repository, Artifacts: repository, Builds: repository, RevisionArtifacts: revisionArtifacts}
+	cablePublisher := &controlrelease.CablePublisher{
+		Releases: repository, Revisions: repository, Artifacts: repository, Signer: signer,
+		MinimumProtocolVersion: config.ProtocolVersion,
+	}
 	playerService, err := playerapi.NewService(repository, repository, store.NewLocalCASReader(cas), playerapi.Limits{MaxBodyBytes: config.MaxBodyBytes, MaxEvents: config.MaxEvents, MaxWait: config.MaxWait})
 
 	operatorRepository := store.NewOperatorAdapter(repository)
-	operator := operatorapi.NewHandler(operatorapi.Dependencies{Auth: authService, PKI: pkiService, Nodes: operatorRepository, Assignments: repository, Media: mediaService, Registration: registration, Assets: repository, Releases: releaseService, MaxJSONBytes: config.MaxBodyBytes, MaxChunkBytes: config.MaxChunkBytes, Idempotency: operatorapi.NewIdempotencyCache()})
+	operator := operatorapi.NewHandler(operatorapi.Dependencies{
+		Auth:            authService,
+		PKI:             pkiService,
+		Nodes:           operatorRepository,
+		Assignments:     repository,
+		AssignmentPages: repository,
+		Media:           mediaService,
+		Uploads:         repository,
+		Registration:    registration,
+		Assets:          repository,
+		Releases:        releaseService,
+		Cable:           cableService,
+		CableRepository: repository,
+		CableCompiler:   cableCompiler,
+		CableReleases:   cablePublisher,
+		ReleasePages:    repository,
+		MaxJSONBytes:    config.MaxBodyBytes,
+		MaxChunkBytes:   config.MaxChunkBytes,
+		Idempotency:     operatorapi.NewIdempotencyCache(),
+	})
 	api := http.NewServeMux()
 	pkiHandler := newPKIHandler(pkiService, config.MaxBodyBytes)
 	api.Handle("/player/enroll", pkiHandler)
@@ -300,6 +327,24 @@ func (a releaseAdapter) GetRelease(ctx context.Context, id string) (canonical.En
 }
 
 type staticProfile struct{ minimum string }
+type revisionArtifactAdapter struct {
+	cas        *localcas.Store
+	repository *store.Store
+}
+
+func (a revisionArtifactAdapter) PutRevisionArtifact(ctx context.Context, digest string, content []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	object, err := a.cas.Put(bytes.NewReader(content), digest)
+	if err != nil {
+		return err
+	}
+	if object.Digest != digest || object.Size != int64(len(content)) {
+		return errors.New("revision artifact store returned inconsistent metadata")
+	}
+	return a.repository.RegisterCableRevisionArtifact(ctx, digest, object.Size)
+}
 
 func (p staticProfile) ProfileForPlayback(context.Context, canonical.PlaybackPayload) (controlrelease.Profile, error) {
 	return controlrelease.Profile{MinimumProtocolVersion: p.minimum}, nil

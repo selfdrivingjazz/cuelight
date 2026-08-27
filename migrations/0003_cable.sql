@@ -69,7 +69,7 @@ CREATE TABLE cable_shell_build_artifacts (
   PRIMARY KEY (shell_build_id, artifact_digest)
 );
 CREATE TABLE cable_revisions (
-  id uuid PRIMARY KEY,
+  id text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{64}$'),
   deployment_id uuid NOT NULL REFERENCES cable_deployments(id) ON DELETE RESTRICT,
   deployment_version bigint NOT NULL,
   shell_build_id uuid NOT NULL REFERENCES cable_shell_builds(id),
@@ -78,6 +78,8 @@ CREATE TABLE cable_revisions (
   entrypoint text NOT NULL,
   bridge_protocol text NOT NULL,
   timezone text NOT NULL,
+  theme text NOT NULL CHECK (theme IN ('nebula','gallery','noir')),
+  generated_at timestamptz NOT NULL,
   window_start timestamptz NOT NULL,
   window_end timestamptz NOT NULL,
   document jsonb NOT NULL,

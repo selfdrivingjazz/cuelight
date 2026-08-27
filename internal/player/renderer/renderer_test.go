@@ -9,11 +9,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jmill/cable/internal/release"
 )
 
 func TestProxyPreservesRangeAndHidesUpstream(t *testing.T) {
@@ -183,5 +186,49 @@ func TestMPVAdapterUsesJSONIPC(t *testing.T) {
 	}
 	if status, err := adapter.Current(context.Background()); err != nil || status.Healthy {
 		t.Fatalf("unexpected current state: %#v %v", status, err)
+	}
+}
+func TestTransformRevisionToPresentationContract(t *testing.T) {
+	candidate := Candidate{Kind: release.PresentationCable, RevisionArtifactDigest: strings.Repeat("a", 64), ShellBuildDigest: strings.Repeat("b", 64), Entrypoint: "index.html", BridgeProtocol: "1.0", ArtifactClosure: []string{strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)}}
+	raw := []byte(`{"schema":"cable.revision.v1","shellBuildDigest":"` + candidate.ShellBuildDigest + `","entrypoint":"index.html","bridgeProtocol":"1.0","generatedAt":"2026-08-27T00:00:00Z","timezone":"UTC","channels":[{"id":"ch","number":1,"name":"Main","callsign":"MAIN","accent":"#fff","enabled":true,"programs":[{"id":"p","startsAt":"2026-08-27T00:00:00Z","endsAt":"2026-08-27T01:00:00Z","artifactDigest":"` + strings.Repeat("c", 64) + `","mediaType":"video/mp4","title":"Show","placardPolicy":"start","fit":"fill","loop":true,"mute":true,"volume":0.64}] }]}`)
+	presentation, err := transformRevision(raw, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(presentation, &value); err != nil {
+		t.Fatal(err)
+	}
+	occurrences, ok := value["occurrences"].([]any)
+	if !ok || len(occurrences) != 1 || value["bridge"] == nil {
+		t.Fatalf("presentation contract = %s", presentation)
+	}
+	program, ok := occurrences[0].(map[string]any)
+	if !ok || program["fit"] != "fill" || program["loop"] != true || program["muted"] != true || program["volume"] != float64(64) {
+		t.Fatalf("playback contract = %#v", occurrences[0])
+	}
+}
+func TestChromiumCommitRemovesPreviousRoot(t *testing.T) {
+	root := t.TempDir()
+	oldRoot := filepath.Join(root, "old")
+	newRoot := filepath.Join(root, "new")
+	if err := os.MkdirAll(oldRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(newRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &Chromium{
+		current: &chromiumState{root: oldRoot, candidate: Candidate{ReleaseDigest: "old"}},
+		pending: &chromiumState{root: newRoot, candidate: Candidate{ReleaseDigest: "new"}},
+	}
+	if err := adapter.Commit(context.Background(), Candidate{ReleaseDigest: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(oldRoot); !os.IsNotExist(err) {
+		t.Fatalf("old Chromium root still exists: %v", err)
+	}
+	if adapter.current == nil || adapter.current.root != newRoot {
+		t.Fatalf("current state = %#v", adapter.current)
 	}
 }

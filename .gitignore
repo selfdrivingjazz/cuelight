@@ -9,7 +9,8 @@
 *.pem
 *.key
 *.crt
-/node_modules/
+**/node_modules/
 **/dist/
 **/test-results/
 **/playwright-report/
+/apps/cable-web/cable-shell.tar.gz

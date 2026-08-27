@@ -99,9 +99,23 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		listener.Close()
 		return fmt.Errorf("open player cache: %w", err)
 	}
+	if err := os.MkdirAll(config.ChromiumRuntimeRoot, 0o700); err != nil {
+		listener.Close()
+		return fmt.Errorf("create Chromium runtime root: %w", err)
+	}
 	mpv := &renderer.MPV{SocketPath: config.MPVSocketPath, Timeout: config.MPVTimeout}
+	chromium, err := renderer.NewChromium(renderer.ChromiumConfig{BinaryPath: config.ChromiumBinaryPath, RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, ExtraArgs: config.ChromiumArgs, Output: os.Stderr})
+	if err != nil {
+		listener.Close()
+		return fmt.Errorf("create Chromium renderer: %w", err)
+	}
+	composite, err := renderer.NewComposite(mpv, chromium)
+	if err != nil {
+		listener.Close()
+		return fmt.Errorf("create renderer dispatcher: %w", err)
+	}
 	reconciler, err := playerruntime.New(config.runtimeConfig(publisherKey), playerruntime.Dependencies{
-		Controller: controller, Journal: journal, CAS: cache, Capacity: filesystemCapacity{path: config.CASPath}, Streamer: streamer, Renderer: mpv,
+		Controller: controller, Journal: journal, CAS: cache, Capacity: filesystemCapacity{path: config.CASPath}, Streamer: streamer, Renderer: composite,
 	})
 	if err != nil {
 		listener.Close()
@@ -134,7 +148,7 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		cancel()
 	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	shutdownErr := proxyServer.Shutdown(shutdownCtx)
+	shutdownErr := errors.Join(composite.Stop(shutdownCtx), proxyServer.Shutdown(shutdownCtx))
 	shutdownCancel()
 	if result == nil || errors.Is(result, context.Canceled) {
 		result = nil

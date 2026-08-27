@@ -89,7 +89,20 @@ func (s *Service) GetAssignment(ctx context.Context, nodeID, ifNoneMatch string,
 	if etagMatches(ifNoneMatch, etag) {
 		return client.AssignmentResult{ETag: etag, NotModified: true}, nil
 	}
-	return client.AssignmentResult{Assignment: toClientAssignment(value), ETag: etag}, nil
+	kind := canonical.PresentationKind("")
+	if kind == "" {
+		envelope, loadErr := s.ReleaseLoader.LoadRelease(ctx, value.ReleaseID)
+		if loadErr != nil || envelope.ID != value.ReleaseID || (value.ReleaseDigest != "" && envelope.Digest != value.ReleaseDigest) {
+			return client.AssignmentResult{}, fmt.Errorf("%w: release binding mismatch", ErrForbidden)
+		}
+		kind = envelope.Payload.PresentationMode()
+		if kind != canonical.PresentationMedia && kind != canonical.PresentationCable {
+			return client.AssignmentResult{}, fmt.Errorf("%w: invalid release presentation", ErrForbidden)
+		}
+	}
+	valueClient := toClientAssignment(value)
+	valueClient.PresentationKind = kind
+	return client.AssignmentResult{Assignment: valueClient, ETag: etag}, nil
 }
 
 func (s *Service) FetchRelease(ctx context.Context, nodeID, releaseID string) (canonical.EnvelopeV1, error) {
@@ -122,6 +135,9 @@ func (s *Service) Report(ctx context.Context, nodeID string, report client.NodeR
 	}
 	if report.EventEpoch == "" || report.Sequence <= 0 || report.ObservedGeneration < 0 || report.DesiredGenerationSeen < 0 {
 		return false, fmt.Errorf("%w: invalid report sequence or epoch", ErrInvalidRequest)
+	}
+	if report.PresentationKind != "" && report.PresentationKind != canonical.PresentationMedia && report.PresentationKind != canonical.PresentationCable {
+		return false, fmt.Errorf("%w: invalid presentationKind", ErrInvalidRequest)
 	}
 	return s.Repository.RecordReport(ctx, nodeID, report)
 }

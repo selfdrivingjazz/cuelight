@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +86,58 @@ func TestStreamAndCacheThenPlayMaterialization(t *testing.T) {
 			t.Fatalf("source = %q", h.renderer.commits[0].Source)
 		}
 	})
+}
+
+func TestCableReleaseMaterializesExactClosureForChromium(t *testing.T) {
+	h := newHarness(t, []byte("bootstrap"), DeliveryCacheThenPlay)
+	h.runtime.config.Features = append(h.runtime.config.Features, "chromium")
+	shell := []byte("shell tar")
+	revision := []byte(`{"schema":"cable.revision.v1"}`)
+	media := []byte("program media")
+	digest := func(content []byte) string {
+		sum := sha256.Sum256(content)
+		return hex.EncodeToString(sum[:])
+	}
+	shellDigest, revisionDigest, mediaDigest := digest(shell), digest(revision), digest(media)
+	closure := []string{shellDigest, revisionDigest, mediaDigest}
+	slices.Sort(closure)
+	artifacts := []release.Artifact{
+		{Digest: shellDigest, Size: int64(len(shell)), MediaType: "application/vnd.cable.shell+tar"},
+		{Digest: revisionDigest, Size: int64(len(revision)), MediaType: "application/vnd.cable.revision+json"},
+		{Digest: mediaDigest, Size: int64(len(media)), MediaType: "video/mp4"},
+	}
+	slices.SortFunc(artifacts, func(a, b release.Artifact) int { return strings.Compare(a.Digest, b.Digest) })
+	envelope, err := release.Sign("cable-release", "publisher-1", release.PayloadV1{
+		SchemaVersion: release.SchemaVersion, MinimumProtocolVersion: release.ProtocolV1,
+		Presentation: release.Presentation{Kind: release.PresentationCable, Cable: &release.CablePresentation{
+			ShellBuildDigest: shellDigest, RevisionArtifactDigest: revisionDigest, Entrypoint: "index.html",
+			BridgeProtocol: "1", ArtifactClosure: closure,
+		}},
+		Artifacts: artifacts, RequiredFeatures: []string{"chromium"},
+	}, h.private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.controller.envelope = envelope
+	h.controller.artifacts = map[string][]byte{shellDigest: shell, revisionDigest: revision, mediaDigest: media}
+	assignment := h.assignment(1, DeliveryCacheThenPlay)
+	assignment.PresentationKind = release.PresentationCable
+	if err := h.runtime.Reconcile(context.Background(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.runtime.flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.cas.puts != 3 {
+		t.Fatalf("cached artifacts = %d, want 3", h.cas.puts)
+	}
+	candidate := h.renderer.commits[0]
+	if candidate.Kind != release.PresentationCable || candidate.ShellBuildDigest != shellDigest || candidate.RevisionArtifactDigest != revisionDigest || len(candidate.ArtifactPaths) != 3 {
+		t.Fatalf("Chromium candidate = %#v", candidate)
+	}
+	if report := h.controller.reports[len(h.controller.reports)-1]; report.PresentationKind != release.PresentationCable || report.ObservedGeneration != 1 {
+		t.Fatalf("Cable report = %#v", report)
+	}
 }
 
 func TestCacheRejectsInsufficientCapacityBeforeDownload(t *testing.T) {
@@ -337,6 +390,7 @@ type fakeController struct {
 	envelope           release.EnvelopeV1
 	artifact           []byte
 	fetches, downloads int
+	artifacts          map[string][]byte
 	capabilityErr      error
 	reports            []playerclient.NodeReport
 	events             []playerclient.EventBatch
@@ -360,12 +414,20 @@ func (c *fakeController) AppendEvents(_ context.Context, batch playerclient.Even
 	c.events = append(c.events, batch)
 	return playerclient.EventAcknowledgement{Epoch: batch.Epoch, AcknowledgedThrough: batch.Events[len(batch.Events)-1].Sequence}, nil
 }
-func (c *fakeController) HeadArtifact(context.Context, string) (playerclient.ArtifactMetadata, error) {
-	return playerclient.ArtifactMetadata{Size: int64(len(c.artifact)), ETag: "artifact-etag"}, nil
+func (c *fakeController) HeadArtifact(_ context.Context, digest string) (playerclient.ArtifactMetadata, error) {
+	content := c.artifact
+	if c.artifacts != nil {
+		content = c.artifacts[digest]
+	}
+	return playerclient.ArtifactMetadata{Size: int64(len(content)), ETag: "artifact-etag"}, nil
 }
-func (c *fakeController) GetArtifact(context.Context, string, *playerclient.ByteRange, string) (playerclient.ArtifactContent, error) {
+func (c *fakeController) GetArtifact(_ context.Context, digest string, _ *playerclient.ByteRange, _ string) (playerclient.ArtifactContent, error) {
 	c.downloads++
-	return playerclient.ArtifactContent{Body: io.NopCloser(bytes.NewReader(c.artifact)), Size: int64(len(c.artifact))}, nil
+	content := c.artifact
+	if c.artifacts != nil {
+		content = c.artifacts[digest]
+	}
+	return playerclient.ArtifactContent{Body: io.NopCloser(bytes.NewReader(content)), Size: int64(len(content))}, nil
 }
 
 type fakeJournal struct {

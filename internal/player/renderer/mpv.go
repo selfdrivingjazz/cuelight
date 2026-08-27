@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"sync/atomic"
 	"time"
+
+	"github.com/jmill/cable/internal/release"
 )
 
 type Candidate struct {
+	Kind                release.PresentationKind
 	ReleaseDigest       string
 	Source              string
 	Fit                 string
@@ -19,7 +23,21 @@ type Candidate struct {
 	Volume              int
 	ImageDurationSecond int
 	Orientation         int
+
+	// Cable candidates are materialized by the Chromium adapter. Keeping the
+	// immutable closure on the candidate lets the composite renderer dispatch
+	// without carrying presentation-specific side channels.
+	ShellBuildDigest       string
+	RevisionArtifactDigest string
+	Entrypoint             string
+	BridgeProtocol         string
+	ArtifactClosure        []string
+	ShellPath              string
+	RevisionPath           string
+	ArtifactPaths          map[string]string
 }
+
+func sameCandidate(a, b Candidate) bool { return reflect.DeepEqual(a, b) }
 
 type Status struct {
 	ReleaseDigest string
@@ -109,13 +127,16 @@ func (m *MPV) Health(ctx context.Context, candidate Candidate) (Status, error) {
 
 func (m *MPV) Commit(_ context.Context, candidate Candidate) error {
 	current := m.current.Load()
-	if current == nil || *current != candidate {
+	if current == nil || !sameCandidate(*current, candidate) {
 		return errors.New("candidate is not the current renderer state")
 	}
 	return nil
 }
 
 func (m *MPV) Stop(ctx context.Context) error {
+	if m.current.Load() == nil {
+		return nil
+	}
 	if _, err := m.command(ctx, []any{"stop"}); err != nil {
 		return err
 	}

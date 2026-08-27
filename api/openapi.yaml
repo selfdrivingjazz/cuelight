@@ -440,6 +440,389 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ReleaseEnvelope"}
         default: {$ref: "#/components/responses/Problem"}
+  /cable/deployments:
+    get:
+      tags: [operator]
+      operationId: listCableDeployments
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Cable deployments in deterministic keyset order.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableDeploymentPage"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator]
+      operationId: createCableDeployment
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableDeploymentInput"}
+      responses:
+        "201":
+          description: Cable deployment created.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableDeployment"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/deployments/{deploymentId}:
+    parameters: [{$ref: "#/components/parameters/CableDeploymentId"}]
+    get:
+      tags: [operator]
+      operationId: getCableDeployment
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Cable deployment.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableDeployment"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: updateCableDeployment
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableDeploymentInput"}
+      responses:
+        "200":
+          description: Cable deployment updated.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableDeployment"}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [operator]
+      operationId: deleteCableDeployment
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      responses:
+        "204": {description: Cable deployment deleted.}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/deployments/{deploymentId}/channels:
+    parameters: [{$ref: "#/components/parameters/CableDeploymentId"}]
+    get:
+      tags: [operator]
+      operationId: listCableChannels
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Channels belonging to the deployment.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableChannelPage"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator]
+      operationId: createCableChannel
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableChannelInput"}
+      responses:
+        "201":
+          description: Cable channel created.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableChannel"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/channels/{channelId}:
+    parameters: [{$ref: "#/components/parameters/CableChannelId"}]
+    get:
+      tags: [operator]
+      operationId: getCableChannel
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Cable channel.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableChannel"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: updateCableChannel
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableChannelInput"}
+      responses:
+        "200":
+          description: Cable channel updated.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableChannel"}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [operator]
+      operationId: deleteCableChannel
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      responses:
+        "204": {description: Cable channel deleted.}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/channels/{channelId}/programs:
+    parameters: [{$ref: "#/components/parameters/CableChannelId"}]
+    get:
+      tags: [operator]
+      operationId: listCablePrograms
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Program entries belonging to the channel.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableProgramPage"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator]
+      operationId: createCableProgram
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableProgramInput"}
+      responses:
+        "201":
+          description: Cable program entry created.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableProgram"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/programs/{programId}:
+    parameters: [{$ref: "#/components/parameters/CableProgramId"}]
+    get:
+      tags: [operator]
+      operationId: getCableProgram
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Cable program entry.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableProgram"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: updateCableProgram
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableProgramInput"}
+      responses:
+        "200":
+          description: Cable program entry updated.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableProgram"}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [operator]
+      operationId: deleteCableProgram
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      responses:
+        "204": {description: Cable program entry deleted.}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/shell-builds:
+    get:
+      tags: [operator]
+      operationId: listCableShellBuilds
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Registered Cable shell builds.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableShellBuildPage"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator]
+      operationId: registerCableShellBuild
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableShellBuildInput"}
+      responses:
+        "201":
+          description: Cable shell build registered.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableShellBuild"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/shell-builds/{shellBuildId}:
+    parameters: [{$ref: "#/components/parameters/CableShellBuildId"}]
+    get:
+      tags: [operator]
+      operationId: getCableShellBuild
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Registered Cable shell build.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableShellBuild"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/deployments/{deploymentId}/revisions:
+    parameters: [{$ref: "#/components/parameters/CableDeploymentId"}]
+    get:
+      tags: [operator]
+      operationId: listCableRevisions
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Immutable Cable revisions for the deployment.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableRevisionPage"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/revisions/{revisionId}:
+    parameters: [{$ref: "#/components/parameters/CableRevisionId"}]
+    get:
+      tags: [operator]
+      operationId: getCableRevision
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Immutable Cable revision.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableRevision"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/revisions/{revisionId}/release:
+    parameters: [{$ref: "#/components/parameters/CableRevisionId"}]
+    post:
+      tags: [operator]
+      operationId: publishCableRelease
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      responses:
+        "200":
+          description: Previously published signed release returned for an idempotent replay.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReleaseEnvelope"}
+        "201":
+          description: Signed release published for the Cable revision.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReleaseEnvelope"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/deployments/{deploymentId}/compile-preview:
+    parameters: [{$ref: "#/components/parameters/CableDeploymentId"}]
+    post:
+      tags: [operator]
+      operationId: previewCableCompile
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableCompileRequest"}
+      responses:
+        "200":
+          description: Preview Cable revision; it is not persisted.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableRevision"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/deployments/{deploymentId}/publish:
+    parameters: [{$ref: "#/components/parameters/CableDeploymentId"}]
+    post:
+      tags: [operator]
+      operationId: publishCableRevision
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableCompileRequest"}
+      responses:
+        "201":
+          description: Published immutable Cable revision.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableRevision"}
+        default: {$ref: "#/components/responses/Problem"}
   /player/enroll:
     post:
       tags: [player]
@@ -650,6 +1033,11 @@ components:
     UploadId: {name: uploadId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
     AssetId: {name: assetId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
     ReleaseId: {name: releaseId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    CableDeploymentId: {name: deploymentId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    CableChannelId: {name: channelId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    CableProgramId: {name: programId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    CableShellBuildId: {name: shellBuildId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    CableRevisionId: {name: revisionId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
     PageCursor:
       name: cursor
       in: query
@@ -717,6 +1105,294 @@ components:
         nextCursor: {type: [string, "null"]}
         previousCursor: {type: [string, "null"]}
         hasMore: {type: boolean}
+    CableDeploymentInput:
+      type: object
+      additionalProperties: false
+      required: [name, timezone, theme]
+      properties:
+        name: {type: string, minLength: 1}
+        timezone: {type: string, minLength: 1}
+        theme: {type: string, enum: [nebula, gallery, noir]}
+        guideHorizon: {type: integer, format: int64, minimum: 0}
+        guideDensity: {type: string}
+        placardDefaults:
+          type: object
+          additionalProperties: {type: string}
+        fallbackMetadata:
+          type: object
+          additionalProperties: {type: string}
+    CableDeployment:
+      type: object
+      additionalProperties: false
+      required: [id, name, timezone, theme, guideHorizon, guideDensity, version, createdBy, updatedBy, createdAt, updatedAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        name: {type: string}
+        timezone: {type: string}
+        theme: {type: string, enum: [nebula, gallery, noir]}
+        guideHorizon: {type: integer, format: int64, minimum: 0}
+        guideDensity: {type: string}
+        placardDefaults:
+          type: object
+          additionalProperties: {type: string}
+        fallbackMetadata:
+          type: object
+          additionalProperties: {type: string}
+        version: {type: integer, format: int64, minimum: 1}
+        createdBy: {$ref: "#/components/schemas/Id"}
+        updatedBy: {$ref: "#/components/schemas/Id"}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CableChannelInput:
+      type: object
+      additionalProperties: false
+      required: [number, name]
+      properties:
+        number: {type: integer, minimum: 1}
+        name: {type: string}
+        callsign: {type: string}
+        description: {type: string}
+        accent: {type: string}
+        artworkAssetId: {$ref: "#/components/schemas/Id"}
+        enabled: {type: boolean}
+        standby: {type: boolean}
+    CableChannel:
+      type: object
+      additionalProperties: false
+      required: [id, deploymentId, number, name, callsign, description, accent, enabled, standby, version, createdAt, updatedAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        deploymentId: {$ref: "#/components/schemas/Id"}
+        number: {type: integer, minimum: 1}
+        name: {type: string}
+        callsign: {type: string}
+        description: {type: string}
+        accent: {type: string}
+        artworkAssetId: {$ref: "#/components/schemas/Id"}
+        enabled: {type: boolean}
+        standby: {type: boolean}
+        version: {type: integer, format: int64, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CableProgramInput:
+      type: object
+      additionalProperties: false
+      required: [assetId, startsAt, endsAt]
+      properties:
+        assetId: {$ref: "#/components/schemas/Id"}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        title: {type: string}
+        subtitle: {type: string}
+        tag: {type: string}
+        artist: {type: string}
+        description: {type: string}
+        artworkAssetId: {$ref: "#/components/schemas/Id"}
+        placardPolicy: {type: string}
+        fit: {type: string}
+        availabilityPolicy: {type: string}
+        loop: {type: boolean}
+        mute: {type: boolean}
+        volume: {type: number, format: double, minimum: 0, maximum: 1}
+    CableProgram:
+      type: object
+      additionalProperties: false
+      required: [id, channelId, assetId, startsAt, endsAt, title, subtitle, tag, artist, description, placardPolicy, fit, availabilityPolicy, loop, mute, volume, version, createdAt, updatedAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        channelId: {$ref: "#/components/schemas/Id"}
+        assetId: {$ref: "#/components/schemas/Id"}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        title: {type: string}
+        subtitle: {type: string}
+        tag: {type: string}
+        artist: {type: string}
+        description: {type: string}
+        artworkAssetId: {$ref: "#/components/schemas/Id"}
+        placardPolicy: {type: string}
+        fit: {type: string}
+        availabilityPolicy: {type: string}
+        loop: {type: boolean}
+        mute: {type: boolean}
+        volume: {type: number, format: double, minimum: 0, maximum: 1}
+        version: {type: integer, format: int64, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CableShellBuildInput:
+      type: object
+      additionalProperties: false
+      required: [digest, entrypoint, artifactDigests, bridgeProtocol]
+      properties:
+        digest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        entrypoint: {type: string, minLength: 1, pattern: "^[^/].*$"}
+        artifactDigests:
+          type: array
+          uniqueItems: true
+          items: {type: string, pattern: "^[a-f0-9]{64}$"}
+        versionMetadata:
+          type: object
+          additionalProperties: {type: string}
+        bridgeProtocol: {type: string, minLength: 1}
+    CableShellBuild:
+      type: object
+      additionalProperties: false
+      required: [id, digest, entrypoint, artifactDigests, bridgeProtocol, createdBy, createdAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        digest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        entrypoint: {type: string, minLength: 1, pattern: "^[^/].*$"}
+        artifactDigests:
+          type: array
+          uniqueItems: true
+          items: {type: string, pattern: "^[a-f0-9]{64}$"}
+        versionMetadata:
+          type: object
+          additionalProperties: {type: string}
+        bridgeProtocol: {type: string, minLength: 1}
+        createdBy: {$ref: "#/components/schemas/Id"}
+        createdAt: {type: string, format: date-time}
+    CableRevisionWindow:
+      type: object
+      additionalProperties: false
+      required: [startsAt, endsAt]
+      properties:
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+    CableRevisionProgram:
+      type: object
+      additionalProperties: false
+      required: [id, startsAt, endsAt, assetId, artifactDigest, mediaType, loop, mute, volume]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        assetId: {$ref: "#/components/schemas/Id"}
+        artifactDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        mediaType: {type: string}
+        title: {type: string}
+        subtitle: {type: string}
+        tag: {type: string}
+        artist: {type: string}
+        description: {type: string}
+        artworkDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        fit: {type: string}
+        placardPolicy: {type: string}
+        availabilityPolicy: {type: string}
+        loop: {type: boolean}
+        mute: {type: boolean}
+        volume: {type: number, format: double, minimum: 0, maximum: 1}
+    CableRevisionChannel:
+      type: object
+      additionalProperties: false
+      required: [id, number, name, enabled, standby, programs]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        number: {type: integer, minimum: 1}
+        name: {type: string}
+        callsign: {type: string}
+        description: {type: string}
+        accent: {type: string}
+        artworkDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        enabled: {type: boolean}
+        standby: {type: boolean}
+        programs:
+          type: array
+          items: {$ref: "#/components/schemas/CableRevisionProgram"}
+    CableRevisionDocument:
+      type: object
+      additionalProperties: false
+      required: [schema, deploymentId, deploymentVersion, theme, generatedAt, shellBuildId, shellBuildDigest, entrypoint, bridgeProtocol, timezone, window, channels, artifactDigests]
+      properties:
+        schema: {type: string, const: cable.revision.v1}
+        deploymentId: {$ref: "#/components/schemas/Id"}
+        deploymentVersion: {type: integer, format: int64, minimum: 1}
+        theme: {type: string, enum: [nebula, gallery, noir]}
+        generatedAt: {type: string, format: date-time}
+        shellBuildId: {$ref: "#/components/schemas/Id"}
+        shellBuildDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        entrypoint: {type: string, minLength: 1, pattern: "^[^/].*$"}
+        bridgeProtocol: {type: string, minLength: 1}
+        timezone: {type: string, minLength: 1}
+        window: {$ref: "#/components/schemas/CableRevisionWindow"}
+        channels:
+          type: array
+          items: {$ref: "#/components/schemas/CableRevisionChannel"}
+        artifactDigests:
+          type: array
+          uniqueItems: true
+          items: {type: string, pattern: "^[a-f0-9]{64}$"}
+    CableRevision:
+      type: object
+      additionalProperties: false
+      required: [id, deploymentId, deploymentVersion, theme, generatedAt, shellBuildId, digest, shellBuildDigest, entrypoint, bridgeProtocol, timezone, window, channels, artifactDigests, createdBy, createdAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        deploymentId: {$ref: "#/components/schemas/Id"}
+        deploymentVersion: {type: integer, format: int64, minimum: 1}
+        theme: {type: string, enum: [nebula, gallery, noir]}
+        generatedAt: {type: string, format: date-time}
+        shellBuildId: {$ref: "#/components/schemas/Id"}
+        digest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        shellBuildDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        entrypoint: {type: string, minLength: 1, pattern: "^[^/].*$"}
+        bridgeProtocol: {type: string, minLength: 1}
+        timezone: {type: string, minLength: 1}
+        window: {$ref: "#/components/schemas/CableRevisionWindow"}
+        channels:
+          type: array
+          items: {$ref: "#/components/schemas/CableRevisionChannel"}
+        artifactDigests:
+          type: array
+          uniqueItems: true
+          items: {type: string, pattern: "^[a-f0-9]{64}$"}
+        json: {type: string, contentEncoding: base64, contentMediaType: application/json}
+        errors: {type: array, items: {type: string}}
+        warnings: {type: array, items: {type: string}}
+        createdBy: {$ref: "#/components/schemas/Id"}
+        createdAt: {type: string, format: date-time}
+    CableDeploymentPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CableDeployment"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    CableChannelPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CableChannel"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    CableProgramPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CableProgram"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    CableShellBuildPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CableShellBuild"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    CableRevisionPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CableRevision"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    CableCompileRequest:
+      type: object
+      additionalProperties: false
+      required: [shellBuildId, window]
+      properties:
+        shellBuildId: {$ref: "#/components/schemas/Id"}
+        window: {$ref: "#/components/schemas/CableRevisionWindow"}
     NodePage:
       type: object
       required: [items, page]
@@ -787,12 +1463,16 @@ components:
         mediaType: {type: string}
     Upload:
       type: object
-      required: [id, length, offset, state]
+      additionalProperties: false
+      required: [id, name, length, offset, mediaType, state]
       properties:
         id: {$ref: "#/components/schemas/Id"}
+        name: {type: string, minLength: 1, maxLength: 255}
         length: {type: integer, format: int64, minimum: 1}
         offset: {type: integer, format: int64, minimum: 0}
+        mediaType: {type: string}
         state: {type: string, enum: [open, finalizing, complete, failed]}
+        artifactDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
     Artifact:
       type: object
       required: [digest, size, mediaType]
@@ -824,6 +1504,43 @@ components:
           minItems: 1
           uniqueItems: true
           items: {type: string, enum: [stream, cache_then_play]}
+    MediaPresentation:
+      type: object
+      required: [playback]
+      properties:
+        playback: {$ref: "#/components/schemas/PlaybackPayload"}
+    CablePresentation:
+      type: object
+      required: [shellBuildDigest, revisionArtifactDigest, entrypoint, bridgeProtocol, artifactClosure]
+      properties:
+        shellBuildDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        revisionArtifactDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        entrypoint: {type: string, minLength: 1}
+        bridgeProtocol: {type: string, minLength: 1}
+        artifactClosure:
+          type: array
+          minItems: 2
+          uniqueItems: true
+          items: {type: string, pattern: "^[a-f0-9]{64}$"}
+    ReleasePresentation:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [media, cable]}
+        media: {$ref: "#/components/schemas/MediaPresentation"}
+        cable: {$ref: "#/components/schemas/CablePresentation"}
+      discriminator: {propertyName: kind}
+      oneOf:
+        - type: object
+          required: [kind, media]
+          properties:
+            kind: {type: string, const: media}
+            media: {$ref: "#/components/schemas/MediaPresentation"}
+        - type: object
+          required: [kind, cable]
+          properties:
+            kind: {type: string, const: cable}
+            cable: {$ref: "#/components/schemas/CablePresentation"}
     PublishReleaseInput:
       type: object
       required: [playback]
@@ -831,10 +1548,14 @@ components:
         playback: {$ref: "#/components/schemas/PlaybackPayload"}
     ReleasePayload:
       type: object
-      required: [schemaVersion, minimumProtocolVersion, playback, artifacts, requiredFeatures]
+      required: [schemaVersion, minimumProtocolVersion, artifacts, requiredFeatures]
+      oneOf:
+        - required: [presentation]
+        - required: [playback]
       properties:
-        schemaVersion: {type: string, const: "1.0"}
+        schemaVersion: {type: string, enum: ["1.0", "1.1"]}
         minimumProtocolVersion: {type: string}
+        presentation: {$ref: "#/components/schemas/ReleasePresentation"}
         playback: {$ref: "#/components/schemas/PlaybackPayload"}
         artifacts: {type: array, minItems: 1, items: {$ref: "#/components/schemas/Artifact"}}
         requiredFeatures: {type: array, items: {type: string}, uniqueItems: true}
@@ -849,10 +1570,11 @@ components:
         payload: {$ref: "#/components/schemas/ReleasePayload"}
     AssignmentInput:
       type: object
-      required: [releaseId, releaseDigest, deliveryMode, expectedGeneration]
+      required: [releaseId, releaseDigest, presentationKind, deliveryMode, expectedGeneration]
       properties:
         releaseId: {$ref: "#/components/schemas/Id"}
         releaseDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        presentationKind: {type: string, enum: [media, cable]}
         deliveryMode: {type: string, enum: [stream, cache_then_play]}
         expectedGeneration: {type: integer, format: int64, minimum: 0}
     Assignment:
@@ -900,12 +1622,13 @@ components:
         clockReliable: {type: boolean}
     NodeReport:
       type: object
-      required: [eventEpoch, sequence, desiredGenerationSeen, observedGeneration, conditions]
+      required: [eventEpoch, sequence, desiredGenerationSeen, observedGeneration, presentationKind, conditions]
       properties:
         eventEpoch: {type: string, format: uuid}
         sequence: {type: integer, format: int64, minimum: 1}
         desiredGenerationSeen: {type: integer, format: int64, minimum: 0}
         observedGeneration: {type: integer, format: int64, minimum: 0}
+        presentationKind: {type: [string, "null"], enum: [media, cable, null]}
         renderingReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         candidateReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         healthyReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}

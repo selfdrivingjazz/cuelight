@@ -253,11 +253,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, assignment playerclient.Assi
 	if envelope.ID != assignment.ReleaseID || envelope.Digest != assignment.ReleaseDigest {
 		return r.fail(ctx, generation, "bind release", ErrReleaseBinding)
 	}
+	if assignment.PresentationKind != "" && envelope.Payload.PresentationMode() != assignment.PresentationKind {
+		return r.fail(ctx, generation, "bind presentation", ErrReleaseBinding)
+	}
 	if err := release.Verify(envelope, r.config.PublisherKeyID, r.config.PublisherPublicKey, r.config.Capabilities.ProtocolVersion); err != nil {
 		return r.fail(ctx, generation, "verify release", err)
-	}
-	if err := r.checkProfile(envelope, assignment.DeliveryMode); err != nil {
-		return r.fail(ctx, generation, "check playback profile", err)
 	}
 
 	candidate, revoke, err := r.materialize(ctx, envelope, assignment.DeliveryMode)
@@ -271,6 +271,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, assignment playerclient.Assi
 		}
 	}()
 	r.snapshot.CandidateDigest = candidate.ReleaseDigest
+	r.snapshot.PresentationKind = candidate.Kind
 	if err := r.transition(generation, StatePrepared, "prepare renderer", ""); err != nil {
 		return r.fail(ctx, generation, "persist prepared", err)
 	}
@@ -334,7 +335,7 @@ func validateAssignment(assignment playerclient.Assignment) (uint64, error) {
 }
 
 func (r *Reconciler) checkProfile(envelope release.EnvelopeV1, mode string) error {
-	if !slices.Contains(envelope.Payload.Playback.AllowedDeliveryMode, mode) {
+	if !envelope.Payload.AllowsDeliveryMode(mode) {
 		return fmt.Errorf("%w: delivery mode %q", ErrIncompatibleRelease, mode)
 	}
 	for _, feature := range envelope.Payload.RequiredFeatures {
@@ -342,42 +343,48 @@ func (r *Reconciler) checkProfile(envelope release.EnvelopeV1, mode string) erro
 			return fmt.Errorf("%w: required feature %q", ErrIncompatibleRelease, feature)
 		}
 	}
-	for _, artifact := range envelope.Payload.Artifacts {
-		if len(r.config.AcceptedMediaTypes) > 0 && !slices.Contains(r.config.AcceptedMediaTypes, artifact.MediaType) {
-			return fmt.Errorf("%w: media type %q", ErrIncompatibleRelease, artifact.MediaType)
+	if envelope.Payload.PresentationMode() == release.PresentationMedia {
+		for _, artifact := range envelope.Payload.Artifacts {
+			if len(r.config.AcceptedMediaTypes) > 0 && !slices.Contains(r.config.AcceptedMediaTypes, artifact.MediaType) {
+				return fmt.Errorf("%w: media type %q", ErrIncompatibleRelease, artifact.MediaType)
+			}
 		}
 	}
 	return nil
 }
 
 func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV1, mode string) (renderer.Candidate, func(), error) {
-	artifact := envelope.Payload.Artifacts[0]
-	playback := envelope.Payload.Playback
-	candidate := renderer.Candidate{
-		ReleaseDigest:       envelope.Digest,
-		Fit:                 playback.Fit,
-		Loop:                playback.Loop,
-		Muted:               playback.Muted,
-		Volume:              playback.Volume,
-		ImageDurationSecond: playback.ImageDurationSecond,
-		Orientation:         playback.Orientation,
-	}
-	if mode == DeliveryStream {
-		if r.deps.Streamer == nil {
-			return candidate, nil, ErrUnsafeStreamSource
+	kind := envelope.Payload.PresentationMode()
+	candidate := renderer.Candidate{Kind: kind, ReleaseDigest: envelope.Digest}
+	if kind == release.PresentationMedia {
+		playback, ok := envelope.Payload.MediaPlayback()
+		if !ok || len(envelope.Payload.Artifacts) == 0 {
+			return candidate, nil, ErrIncompatibleRelease
 		}
-		source, revoke, err := r.deps.Streamer.Open(ctx, artifact.Digest, r.config.StreamTTL)
-		if err != nil {
-			return candidate, nil, err
-		}
-		if !isLoopbackURL(source) {
-			if revoke != nil {
-				revoke()
+		candidate.Fit, candidate.Loop, candidate.Muted, candidate.Volume = playback.Fit, playback.Loop, playback.Muted, playback.Volume
+		candidate.ImageDurationSecond, candidate.Orientation = playback.ImageDurationSecond, playback.Orientation
+		artifact := envelope.Payload.Artifacts[0]
+		if mode == DeliveryStream {
+			if r.deps.Streamer == nil {
+				return candidate, nil, ErrUnsafeStreamSource
 			}
-			return candidate, nil, ErrUnsafeStreamSource
+			source, revoke, err := r.deps.Streamer.Open(ctx, artifact.Digest, r.config.StreamTTL)
+			if err != nil {
+				return candidate, nil, err
+			}
+			if !isLoopbackURL(source) {
+				if revoke != nil {
+					revoke()
+				}
+				return candidate, nil, ErrUnsafeStreamSource
+			}
+			candidate.Source = source
+			return candidate, revoke, nil
 		}
-		candidate.Source = source
-		return candidate, revoke, nil
+	} else if kind != release.PresentationCable {
+		return candidate, nil, ErrIncompatibleRelease
+	} else if mode != DeliveryCacheThenPlay {
+		return candidate, nil, fmt.Errorf("%w: cable requires cache_then_play", ErrIncompatibleRelease)
 	}
 
 	referenced := make(map[string]bool, len(envelope.Payload.Artifacts))
@@ -393,7 +400,6 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 			return candidate, nil, err
 		}
 	}
-
 	missing := make([]release.Artifact, 0, len(envelope.Payload.Artifacts))
 	var required int64
 	objects := make(map[string]localcas.Object, len(envelope.Payload.Artifacts))
@@ -423,6 +429,27 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 		}
 		objects[item.Digest] = object
 	}
+	if kind == release.PresentationCable {
+		cable := envelope.Payload.Presentation.Cable
+		if cable == nil {
+			return candidate, nil, ErrIncompatibleRelease
+		}
+		shell, shellOK := objects[cable.ShellBuildDigest]
+		revision, revisionOK := objects[cable.RevisionArtifactDigest]
+		if !shellOK || !revisionOK || shell.Path == "" || revision.Path == "" {
+			return candidate, nil, errors.New("cable artifacts are not cached")
+		}
+		candidate.ShellBuildDigest, candidate.RevisionArtifactDigest = cable.ShellBuildDigest, cable.RevisionArtifactDigest
+		candidate.Entrypoint, candidate.BridgeProtocol = cable.Entrypoint, cable.BridgeProtocol
+		candidate.ArtifactClosure = slices.Clone(cable.ArtifactClosure)
+		candidate.ShellPath, candidate.RevisionPath = shell.Path, revision.Path
+		candidate.ArtifactPaths = make(map[string]string, len(objects))
+		for digest, object := range objects {
+			candidate.ArtifactPaths[digest] = object.Path
+		}
+		return candidate, nil, nil
+	}
+	artifact := envelope.Payload.Artifacts[0]
 	candidate.Source = objects[artifact.Digest].Path
 	if candidate.Source == "" {
 		return candidate, nil, errors.New("CAS committed object has no renderer path")
@@ -495,7 +522,7 @@ func (r *Reconciler) fail(ctx context.Context, generation uint64, operation stri
 }
 
 func (r *Reconciler) rollback(ctx context.Context, generation uint64, outcome string) bool {
-	if r.lkg.ReleaseDigest == "" || r.lkg.Source == "" {
+	if r.lkg.ReleaseDigest == "" || (r.lkg.Source == "" && r.lkg.Kind != release.PresentationCable) {
 		return false
 	}
 	if err := r.deps.Renderer.Prepare(ctx, r.lkg); err != nil {
@@ -514,6 +541,7 @@ func (r *Reconciler) rollback(ctx context.Context, generation uint64, outcome st
 	if err := r.deps.Journal.RecordTransition(generation, StateRolledBack, r.lkg.ReleaseDigest, outcome); err != nil {
 		return false
 	}
+	r.snapshot.PresentationKind = r.lkg.Kind
 	r.snapshot.RenderingDigest = r.lkg.ReleaseDigest
 	r.snapshot.HealthyDigest = r.lkg.ReleaseDigest
 	r.snapshot.LastKnownGoodDigest = r.lkg.ReleaseDigest
@@ -525,6 +553,7 @@ func (r *Reconciler) rollback(ctx context.Context, generation uint64, outcome st
 
 func (r *Reconciler) restoreHealthy(generation uint64, candidate renderer.Candidate) {
 	r.snapshot.ObservedGeneration = generation
+	r.snapshot.PresentationKind = candidate.Kind
 	r.snapshot.RenderingDigest = candidate.ReleaseDigest
 	r.snapshot.CandidateDigest = ""
 	r.snapshot.HealthyDigest = candidate.ReleaseDigest
@@ -552,6 +581,7 @@ func (r *Reconciler) stopActive(ctx context.Context) {
 	r.activeDelivery = ""
 	r.snapshot.RenderingDigest = ""
 	r.snapshot.HealthyDigest = ""
+	r.snapshot.PresentationKind = ""
 	r.snapshot.Safe = true
 }
 
@@ -594,10 +624,13 @@ func (r *Reconciler) event(kind string, generation uint64, data map[string]any) 
 	r.eventSeq++
 	sequence := r.eventSeq
 	event := playerclient.NodeEvent{ID: eventUUID(r.epoch, sequence), Epoch: r.epoch, Sequence: int64(sequence), Type: kind, OccurredAt: r.deps.Clock.Now(), Data: data}
+	if event.Data == nil {
+		event.Data = make(map[string]any)
+	}
+	if r.snapshot.PresentationKind != "" {
+		event.Data["presentationKind"] = r.snapshot.PresentationKind
+	}
 	if generation > 0 {
-		if event.Data == nil {
-			event.Data = make(map[string]any)
-		}
 		event.Data["generation"] = generation
 	}
 	if len(r.events) == r.config.MaxEvents {
@@ -628,6 +661,7 @@ func (r *Reconciler) flush(ctx context.Context) error {
 	report := playerclient.NodeReport{
 		EventEpoch: r.epoch, Sequence: int64(r.reportSeq),
 		DesiredGenerationSeen: int64(r.snapshot.DesiredGenerationSeen), ObservedGeneration: int64(r.snapshot.ObservedGeneration),
+		PresentationKind:       r.snapshot.PresentationKind,
 		RenderingReleaseDigest: stringPointer(r.snapshot.RenderingDigest), CandidateReleaseDigest: stringPointer(r.snapshot.CandidateDigest),
 		HealthyReleaseDigest: stringPointer(r.snapshot.HealthyDigest), LastKnownGoodReleaseDigest: stringPointer(r.snapshot.LastKnownGoodDigest), Conditions: conditions,
 	}
