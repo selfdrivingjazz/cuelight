@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	operator "github.com/jmill/cable/internal/client"
 	"github.com/jmill/cable/internal/control/pki"
 )
 
@@ -278,6 +279,9 @@ func (m *Manager) Up(ctx context.Context) (Status, error) {
 			return writeErr(err)
 		}
 	}
+	if err := operator.SaveConfig(m.path("operator.json"), operator.Config{Server: r.Endpoint + "/api/v1", Token: admin, CAPath: m.path("trust", "ca.pem")}); err != nil {
+		return writeErr(err)
+	}
 	enrollment := ""
 	if _, stateErr := os.Stat(m.path("state", "node.state.json")); errors.Is(stateErr, os.ErrNotExist) {
 		enrollment, err = m.enrollment(ctx, r.Endpoint, admin)
@@ -359,7 +363,10 @@ func (m *Manager) Reset(ctx context.Context) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, path := range []string{m.path("trust"), m.path("cas"), m.path("state"), m.path("admin-token"), m.receiptPath()} {
+	if err := m.reclaimPostgresRoot(ctx); err != nil {
+		return err
+	}
+	for _, path := range []string{m.path("trust"), m.path("cas"), m.path("state"), m.path("postgres"), m.path("admin-token"), m.path("operator.json"), m.path("logs"), m.receiptPath()} {
 		if err := removeWithinRoot(m.config.Root, path); err != nil {
 			return err
 		}
@@ -442,7 +449,11 @@ func (m *Manager) path(parts ...string) string {
 }
 func (m *Manager) receiptPath() string { return m.path("lifecycle.json") }
 func (m *Manager) paths() map[string]string {
-	return map[string]string{"ca": m.path("trust", "ca.pem"), "serverCertificate": m.path("trust", "server.pem"), "publisherKey": m.path("trust", "publisher-key.pem"), "sealKey": m.path("trust", "seal.key"), "cas": m.path("cas"), "nodeState": m.path("state", "node.state.json")}
+	return map[string]string{
+		"ca":             m.path("trust", "ca.pem"),
+		"operatorConfig": m.path("operator.json"),
+		"logs":           m.path("logs"),
+	}
 }
 func (m *Manager) ensureRoot() error {
 	if err := os.MkdirAll(m.config.Root, 0700); err != nil {
@@ -532,6 +543,24 @@ func (m *Manager) componentStatus(c componentReceipt) ComponentStatus {
 	}
 	return ComponentStatus{State: state, PID: c.PID, ContainerID: c.ID, Endpoint: endpoint}
 }
+func (m *Manager) reclaimPostgresRoot(ctx context.Context) error {
+	postgresRoot := m.path("postgres")
+	if _, err := os.Stat(postgresRoot); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	code, err := m.commands.Run(ctx, "docker", []string{"run", "--rm", "--entrypoint", "chown", "-v", postgresRoot + ":/data", m.config.PostgresImage, "-R", owner, "/data"}, nil, io.Discard, io.Discard)
+	if err != nil {
+		return fmt.Errorf("reclaim PostgreSQL development data: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("reclaim PostgreSQL development data exited %d", code)
+	}
+	return nil
+}
+
 func redactEndpoint(raw string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.User == nil {

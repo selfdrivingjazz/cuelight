@@ -45,6 +45,7 @@ type globalOptions struct {
 	configPath            string
 	server                string
 	token                 string
+	caPath                string
 	allowInsecureLoopback bool
 }
 
@@ -75,6 +76,7 @@ func run(ctx context.Context, args []string, streams commandIO) int {
 	flags.StringVar(&options.configPath, "config", defaultPath, "operator config path")
 	flags.StringVar(&options.server, "server", "", "override the configured server")
 	flags.StringVar(&options.token, "token", "", "override the configured operator token")
+	flags.StringVar(&options.caPath, "ca", "", "CA certificate for the configured HTTPS server")
 	flags.BoolVar(&options.allowInsecureLoopback, "allow-insecure-loopback", false, "allow plain HTTP to a loopback server")
 	showVersion := flags.Bool("version", false, "print version")
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
@@ -176,19 +178,25 @@ func runLogin(args []string, options globalOptions, streams commandIO) int {
 	flags := commandFlags("login")
 	server := flags.String("server", options.server, "Cable server URL")
 	token := flags.String("token", options.token, "operator token")
+	caPath := flags.String("ca", options.caPath, "CA certificate for the Cable server")
 	allowInsecureLoopback := flags.Bool("allow-insecure-loopback", options.allowInsecureLoopback, "allow plain HTTP to a loopback server")
 	if code := parseCommand(flags, args, streams.stderr); code != exitOK {
 		return code
 	}
 	if flags.NArg() != 0 || *server == "" || *token == "" {
-		fmt.Fprintln(streams.stderr, "usage: cable login --server URL --token TOKEN")
+		fmt.Fprintln(streams.stderr, "usage: cable login --server URL --token TOKEN [--ca PATH]")
 		return exitUsage
 	}
 	options.allowInsecureLoopback = *allowInsecureLoopback
-	if _, err := operator.New(*server, *token, streams.httpClient, clientOptions(options)...); err != nil {
+	options.caPath = *caPath
+	httpClient, err := configuredHTTPClient(options, streams)
+	if err != nil {
 		return renderFailure(streams, options.json, exitConfig, err)
 	}
-	if err := operator.SaveConfig(options.configPath, operator.Config{Server: *server, Token: *token}); err != nil {
+	if _, err := operator.New(*server, *token, httpClient, clientOptions(options)...); err != nil {
+		return renderFailure(streams, options.json, exitConfig, err)
+	}
+	if err := operator.SaveConfig(options.configPath, operator.Config{Server: *server, Token: *token, CAPath: *caPath}); err != nil {
 		return renderFailure(streams, options.json, exitConfig, err)
 	}
 	result := struct {
@@ -218,11 +226,15 @@ func runConfig(args []string, options globalOptions, streams commandIO) int {
 	result := struct {
 		Server          string `json:"server"`
 		TokenConfigured bool   `json:"tokenConfigured"`
-	}{Server: config.Server, TokenConfigured: config.Token != ""}
+		CAPath          string `json:"caPath,omitempty"`
+	}{Server: config.Server, TokenConfigured: config.Token != "", CAPath: config.CAPath}
 	if options.json {
 		writeJSON(streams.stdout, result)
 	} else {
 		fmt.Fprintf(streams.stdout, "Server: %s\nToken: configured\n", result.Server)
+		if result.CAPath != "" {
+			fmt.Fprintf(streams.stdout, "CA: %s\n", result.CAPath)
+		}
 	}
 	return exitOK
 }
@@ -934,12 +946,26 @@ func configuredClient(options globalOptions, streams commandIO) (*operator.Clien
 		if token == "" {
 			token = config.Token
 		}
+		if options.caPath == "" {
+			options.caPath = config.CAPath
+		}
 	}
-	api, err := operator.New(server, token, streams.httpClient, clientOptions(options)...)
+	httpClient, err := configuredHTTPClient(options, streams)
+	if err != nil {
+		return nil, renderFailure(streams, options.json, exitConfig, err)
+	}
+	api, err := operator.New(server, token, httpClient, clientOptions(options)...)
 	if err != nil {
 		return nil, renderFailure(streams, options.json, exitConfig, err)
 	}
 	return api, exitOK
+}
+
+func configuredHTTPClient(options globalOptions, streams commandIO) (*http.Client, error) {
+	if options.caPath != "" {
+		return operator.HTTPClientWithCA(options.caPath)
+	}
+	return streams.httpClient, nil
 }
 
 func clientOptions(options globalOptions) []operator.Option {
@@ -1133,10 +1159,9 @@ func usageError(stderr io.Writer, message string) int {
 	fmt.Fprintln(stderr, message)
 	return exitUsage
 }
-
 func writeUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage: cable [global flags] <command>")
-	fmt.Fprintln(output, "global flags: --output human|json|jsonl, --json, --config PATH, --server URL, --token TOKEN, --allow-insecure-loopback")
+	fmt.Fprintln(output, "global flags: --output human|json|jsonl, --json, --config PATH, --server URL, --token TOKEN, --ca PATH, --allow-insecure-loopback")
 	fmt.Fprintln(output, "commands: login, config, token, enrollment-token, recovery-token, node, media, release, assignment, status, events, play, wait, fixture")
 	fmt.Fprintln(output, "exit codes: 0 success, 2 usage, 3 config, 4 auth, 5 not found, 6 conflict, 7 API, 8 I/O, 9 timeout")
 }

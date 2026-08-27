@@ -14,6 +14,7 @@ var ErrInsecureConfig = errors.New("operator config permissions must be 0600")
 type Config struct {
 	Server string `json:"server"`
 	Token  string `json:"token"`
+	CAPath string `json:"caPath,omitempty"`
 }
 
 func DefaultConfigPath() (string, error) {
