@@ -1,0 +1,178 @@
+package operatorapi
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/jmill/cable/internal/control/assignment"
+	"github.com/jmill/cable/internal/control/auth"
+	"github.com/jmill/cable/internal/control/media"
+	"github.com/jmill/cable/internal/control/pki"
+	"github.com/jmill/cable/internal/control/release"
+	playerclient "github.com/jmill/cable/internal/player/client"
+	canonical "github.com/jmill/cable/internal/release"
+)
+
+const (
+	ScopeNodeEnroll      = "node_enroll"
+	ScopeSecurityAdmin   = "security_admin"
+	ScopeNodeRead        = "node_read"
+	ScopeNodeWrite       = "node_write"
+	ScopeAssignmentRead  = "assignment_read"
+	ScopeAssignmentWrite = "assignment_write"
+	ScopeMediaRead       = "media_read"
+	ScopeMediaWrite      = "media_write"
+	ScopeLocalMediaRead  = "local_media_read"
+	ScopeReleaseRead     = "release_read"
+	ScopeReleaseWrite    = "release_write"
+)
+
+var (
+	ErrUnauthorized   = errors.New("operator authentication required")
+	ErrForbidden      = errors.New("operator scope is insufficient")
+	ErrInvalidRequest = errors.New("invalid operator request")
+	ErrBodyTooLarge   = errors.New("operator request body is too large")
+	ErrChunkTooLarge  = errors.New("operator upload chunk is too large")
+	ErrOffsetMismatch = errors.New("upload offset mismatch")
+	ErrPrecondition   = errors.New("If-Match precondition failed")
+	ErrCursorInvalid  = errors.New("invalid cursor")
+	ErrWaitInvalid    = errors.New("invalid wait")
+)
+
+// Problem is the RFC 9457-compatible error representation emitted by handlers.
+type Problem struct {
+	Type          string `json:"type"`
+	Title         string `json:"title"`
+	Status        int    `json:"status"`
+	Detail        string `json:"detail,omitempty"`
+	Instance      string `json:"instance,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty"`
+}
+
+// Node is the stable operator representation. Desired and observed generations
+// are optional because some repositories only expose node identity metadata.
+type Node struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	CredentialState    string `json:"credentialState"`
+	DesiredGeneration  int64  `json:"desiredGeneration,omitempty"`
+	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
+}
+
+type Assignment struct {
+	ID                 string `json:"id"`
+	NodeID             string `json:"nodeId"`
+	ReleaseID          string `json:"releaseId"`
+	ReleaseDigest      string `json:"releaseDigest"`
+	DeliveryMode       string `json:"deliveryMode"`
+	ExpectedGeneration int64  `json:"expectedGeneration"`
+	DesiredGeneration  int64  `json:"desiredGeneration"`
+}
+
+type Upload struct {
+	ID     string `json:"id"`
+	Length int64  `json:"length"`
+	Offset int64  `json:"offset"`
+	State  string `json:"state"`
+}
+
+type Artifact struct {
+	Digest    string `json:"digest"`
+	Size      int64  `json:"size"`
+	MediaType string `json:"mediaType"`
+}
+
+type Asset struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Artifact Artifact `json:"artifact"`
+}
+
+type EnrollmentTokenCreated struct {
+	ID        string    `json:"id"`
+	Secret    string    `json:"secret"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+type NodeService interface {
+	ListNodes(context.Context) ([]Node, error)
+	GetNode(context.Context, string) (Node, error)
+	UpdateNode(context.Context, string, string, string) (Node, error)
+	GetNodeStatus(context.Context, string) (playerclient.NodeReport, error)
+	ListNodeEvents(context.Context, string, string) ([]playerclient.NodeEvent, *string, error)
+}
+
+type AssignmentService interface {
+	GetAssignment(context.Context, string) (assignment.Assignment, error)
+	PutAssignment(context.Context, string, assignment.Mutation, assignment.PutInput) (assignment.PutResult, error)
+}
+
+type AssetService interface {
+	ListAssets(context.Context) ([]media.Asset, error)
+	GetAsset(context.Context, string) (media.Asset, error)
+}
+
+type ReleaseService interface {
+	Publish(context.Context, release.Mutation, release.PublishInput) (release.PublishResult, error)
+	GetRelease(context.Context, string) (canonical.EnvelopeV1, error)
+}
+
+// Dependencies is the explicit composition boundary for the operator API.
+// Services are deliberately narrow, allowing HTTP to be tested without SQL.
+type Dependencies struct {
+	Auth interface {
+		Authenticate(context.Context, string, ...string) (auth.Actor, error)
+		List(context.Context) ([]auth.TokenMetadata, error)
+		Revoke(context.Context, string) (auth.TokenMetadata, error)
+	}
+	PKI interface {
+		CreateEnrollmentToken(context.Context, pki.Mutation) (pki.TokenSecret, error)
+		CreateRecoveryToken(context.Context, pki.Mutation, string) (pki.TokenSecret, error)
+	}
+	Nodes       NodeService
+	Assignments AssignmentService
+	Media       interface {
+		CreateUpload(context.Context, media.Mutation, media.CreateUploadRequest) (media.Upload, error)
+		Upload(context.Context, string) (media.Upload, error)
+		AppendChunk(context.Context, media.Mutation, string, media.AppendChunkRequest) (media.Upload, error)
+		CompleteUpload(context.Context, media.Mutation, string) (media.Asset, error)
+	}
+	Registration interface {
+		Register(context.Context, media.Mutation, string) (media.Asset, error)
+	}
+	Assets        AssetService
+	Releases      ReleaseService
+	MaxJSONBytes  int64
+	MaxChunkBytes int64
+	Idempotency   *IdempotencyCache
+}
+
+// IdempotencyCache is only used by adapters that need HTTP-level replay. Domain
+// services should continue to own durable idempotency where available.
+type IdempotencyCache struct {
+	mu     sync.Mutex
+	values map[string][]byte
+}
+
+func NewIdempotencyCache() *IdempotencyCache {
+	return &IdempotencyCache{values: make(map[string][]byte)}
+}
+func (c *IdempotencyCache) get(key string) ([]byte, bool) {
+	if c == nil {
+		return nil, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	b, ok := c.values[key]
+	return append([]byte(nil), b...), ok
+}
+func (c *IdempotencyCache) put(key string, b []byte) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.values[key] = append([]byte(nil), b...)
+}

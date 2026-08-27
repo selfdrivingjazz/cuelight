@@ -57,7 +57,7 @@ paths:
                   items:
                     type: array
                     items: {$ref: "#/components/schemas/AdminToken"}
-  /admin-tokens/{tokenId}:revoke:
+  /admin-tokens/{tokenId}/revoke:
     post:
       tags: [operator]
       operationId: revokeAdminToken
@@ -276,7 +276,7 @@ paths:
           headers:
             Upload-Offset: {schema: {type: integer, format: int64, minimum: 0}}
         default: {$ref: "#/components/responses/Problem"}
-  /uploads/{uploadId}:complete:
+  /uploads/{uploadId}/complete:
     post:
       tags: [operator]
       operationId: completeUpload
@@ -292,7 +292,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Asset"}
         default: {$ref: "#/components/responses/Problem"}
-  /assets:register-local:
+  /assets/register-local:
     post:
       tags: [operator]
       operationId: registerLocalAsset
@@ -344,7 +344,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Asset"}
         default: {$ref: "#/components/responses/Problem"}
-  /releases:publish:
+  /releases/publish:
     post:
       tags: [operator]
       operationId: publishRelease

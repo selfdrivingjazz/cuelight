@@ -107,7 +107,7 @@ func (c *Client) ListTokens(ctx context.Context) ([]AdminToken, error) {
 }
 
 func (c *Client) RevokeToken(ctx context.Context, tokenID, idempotencyKey string) error {
-	return c.doJSON(ctx, http.MethodPost, "/admin-tokens/"+url.PathEscape(tokenID)+":revoke", nil, idempotencyKey, "", nil, http.StatusNoContent)
+	return c.doJSON(ctx, http.MethodPost, "/admin-tokens/"+url.PathEscape(tokenID)+"/revoke", nil, idempotencyKey, "", nil, http.StatusNoContent)
 }
 
 func (c *Client) CreateEnrollmentToken(ctx context.Context, idempotencyKey string) (OneTimeToken, error) {
@@ -197,7 +197,7 @@ func (c *Client) AppendUpload(ctx context.Context, uploadID string, offset, leng
 
 func (c *Client) CompleteUpload(ctx context.Context, uploadID, idempotencyKey string) (Asset, error) {
 	var result Asset
-	path := "/uploads/" + url.PathEscape(uploadID) + ":complete"
+	path := "/uploads/" + url.PathEscape(uploadID) + "/complete"
 	err := c.doJSON(ctx, http.MethodPost, path, nil, idempotencyKey, "", &result, http.StatusCreated)
 	return result, err
 }
@@ -222,7 +222,7 @@ func (c *Client) RegisterLocalAsset(ctx context.Context, path, idempotencyKey st
 	body := struct {
 		Path string `json:"path"`
 	}{Path: path}
-	err := c.doJSON(ctx, http.MethodPost, "/assets:register-local", body, idempotencyKey, "", &result, http.StatusCreated)
+	err := c.doJSON(ctx, http.MethodPost, "/assets/register-local", body, idempotencyKey, "", &result, http.StatusCreated)
 	return result, err
 }
 
@@ -231,7 +231,7 @@ func (c *Client) PublishRelease(ctx context.Context, input json.RawMessage, idem
 		return nil, errors.New("release input is not valid JSON")
 	}
 	var result Document
-	err := c.doJSON(ctx, http.MethodPost, "/releases:publish", input, idempotencyKey, "", &result, http.StatusCreated)
+	err := c.doJSON(ctx, http.MethodPost, "/releases/publish", input, idempotencyKey, "", &result, http.StatusCreated)
 	return result, err
 }
 

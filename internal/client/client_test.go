@@ -14,7 +14,7 @@ import (
 
 func TestRequestMappingAndProblemDecoding(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost || request.URL.EscapedPath() != "/admin-tokens/token%2Fid:revoke" {
+		if request.Method != http.MethodPost || request.URL.EscapedPath() != "/admin-tokens/token%2Fid/revoke" {
 			http.Error(response, "wrong request", http.StatusInternalServerError)
 			return
 		}
@@ -133,7 +133,7 @@ func TestUploadAssetStreamsContentAcrossWorkflow(t *testing.T) {
 			response.Header().Set("Upload-Offset", fmt.Sprint(len(content)))
 			response.WriteHeader(http.StatusNoContent)
 		case 3:
-			if request.Method != http.MethodPost || request.URL.Path != "/uploads/upload-1:complete" {
+			if request.Method != http.MethodPost || request.URL.Path != "/uploads/upload-1/complete" {
 				t.Fatalf("complete request = %s %s", request.Method, request.URL.Path)
 			}
 			response.Header().Set("Content-Type", "application/json")
