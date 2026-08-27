@@ -37,7 +37,7 @@ func run(ctx context.Context, args []string, streams commandIO) int {
 	migrations := flags.String("migrations", "migrations", "control-plane migrations directory")
 	control := flags.String("control-binary", "cable-control", "cable-control executable")
 	simulator := flags.String("simulator-binary", "cable-node-sim", "cable-node-sim executable")
-	image := flags.String("postgres-image", "postgres:16-alpine", "PostgreSQL Docker image")
+	image := flags.String("postgres-image", "postgres:17-alpine", "PostgreSQL Docker image")
 	jsonOutput := flags.Bool("json", true, "emit structured JSON (the default)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

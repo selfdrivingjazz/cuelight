@@ -35,7 +35,7 @@ import (
 const (
 	stateVersion           = 1
 	rootMarker             = "cable-development-root-v1"
-	defaultPostgresImage   = "postgres:16-alpine"
+	defaultPostgresImage   = "postgres:17-alpine"
 	defaultControlBinary   = "cable-control"
 	defaultSimulatorBinary = "cable-node-sim"
 )
