@@ -1,9 +1,18 @@
 package main
 
-import "fmt"
+import (
+	"context"
+	"net/http"
+	"os"
+)
 
 var version = "dev"
 
 func main() {
-	fmt.Printf("cable %s\n", version)
+	os.Exit(run(context.Background(), os.Args[1:], commandIO{
+		stdin:      os.Stdin,
+		stdout:     os.Stdout,
+		stderr:     os.Stderr,
+		httpClient: http.DefaultClient,
+	}))
 }
