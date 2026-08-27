@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 25% 98%;
+  --foreground: 216 32% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 216 32% 12%;
+  --primary: 199 89% 38%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 200 30% 94%;
+  --border: 214 21% 87%;
+  --muted: 210 22% 94%;
+  --muted-foreground: 215 16% 44%;
+  --ring: 199 89% 38%;
+  --status-success: 152 64% 32%;
+  --status-warning: 35 85% 38%;
+  --status-danger: 0 72% 43%;
+  --status-info: 199 89% 38%;
+  --sidebar-width: 15rem;
+  --content-max-width: 90rem;
+  --table-row-height: 3rem;
+  --table-header-height: 2.5rem;
+  --focus-ring: 0 0 0 3px hsl(var(--ring) / .22);
+}
+
+* { border-color: hsl(var(--border)); }
+body { background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+:focus-visible { outline: none; box-shadow: var(--focus-ring); }

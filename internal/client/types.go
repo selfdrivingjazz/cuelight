@@ -128,10 +128,44 @@ type Assignment struct {
 	DesiredGeneration int64 `json:"desiredGeneration"`
 }
 
+// PageRequest is the common list query contract. Cursor remains opaque to the
+// client; callers pass a server-issued value unchanged.
+type PageRequest struct {
+	Cursor  string
+	Limit   int
+	Sort    string
+	Order   string
+	Search  string
+	Filters map[string]string
+}
+
+type PageInfo struct {
+	NextCursor     *string `json:"nextCursor"`
+	PreviousCursor *string `json:"previousCursor"`
+	HasMore        bool    `json:"hasMore"`
+}
+
+type Page[T any] struct {
+	Items []T      `json:"items"`
+	Page  PageInfo `json:"page"`
+}
+
+type PageResponse[T any] = Page[T]
+
 // Document represents an API object whose fields are intentionally open-ended.
 type Document map[string]any
 
+type OperatorMe struct {
+	ID           string          `json:"id"`
+	TokenID      string          `json:"tokenId,omitempty"`
+	Scopes       []string        `json:"scopes"`
+	Capabilities map[string]bool `json:"capabilities"`
+}
+
+// EventPage retains the sequence cursor at the top level for compatibility;
+// Page carries the common envelope metadata for new callers.
 type EventPage struct {
 	Items      []Document `json:"items"`
 	NextCursor *string    `json:"nextCursor"`
+	Page       PageInfo   `json:"page"`
 }

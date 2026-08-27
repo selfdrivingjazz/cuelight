@@ -1,0 +1,19 @@
+{
+  "name": "cable-web-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.14.0",
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "bootstrap": "pnpm install --frozen-lockfile",
+    "generate": "pnpm --filter @cable/api-client generate",
+    "check": "pnpm generate && pnpm -r typecheck && pnpm --filter @cable/api-client check-generated",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "e2e": "pnpm --filter @cable/controller-web e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0",
+    "@types/node": "24.3.0",
+    "typescript": "5.9.2"
+  }
+}

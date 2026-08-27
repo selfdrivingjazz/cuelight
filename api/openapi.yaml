@@ -22,6 +22,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+  /operator/me:
+    get:
+      tags: [operator]
+      operationId: getOperatorMe
+      security: [{operatorToken: []}]
+      x-required-scopes: []
+      responses:
+        "200":
+          description: Authenticated operator identity, scopes, and capabilities.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OperatorMe"}
+        default: {$ref: "#/components/responses/Problem"}
   /enrollment-tokens:
     post:
       tags: [operator]
@@ -75,18 +88,18 @@ paths:
       operationId: listNodes
       security: [{operatorToken: []}]
       x-required-scopes: [node_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageSort"
+        - $ref: "#/components/parameters/PageOrder"
+        - $ref: "#/components/parameters/PageSearch"
       responses:
         "200":
-          description: Nodes.
+          description: Nodes in deterministic keyset order.
           content:
             application/json:
-              schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items: {$ref: "#/components/schemas/Node"}
+              schema: {$ref: "#/components/schemas/NodePage"}
   /nodes/{nodeId}:
     get:
       tags: [operator]
@@ -207,21 +220,33 @@ paths:
         - $ref: "#/components/parameters/NodeId"
         - name: cursor
           in: query
-          schema: {type: string}
+          description: Last consumed event sequence; this is not a keyset cursor.
+          schema: {type: string, pattern: "^[0-9]+$"}
+        - $ref: "#/components/parameters/PageLimit"
       responses:
         "200":
-          description: Node events.
+          description: Node events. nextCursor is the last returned sequence.
           content:
             application/json:
-              schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items: {$ref: "#/components/schemas/NodeEvent"}
-                  nextCursor: {type: [string, "null"]}
+              schema: {$ref: "#/components/schemas/EventPage"}
   /uploads:
+    get:
+      tags: [operator]
+      operationId: listUploads
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageSort"
+        - $ref: "#/components/parameters/PageOrder"
+        - $ref: "#/components/parameters/PageSearch"
+      responses:
+        "200":
+          description: Uploads in deterministic keyset order.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UploadPage"}
     post:
       tags: [operator]
       operationId: createUpload
@@ -320,16 +345,18 @@ paths:
       operationId: listAssets
       security: [{operatorToken: []}]
       x-required-scopes: [media_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageSort"
+        - $ref: "#/components/parameters/PageOrder"
+        - $ref: "#/components/parameters/PageSearch"
       responses:
         "200":
-          description: Assets.
+          description: Assets in deterministic keyset order.
           content:
             application/json:
-              schema:
-                type: object
-                required: [items]
-                properties:
-                  items: {type: array, items: {$ref: "#/components/schemas/Asset"}}
+              schema: {$ref: "#/components/schemas/AssetPage"}
   /assets/{assetId}:
     get:
       tags: [operator]
@@ -344,6 +371,42 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Asset"}
         default: {$ref: "#/components/responses/Problem"}
+  /assignments:
+    get:
+      tags: [operator]
+      operationId: listAssignments
+      security: [{operatorToken: []}]
+      x-required-scopes: [assignment_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageSort"
+        - $ref: "#/components/parameters/PageOrder"
+        - $ref: "#/components/parameters/PageSearch"
+      responses:
+        "200":
+          description: Assignments in deterministic keyset order.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AssignmentPage"}
+  /releases:
+    get:
+      tags: [operator]
+      operationId: listReleases
+      security: [{operatorToken: []}]
+      x-required-scopes: [release_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageSort"
+        - $ref: "#/components/parameters/PageOrder"
+        - $ref: "#/components/parameters/PageSearch"
+      responses:
+        "200":
+          description: Releases in deterministic keyset order.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReleasePage"}
   /releases/publish:
     post:
       tags: [operator]
@@ -587,6 +650,27 @@ components:
     UploadId: {name: uploadId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
     AssetId: {name: assetId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
     ReleaseId: {name: releaseId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    PageCursor:
+      name: cursor
+      in: query
+      description: Opaque, server-issued keyset cursor.
+      schema: {type: string, maxLength: 2048}
+    PageLimit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 25}
+    PageSort:
+      name: sort
+      in: query
+      schema: {type: string}
+    PageOrder:
+      name: order
+      in: query
+      schema: {type: string, enum: [asc, desc], default: asc}
+    PageSearch:
+      name: search
+      in: query
+      schema: {type: string, maxLength: 200}
     Digest:
       name: digest
       in: path
@@ -618,6 +702,58 @@ components:
         detail: {type: string}
         instance: {type: string, format: uri-reference}
         correlationId: {type: string}
+    OperatorMe:
+      type: object
+      required: [id, scopes, capabilities]
+      properties:
+        id: {type: string}
+        tokenId: {type: string}
+        scopes: {type: array, items: {type: string}}
+        capabilities: {type: object, additionalProperties: {type: boolean}}
+    PageInfo:
+      type: object
+      required: [nextCursor, previousCursor, hasMore]
+      properties:
+        nextCursor: {type: [string, "null"]}
+        previousCursor: {type: [string, "null"]}
+        hasMore: {type: boolean}
+    NodePage:
+      type: object
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Node"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    AssetPage:
+      type: object
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Asset"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    EventPage:
+      type: object
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/NodeEvent"}}
+        nextCursor: {type: [string, "null"]}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    UploadPage:
+      type: object
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Upload"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    ReleasePage:
+      type: object
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/ReleaseEnvelope"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    AssignmentPage:
+      type: object
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Assignment"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
     AdminToken:
       type: object
       required: [id, prefix, scopes, revoked]
@@ -664,6 +800,7 @@ components:
         digest: {type: string, pattern: "^[a-f0-9]{64}$"}
         size: {type: integer, format: int64, minimum: 1}
         mediaType: {type: string}
+        state: {type: string, enum: [ready, quarantined, missing]}
     Asset:
       type: object
       required: [id, name, artifact]

@@ -3,16 +3,17 @@ package operatorapi
 import (
 	"context"
 	"errors"
-	"sync"
-	"time"
-
+	"fmt"
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
 	"github.com/jmill/cable/internal/control/media"
+	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
 	"github.com/jmill/cable/internal/control/release"
 	playerclient "github.com/jmill/cable/internal/player/client"
 	canonical "github.com/jmill/cable/internal/release"
+	"sync"
+	"time"
 )
 
 const (
@@ -82,6 +83,7 @@ type Artifact struct {
 	Digest    string `json:"digest"`
 	Size      int64  `json:"size"`
 	MediaType string `json:"mediaType"`
+	State     string `json:"state,omitempty"`
 }
 
 type Asset struct {
@@ -94,6 +96,13 @@ type EnrollmentTokenCreated struct {
 	ID        string    `json:"id"`
 	Secret    string    `json:"secret"`
 	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+type OperatorMe struct {
+	ID           string          `json:"id"`
+	TokenID      string          `json:"tokenId,omitempty"`
+	Scopes       []string        `json:"scopes"`
+	Capabilities map[string]bool `json:"capabilities"`
 }
 
 type NodeService interface {
@@ -119,10 +128,110 @@ type ReleaseService interface {
 	GetRelease(context.Context, string) (canonical.EnvelopeV1, error)
 }
 
+type UploadPageService interface {
+	ListUploadsPage(context.Context, page.PageRequest) (page.Response[Upload], error)
+}
+
+type AssignmentPageService interface {
+	ListAssignmentsPage(context.Context, page.PageRequest) (page.Response[Assignment], error)
+}
+
+type ReleasePageService interface {
+	ListReleasesPage(context.Context, page.PageRequest) (page.Response[canonical.EnvelopeV1], error)
+}
+
+// PageRequestService is implemented by repositories that can perform keyset
+// pagination. Legacy list services remain supported during migration.
+type NodePageService interface {
+	ListNodesPage(context.Context, page.PageRequest) (page.Response[Node], error)
+}
+
+type AssetPageService interface {
+	ListAssetsPage(context.Context, page.PageRequest) (page.Response[Asset], error)
+}
+
+// Authorizer is the forward-compatible authorization seam. Implementations
+// receive the authenticated actor and a stable action/resource pair.
+type Authorizer interface {
+	Authorize(auth.Actor, string, string, string) error
+}
+
+// ScopeAuthorizer adapts existing token scopes to the action/resource seam.
+type ScopeAuthorizer struct {
+	Scopes map[string]string
+}
+
+func (a ScopeAuthorizer) Authorize(actor auth.Actor, action, resourceType, resourceID string) error {
+	if resourceType == "" {
+		return ErrInvalidRequest
+	}
+	switch resourceType {
+	case "node", "upload", "asset", "release", "token", "enrollment-token", "operator", "assignment", "assignments":
+	default:
+		return fmt.Errorf("%w: unknown resource %q", ErrForbidden, resourceType)
+	}
+	scope, ok := a.Scopes[action]
+	if !ok {
+		return fmt.Errorf("%w: unknown action %q", ErrForbidden, action)
+	}
+	if scope == "" {
+		return nil
+	}
+	for _, got := range actor.Scopes {
+		if got == scope {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: action %q on %s", ErrForbidden, action, resourceType)
+}
+
+// AuditRecord and AuditQuery are persistence-neutral audit contracts. The
+// controller may attach a repository without coupling handlers to SQL.
+type AuditRecord struct {
+	ID           string    `json:"id"`
+	ActorID      string    `json:"actorId"`
+	Action       string    `json:"action"`
+	ResourceType string    `json:"resourceType"`
+	ResourceID   string    `json:"resourceId,omitempty"`
+	Outcome      string    `json:"outcome"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type AuditQuery struct {
+	page.PageRequest
+	ActorID      string
+	Action       string
+	ResourceType string
+	ResourceID   string
+}
+
+type AuditRepository interface {
+	Append(context.Context, AuditRecord) error
+	Query(context.Context, AuditQuery) (page.Response[AuditRecord], error)
+}
+
+type AuditService struct{ Repository AuditRepository }
+
+func (s AuditService) Record(ctx context.Context, record AuditRecord) error {
+	if s.Repository == nil {
+		return nil
+	}
+	return s.Repository.Append(ctx, record)
+}
+
+func (s AuditService) List(ctx context.Context, query AuditQuery) (page.Response[AuditRecord], error) {
+	if s.Repository == nil {
+		return page.NewResponse[AuditRecord](nil, nil, nil, false), nil
+	}
+	return s.Repository.Query(ctx, query)
+}
+
 // Dependencies is the explicit composition boundary for the operator API.
 // Services are deliberately narrow, allowing HTTP to be tested without SQL.
 type Dependencies struct {
-	Auth interface {
+	Authorizer Authorizer
+	Audit      AuditService
+	Auth       interface {
 		Authenticate(context.Context, string, ...string) (auth.Actor, error)
 		List(context.Context) ([]auth.TokenMetadata, error)
 		Revoke(context.Context, string) (auth.TokenMetadata, error)

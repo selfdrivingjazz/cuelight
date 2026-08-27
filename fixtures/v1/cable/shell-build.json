@@ -1,0 +1,8 @@
+{
+  "id": "7d1e8df0-3a9c-4e95-8dd1-86c9d9f1a001",
+  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "entrypoint": "index.html",
+  "bridgeProtocol": "1.0",
+  "versionMetadata": {"version": "2026.08.27", "commit": "fixture"},
+  "artifactDigests": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+}

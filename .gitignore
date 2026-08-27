@@ -9,3 +9,7 @@
 *.pem
 *.key
 *.crt
+/node_modules/
+**/dist/
+**/test-results/
+**/playwright-report/

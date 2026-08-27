@@ -1,0 +1,490 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/jmill/cable/internal/control/cable"
+	"time"
+)
+
+var _ cable.Repository = (*Store)(nil)
+var _ cable.ArtifactRepository = (*Store)(nil)
+var _ cable.ArtifactByDigestRepository = (*Store)(nil)
+
+func ct(m cable.Mutation) time.Time {
+	if m.Now.IsZero() {
+		return time.Now().UTC()
+	}
+	return m.Now.UTC()
+}
+func cl(n int) int {
+	if n <= 0 {
+		return 25
+	}
+	if n > 100 {
+		return 100
+	}
+	return n
+}
+func cj(v any) ([]byte, error) { return json.Marshal(v) }
+func dj(b []byte, v any) {
+	if len(b) > 0 {
+		_ = json.Unmarshal(b, v)
+	}
+}
+func ce(op string, e error) error {
+	if e == nil {
+		return nil
+	}
+	if errors.Is(e, sql.ErrNoRows) {
+		return cable.ErrNotFound
+	}
+	return fmt.Errorf("PostgreSQL %s: %w", op, e)
+}
+func pgConflict(e error) bool { return postgresCode(e) == "23505" }
+func (s *Store) CreateDeployment(ctx context.Context, m cable.Mutation, in cable.DeploymentInput) (cable.CableDeployment, error) {
+	if m.ActorID == "" || in.Name == "" || in.Timezone == "" {
+		return cable.CableDeployment{}, cable.ErrInvalidArgument
+	}
+	if _, e := time.LoadLocation(in.Timezone); e != nil {
+		return cable.CableDeployment{}, cable.ErrInvalidArgument
+	}
+	if in.Theme != "nebula" && in.Theme != "gallery" && in.Theme != "noir" {
+		return cable.CableDeployment{}, cable.ErrInvalidArgument
+	}
+	id, e := s.newUUID()
+	if e != nil {
+		return cable.CableDeployment{}, e
+	}
+	p, _ := cj(in.PlacardDefaults)
+	f, _ := cj(in.FallbackMetadata)
+	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_deployments(id,name,timezone,theme,guide_horizon,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$9,$10,$10)`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizon, in.GuideDensity, p, f, m.ActorID, ct(m))
+	if e != nil {
+		return cable.CableDeployment{}, ce("create cable deployment", e)
+	}
+	return s.Deployment(ctx, id)
+}
+func (s *Store) Deployment(ctx context.Context, id string) (cable.CableDeployment, error) {
+	var d cable.CableDeployment
+	var p, f []byte
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,name,timezone,theme,guide_horizon,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at FROM cable_deployments WHERE id=$1`, id).Scan(&d.ID, &d.Name, &d.Timezone, &d.Theme, &d.GuideHorizon, &d.GuideDensity, &p, &f, &d.Version, &d.CreatedBy, &d.UpdatedBy, &d.CreatedAt, &d.UpdatedAt)
+	if e != nil {
+		return d, ce("get cable deployment", e)
+	}
+	dj(p, &d.PlacardDefaults)
+	dj(f, &d.FallbackMetadata)
+	return d, nil
+}
+func (s *Store) UpdateDeployment(ctx context.Context, m cable.Mutation, id string, in cable.DeploymentInput) (cable.CableDeployment, error) {
+	if m.ExpectedVersion <= 0 {
+		return cable.CableDeployment{}, cable.ErrConflict
+	}
+	if in.Name == "" || in.Timezone == "" {
+		return cable.CableDeployment{}, cable.ErrInvalidArgument
+	}
+	if _, e := time.LoadLocation(in.Timezone); e != nil {
+		return cable.CableDeployment{}, cable.ErrInvalidArgument
+	}
+	p, _ := cj(in.PlacardDefaults)
+	f, _ := cj(in.FallbackMetadata)
+	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_deployments SET name=$2,timezone=$3,theme=$4,guide_horizon=$5,guide_density=$6,placard_defaults=$7,fallback_metadata=$8,version=version+1,updated_by=$9,updated_at=$10 WHERE id=$1 AND version=$11`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizon, in.GuideDensity, p, f, m.ActorID, ct(m), m.ExpectedVersion)
+	if e != nil {
+		return cable.CableDeployment{}, ce("update cable deployment", e)
+	}
+	n, _ := r.RowsAffected()
+	if n != 1 {
+		return cable.CableDeployment{}, cable.ErrConflict
+	}
+	return s.Deployment(ctx, id)
+}
+func (s *Store) ListDeployments(ctx context.Context, cursor string, limit int) (cable.DeploymentPage, error) {
+	limit = cl(limit)
+	q := `SELECT id,name,timezone,theme,guide_horizon,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at FROM cable_deployments`
+	args := []any{}
+	if cursor != "" {
+		q += ` WHERE id>$1`
+		args = append(args, cursor)
+	}
+	q += fmt.Sprintf(` ORDER BY id LIMIT $%d`, len(args)+1)
+	args = append(args, limit+1)
+	rows, e := s.q(ctx).QueryContext(ctx, q, args...)
+	if e != nil {
+		return cable.DeploymentPage{}, ce("list cable deployments", e)
+	}
+	defer rows.Close()
+	out := cable.DeploymentPage{Items: []cable.CableDeployment{}}
+	for rows.Next() {
+		var d cable.CableDeployment
+		var p, f []byte
+		if e = rows.Scan(&d.ID, &d.Name, &d.Timezone, &d.Theme, &d.GuideHorizon, &d.GuideDensity, &p, &f, &d.Version, &d.CreatedBy, &d.UpdatedBy, &d.CreatedAt, &d.UpdatedAt); e != nil {
+			return out, e
+		}
+		dj(p, &d.PlacardDefaults)
+		dj(f, &d.FallbackMetadata)
+		out.Items = append(out.Items, d)
+	}
+	if len(out.Items) > limit {
+		out.Items = out.Items[:limit]
+		out.Page.HasMore = true
+		out.Page.NextCursor = out.Items[limit-1].ID
+	}
+	return out, rows.Err()
+}
+func (s *Store) DeleteDeployment(ctx context.Context, m cable.Mutation, id string) error {
+	r, e := s.q(ctx).ExecContext(ctx, `DELETE FROM cable_deployments WHERE id=$1 AND version=$2`, id, m.ExpectedVersion)
+	if e != nil {
+		return ce("delete cable deployment", e)
+	}
+	n, _ := r.RowsAffected()
+	if n != 1 {
+		return cable.ErrConflict
+	}
+	return nil
+}
+
+func (s *Store) CreateChannel(ctx context.Context, m cable.Mutation, in cable.ChannelInput) (cable.Channel, error) {
+	if m.ActorID == "" || in.DeploymentID == "" || in.Number <= 0 {
+		return cable.Channel{}, cable.ErrInvalidArgument
+	}
+	id, e := s.newUUID()
+	if e != nil {
+		return cable.Channel{}, e
+	}
+	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_channels(id,deployment_id,number,name,callsign,description,accent,artwork_asset_id,enabled,standby,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9,$10,1,$11,$11)`, id, in.DeploymentID, in.Number, in.Name, in.Callsign, in.Description, in.Accent, in.ArtworkAssetID, in.Enabled, in.Standby, ct(m))
+	if e != nil {
+		if pgConflict(e) {
+			return cable.Channel{}, cable.ErrConflict
+		}
+		return cable.Channel{}, ce("create channel", e)
+	}
+	return s.Channel(ctx, id)
+}
+func (s *Store) Channel(ctx context.Context, id string) (cable.Channel, error) {
+	var v cable.Channel
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,deployment_id,number,name,callsign,description,accent,COALESCE(artwork_asset_id::text,''),enabled,standby,version,created_at,updated_at FROM cable_channels WHERE id=$1`, id).Scan(&v.ID, &v.DeploymentID, &v.Number, &v.Name, &v.Callsign, &v.Description, &v.Accent, &v.ArtworkAssetID, &v.Enabled, &v.Standby, &v.Version, &v.CreatedAt, &v.UpdatedAt)
+	if e != nil {
+		return v, ce("get channel", e)
+	}
+	return v, nil
+}
+func (s *Store) UpdateChannel(ctx context.Context, m cable.Mutation, id string, in cable.ChannelInput) (cable.Channel, error) {
+	if m.ExpectedVersion <= 0 || in.Number <= 0 {
+		return cable.Channel{}, cable.ErrInvalidArgument
+	}
+	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_channels SET number=$2,name=$3,callsign=$4,description=$5,accent=$6,artwork_asset_id=NULLIF($7,''),enabled=$8,standby=$9,version=version+1,updated_at=$10 WHERE id=$1 AND version=$11`, id, in.Number, in.Name, in.Callsign, in.Description, in.Accent, in.ArtworkAssetID, in.Enabled, in.Standby, ct(m), m.ExpectedVersion)
+	if e != nil {
+		if pgConflict(e) {
+			return cable.Channel{}, cable.ErrConflict
+		}
+		return cable.Channel{}, ce("update channel", e)
+	}
+	n, _ := r.RowsAffected()
+	if n != 1 {
+		return cable.Channel{}, cable.ErrConflict
+	}
+	return s.Channel(ctx, id)
+}
+func (s *Store) ListChannels(ctx context.Context, did, cursor string, limit int) (cable.ChannelPage, error) {
+	limit = cl(limit)
+	q := `SELECT id,deployment_id,number,name,callsign,description,accent,COALESCE(artwork_asset_id::text,''),enabled,standby,version,created_at,updated_at FROM cable_channels WHERE deployment_id=$1`
+	args := []any{did}
+	if cursor != "" {
+		q += ` AND id>$2`
+		args = append(args, cursor)
+	}
+	q += fmt.Sprintf(` ORDER BY number,id LIMIT $%d`, len(args)+1)
+	args = append(args, limit+1)
+	rows, e := s.q(ctx).QueryContext(ctx, q, args...)
+	if e != nil {
+		return cable.ChannelPage{}, ce("list channels", e)
+	}
+	defer rows.Close()
+	out := cable.ChannelPage{Items: []cable.Channel{}}
+	for rows.Next() {
+		var v cable.Channel
+		if e = rows.Scan(&v.ID, &v.DeploymentID, &v.Number, &v.Name, &v.Callsign, &v.Description, &v.Accent, &v.ArtworkAssetID, &v.Enabled, &v.Standby, &v.Version, &v.CreatedAt, &v.UpdatedAt); e != nil {
+			return out, e
+		}
+		out.Items = append(out.Items, v)
+	}
+	if len(out.Items) > limit {
+		out.Items = out.Items[:limit]
+		out.Page.HasMore = true
+		out.Page.NextCursor = out.Items[limit-1].ID
+	}
+	return out, rows.Err()
+}
+func (s *Store) DeleteChannel(ctx context.Context, m cable.Mutation, id string) error {
+	r, e := s.q(ctx).ExecContext(ctx, `DELETE FROM cable_channels WHERE id=$1 AND version=$2`, id, m.ExpectedVersion)
+	if e != nil {
+		return ce("delete channel", e)
+	}
+	n, _ := r.RowsAffected()
+	if n != 1 {
+		return cable.ErrConflict
+	}
+	return nil
+}
+
+func (s *Store) CreateProgramEntry(ctx context.Context, m cable.Mutation, in cable.ProgramInput) (cable.ProgramEntry, error) {
+	if m.ActorID == "" || cable.ValidateProgram(in) != nil {
+		return cable.ProgramEntry{}, cable.ErrInvalidArgument
+	}
+	var overlap bool
+	if e := s.q(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cable_program_entries WHERE channel_id=$1 AND starts_at<$3 AND ends_at>$2)`, in.ChannelID, in.StartsAt.UTC(), in.EndsAt.UTC()).Scan(&overlap); e != nil {
+		return cable.ProgramEntry{}, ce("validate program overlap", e)
+	}
+	if overlap {
+		return cable.ProgramEntry{}, cable.ErrOverlap
+	}
+	id, e := s.newUUID()
+	if e != nil {
+		return cable.ProgramEntry{}, e
+	}
+	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_program_entries(id,channel_id,asset_id,starts_at,ends_at,title,subtitle,tag,artist,description,artwork_asset_id,fit,loop,mute,volume,placard_policy,availability_policy,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12,$13,$14,$15,$16,$17,1,$18,$18)`, id, in.ChannelID, in.AssetID, in.StartsAt.UTC(), in.EndsAt.UTC(), in.Title, in.Subtitle, in.Tag, in.Artist, in.Description, in.ArtworkAssetID, in.Fit, in.Loop, in.Mute, in.Volume, in.PlacardPolicy, in.AvailabilityPolicy, ct(m))
+	if e != nil {
+		return cable.ProgramEntry{}, ce("create program entry", e)
+	}
+	return s.ProgramEntry(ctx, id)
+}
+func (s *Store) ProgramEntry(ctx context.Context, id string) (cable.ProgramEntry, error) {
+	var p cable.ProgramEntry
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,channel_id,asset_id,starts_at,ends_at,title,subtitle,tag,artist,description,COALESCE(artwork_asset_id::text,''),fit,loop,mute,volume,placard_policy,availability_policy,version,created_at,updated_at FROM cable_program_entries WHERE id=$1`, id).Scan(&p.ID, &p.ChannelID, &p.AssetID, &p.StartsAt, &p.EndsAt, &p.Title, &p.Subtitle, &p.Tag, &p.Artist, &p.Description, &p.ArtworkAssetID, &p.Fit, &p.Loop, &p.Mute, &p.Volume, &p.PlacardPolicy, &p.AvailabilityPolicy, &p.Version, &p.CreatedAt, &p.UpdatedAt)
+	if e != nil {
+		return p, ce("get program entry", e)
+	}
+	return p, nil
+}
+func (s *Store) UpdateProgramEntry(ctx context.Context, m cable.Mutation, id string, in cable.ProgramInput) (cable.ProgramEntry, error) {
+	if m.ExpectedVersion <= 0 || cable.ValidateProgram(in) != nil {
+		return cable.ProgramEntry{}, cable.ErrInvalidArgument
+	}
+	var overlap bool
+	if e := s.q(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cable_program_entries WHERE channel_id=$1 AND id<>$4 AND starts_at<$3 AND ends_at>$2)`, in.ChannelID, in.StartsAt.UTC(), in.EndsAt.UTC(), id).Scan(&overlap); e != nil {
+		return cable.ProgramEntry{}, ce("validate program overlap", e)
+	}
+	if overlap {
+		return cable.ProgramEntry{}, cable.ErrOverlap
+	}
+	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_program_entries SET asset_id=$2,starts_at=$3,ends_at=$4,title=$5,subtitle=$6,tag=$7,artist=$8,description=$9,artwork_asset_id=NULLIF($10,''),fit=$11,loop=$12,mute=$13,volume=$14,placard_policy=$15,availability_policy=$16,version=version+1,updated_at=$17 WHERE id=$1 AND version=$18`, id, in.AssetID, in.StartsAt.UTC(), in.EndsAt.UTC(), in.Title, in.Subtitle, in.Tag, in.Artist, in.Description, in.ArtworkAssetID, in.Fit, in.Loop, in.Mute, in.Volume, in.PlacardPolicy, in.AvailabilityPolicy, ct(m), m.ExpectedVersion)
+	if e != nil {
+		return cable.ProgramEntry{}, ce("update program entry", e)
+	}
+	n, _ := r.RowsAffected()
+	if n != 1 {
+		return cable.ProgramEntry{}, cable.ErrConflict
+	}
+	return s.ProgramEntry(ctx, id)
+}
+func (s *Store) ListProgramEntries(ctx context.Context, cid, cursor string, limit int) (cable.ProgramPage, error) {
+	limit = cl(limit)
+	q := `SELECT id,channel_id,asset_id,starts_at,ends_at,title,subtitle,tag,artist,description,COALESCE(artwork_asset_id::text,''),fit,loop,mute,volume,placard_policy,availability_policy,version,created_at,updated_at FROM cable_program_entries WHERE channel_id=$1`
+	args := []any{cid}
+	if cursor != "" {
+		q += ` AND id>$2`
+		args = append(args, cursor)
+	}
+	q += fmt.Sprintf(` ORDER BY starts_at,id LIMIT $%d`, len(args)+1)
+	args = append(args, limit+1)
+	rows, e := s.q(ctx).QueryContext(ctx, q, args...)
+	if e != nil {
+		return cable.ProgramPage{}, ce("list program entries", e)
+	}
+	defer rows.Close()
+	out := cable.ProgramPage{Items: []cable.ProgramEntry{}}
+	for rows.Next() {
+		var p cable.ProgramEntry
+		if e = rows.Scan(&p.ID, &p.ChannelID, &p.AssetID, &p.StartsAt, &p.EndsAt, &p.Title, &p.Subtitle, &p.Tag, &p.Artist, &p.Description, &p.ArtworkAssetID, &p.Fit, &p.Loop, &p.Mute, &p.Volume, &p.PlacardPolicy, &p.AvailabilityPolicy, &p.Version, &p.CreatedAt, &p.UpdatedAt); e != nil {
+			return out, e
+		}
+		out.Items = append(out.Items, p)
+	}
+	if len(out.Items) > limit {
+		out.Items = out.Items[:limit]
+		out.Page.HasMore = true
+		out.Page.NextCursor = out.Items[limit-1].ID
+	}
+	return out, rows.Err()
+}
+func (s *Store) DeleteProgramEntry(ctx context.Context, m cable.Mutation, id string) error {
+	r, e := s.q(ctx).ExecContext(ctx, `DELETE FROM cable_program_entries WHERE id=$1 AND version=$2`, id, m.ExpectedVersion)
+	if e != nil {
+		return ce("delete program entry", e)
+	}
+	n, _ := r.RowsAffected()
+	if n != 1 {
+		return cable.ErrConflict
+	}
+	return nil
+}
+
+func (s *Store) RegisterShellBuild(ctx context.Context, m cable.Mutation, in cable.ShellBuildInput) (cable.ShellBuild, error) {
+	if m.ActorID == "" || len(in.Digest) != 64 || in.Entrypoint == "" || in.BridgeProtocol == "" {
+		return cable.ShellBuild{}, cable.ErrInvalidArgument
+	}
+	meta, _ := cj(in.VersionMetadata)
+	id, e := s.newUUID()
+	if e != nil {
+		return cable.ShellBuild{}, e
+	}
+	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_shell_builds(id,digest,entrypoint,version_metadata,bridge_protocol,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, id, in.Digest, in.Entrypoint, meta, in.BridgeProtocol, m.ActorID, ct(m))
+	if e != nil {
+		if pgConflict(e) {
+			return cable.ShellBuild{}, cable.ErrConflict
+		}
+		return cable.ShellBuild{}, ce("register shell build", e)
+	}
+	for _, d := range in.ArtifactDigests {
+		if _, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_shell_build_artifacts(shell_build_id,artifact_digest) VALUES($1,$2)`, id, d); e != nil {
+			return cable.ShellBuild{}, ce("bind shell build artifact", e)
+		}
+	}
+	return s.ShellBuild(ctx, id)
+}
+func (s *Store) ShellBuild(ctx context.Context, id string) (cable.ShellBuild, error) {
+	var b cable.ShellBuild
+	var meta []byte
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,digest,entrypoint,version_metadata,bridge_protocol,created_by,created_at FROM cable_shell_builds WHERE id=$1`, id).Scan(&b.ID, &b.Digest, &b.Entrypoint, &meta, &b.BridgeProtocol, &b.CreatedBy, &b.CreatedAt)
+	if e != nil {
+		return b, ce("get shell build", e)
+	}
+	dj(meta, &b.VersionMetadata)
+	rows, e := s.q(ctx).QueryContext(ctx, `SELECT artifact_digest FROM cable_shell_build_artifacts WHERE shell_build_id=$1 ORDER BY artifact_digest`, id)
+	if e != nil {
+		return b, ce("list shell build artifacts", e)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d string
+		if e = rows.Scan(&d); e != nil {
+			return b, e
+		}
+		b.ArtifactDigests = append(b.ArtifactDigests, d)
+	}
+	return b, rows.Err()
+}
+func (s *Store) ListShellBuilds(ctx context.Context, cursor string, limit int) (cable.ShellBuildPage, error) {
+	limit = cl(limit)
+	q := `SELECT id FROM cable_shell_builds`
+	args := []any{}
+	if cursor != "" {
+		q += ` WHERE id>$1`
+		args = append(args, cursor)
+	}
+	q += fmt.Sprintf(` ORDER BY id LIMIT $%d`, len(args)+1)
+	args = append(args, limit+1)
+	rows, e := s.q(ctx).QueryContext(ctx, q, args...)
+	if e != nil {
+		return cable.ShellBuildPage{}, ce("list shell builds", e)
+	}
+	defer rows.Close()
+	out := cable.ShellBuildPage{Items: []cable.ShellBuild{}}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			return out, e
+		}
+		b, e := s.ShellBuild(ctx, id)
+		if e != nil {
+			return out, e
+		}
+		out.Items = append(out.Items, b)
+	}
+	if len(out.Items) > limit {
+		out.Items = out.Items[:limit]
+		out.Page.HasMore = true
+		out.Page.NextCursor = out.Items[limit-1].ID
+	}
+	return out, rows.Err()
+}
+func (s *Store) CreateRevision(ctx context.Context, r cable.CableRevision) error {
+	if r.Digest == "" || len(r.JSON) == 0 {
+		return cable.ErrInvalidArgument
+	}
+	if r.ID == "" {
+		var e error
+		r.ID, e = s.newUUID()
+		if e != nil {
+			return e
+		}
+	}
+	_, e := s.q(ctx).ExecContext(ctx, `INSERT INTO cable_revisions(id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, r.ID, r.DeploymentID, r.DeploymentVersion, r.ShellBuildID, r.Digest, r.ShellBuildDigest, r.Entrypoint, r.BridgeProtocol, r.Timezone, r.Window.StartsAt.UTC(), r.Window.EndsAt.UTC(), r.JSON, r.ArtifactDigests, r.Errors, r.Warnings, r.CreatedBy, r.CreatedAt.UTC())
+	if e != nil {
+		if pgConflict(e) {
+			return cable.ErrConflict
+		}
+		return ce("create cable revision", e)
+	}
+	return nil
+}
+func (s *Store) Revision(ctx context.Context, id string) (cable.CableRevision, error) {
+	var r cable.CableRevision
+	var doc []byte
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at FROM cable_revisions WHERE id=$1`, id).Scan(&r.ID, &r.DeploymentID, &r.DeploymentVersion, &r.ShellBuildID, &r.Digest, &r.ShellBuildDigest, &r.Entrypoint, &r.BridgeProtocol, &r.Timezone, &r.Window.StartsAt, &r.Window.EndsAt, &doc, &r.ArtifactDigests, &r.Errors, &r.Warnings, &r.CreatedBy, &r.CreatedAt)
+	if e != nil {
+		return r, ce("get cable revision", e)
+	}
+	r.JSON = doc
+	return r, nil
+}
+func (s *Store) ListRevisions(ctx context.Context, did, cursor string, limit int) (cable.RevisionPage, error) {
+	limit = cl(limit)
+	q := `SELECT id FROM cable_revisions WHERE deployment_id=$1`
+	args := []any{did}
+	if cursor != "" {
+		q += ` AND id>$2`
+		args = append(args, cursor)
+	}
+	q += fmt.Sprintf(` ORDER BY id LIMIT $%d`, len(args)+1)
+	args = append(args, limit+1)
+	rows, e := s.q(ctx).QueryContext(ctx, q, args...)
+	if e != nil {
+		return cable.RevisionPage{}, ce("list cable revisions", e)
+	}
+	defer rows.Close()
+	out := cable.RevisionPage{Items: []cable.CableRevision{}}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			return out, e
+		}
+		r, e := s.Revision(ctx, id)
+		if e != nil {
+			return out, e
+		}
+		out.Items = append(out.Items, r)
+	}
+	if len(out.Items) > limit {
+		out.Items = out.Items[:limit]
+		out.Page.HasMore = true
+		out.Page.NextCursor = out.Items[limit-1].ID
+	}
+	return out, rows.Err()
+}
+func (s *Store) CableArtifactsForAsset(ctx context.Context, id string) ([]cable.Artifact, error) {
+	rows, e := s.q(ctx).QueryContext(ctx, `SELECT aa.asset_id,a.digest,a.size_bytes,a.media_type,a.state FROM asset_artifacts aa JOIN artifacts a ON a.digest=aa.artifact_digest WHERE aa.asset_id=$1 ORDER BY a.digest`, id)
+	if e != nil {
+		return nil, ce("list cable asset artifacts", e)
+	}
+	defer rows.Close()
+	out := []cable.Artifact{}
+	for rows.Next() {
+		var a cable.Artifact
+		if e = rows.Scan(&a.AssetID, &a.Digest, &a.Size, &a.MediaType, &a.State); e != nil {
+			return nil, e
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+func (s *Store) CableArtifactByDigest(ctx context.Context, digest string) (cable.Artifact, error) {
+	var a cable.Artifact
+	e := s.q(ctx).QueryRowContext(ctx, `SELECT digest,size_bytes,media_type,state FROM artifacts WHERE digest=$1`, digest).Scan(&a.Digest, &a.Size, &a.MediaType, &a.State)
+	if e != nil {
+		return a, ce("get cable artifact", e)
+	}
+	return a, nil
+}

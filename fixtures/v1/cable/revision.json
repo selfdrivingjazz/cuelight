@@ -1,0 +1,21 @@
+{
+  "schema": "cable.revision.v1",
+  "deploymentId": "7d1e8df0-3a9c-4e95-8dd1-86c9d9f1b001",
+  "deploymentVersion": 3,
+  "shellBuildId": "7d1e8df0-3a9c-4e95-8dd1-86c9d9f1a001",
+  "shellBuildDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "entrypoint": "index.html",
+  "bridgeProtocol": "1.0",
+  "timezone": "America/New_York",
+  "window": {"startsAt":"2026-08-27T00:00:00Z","endsAt":"2026-08-28T00:00:00Z"},
+  "channels": [
+    {"id":"7d1e8df0-3a9c-4e95-8dd1-86c9d9f1b101","number":7,"name":"News","callsign":"NEWS","description":"Continuous news","accent":"#2e6fdb","enabled":true,"standby":false,"programs":[
+      {"id":"7d1e8df0-3a9c-4e95-8dd1-86c9d9f1b201","startsAt":"2026-08-27T00:00:00Z","endsAt":"2026-08-27T00:30:00Z","assetId":"7d1e8df0-3a9c-4e95-8dd1-86c9d9f1c001","artifactDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","mediaType":"video/mp4","title":"Morning Brief","subtitle":"Top stories","fit":"contain","placardPolicy":"default","availabilityPolicy":"fail","loop":false,"mute":false,"volume":1}
+    ]},
+    {"id":"7d1e8df0-3a9c-4e95-8dd1-86c9d9f1b102","number":12,"name":"Culture","callsign":"CULT","description":"Arts and culture","accent":"#b34c91","enabled":true,"standby":false,"programs":[]}
+  ],
+  "artifactDigests": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  ]
+}

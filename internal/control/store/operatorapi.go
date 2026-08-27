@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/operatorapi"
+	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
 	playerclient "github.com/jmill/cable/internal/player/client"
 	canonical "github.com/jmill/cable/internal/release"
@@ -23,8 +26,10 @@ func NewOperatorAdapter(repository *Store) *OperatorAdapter {
 }
 
 var _ operatorapi.NodeService = (*OperatorAdapter)(nil)
+var _ operatorapi.NodePageService = (*OperatorAdapter)(nil)
 var _ operatorapi.AssignmentService = (*Store)(nil)
 var _ operatorapi.AssetService = (*Store)(nil)
+var _ operatorapi.AssetPageService = (*Store)(nil)
 
 func (a *OperatorAdapter) ListNodes(ctx context.Context) ([]operatorapi.Node, error) {
 	s := a.Store
@@ -42,6 +47,107 @@ func (a *OperatorAdapter) ListNodes(ctx context.Context) ([]operatorapi.Node, er
 		result = append(result, node)
 	}
 	return result, wrap("iterate nodes", rows.Err())
+}
+
+// ListNodesPage performs keyset pagination over the immutable (created_at,id)
+// order. Search and credentialState filtering are evaluated by PostgreSQL.
+func (a *OperatorAdapter) ListNodesPage(ctx context.Context, request page.PageRequest) (page.Response[operatorapi.Node], error) {
+	request, err := request.Normalize()
+	if err != nil {
+		return page.Response[operatorapi.Node]{}, err
+	}
+	sortKey := request.Sort
+	if sortKey == "" {
+		sortKey = "createdAt"
+	}
+	if sortKey != "createdAt" && sortKey != "name" {
+		return page.Response[operatorapi.Node]{}, page.ErrSortInvalid
+	}
+	codec := page.DefaultCodec()
+	var pos page.Position
+	if request.Cursor != "" {
+		pos, err = codec.Decode(request.Cursor)
+		if err != nil || pos.Resource != "nodes" || pos.Sort != sortKey || pos.Order != request.Order {
+			return page.Response[operatorapi.Node]{}, page.ErrCursorInvalid
+		}
+	}
+	clauses := []string{"1=1"}
+	args := make([]any, 0, 5)
+	if request.Search != "" {
+		args = append(args, "%"+strings.ToLower(request.Search)+"%")
+		clauses = append(clauses, "(LOWER(n.id::text) LIKE $"+strconv.Itoa(len(args))+" OR LOWER(n.name) LIKE $"+strconv.Itoa(len(args))+")")
+	}
+	if state := strings.TrimSpace(request.Filters["credentialState"]); state != "" {
+		args = append(args, state)
+		clauses = append(clauses, "n.credential_state = $"+strconv.Itoa(len(args)))
+	}
+	if request.Cursor != "" {
+		if sortKey == "name" {
+			args = append(args, pos.Value, pos.ID)
+			op := ">"
+			if request.Order == "desc" {
+				op = "<"
+			}
+			clauses = append(clauses, "(n.name, n.id::text) "+op+" ($"+strconv.Itoa(len(args)-1)+", $"+strconv.Itoa(len(args))+")")
+		} else {
+			at, parseErr := time.Parse(time.RFC3339Nano, pos.Value)
+			if parseErr != nil {
+				return page.Response[operatorapi.Node]{}, page.ErrCursorInvalid
+			}
+			args = append(args, at, pos.ID)
+			op := ">"
+			if request.Order == "desc" {
+				op = "<"
+			}
+			clauses = append(clauses, "(n.created_at, n.id::text) "+op+" ($"+strconv.Itoa(len(args)-1)+", $"+strconv.Itoa(len(args))+")")
+		}
+	}
+	order := "ASC"
+	if request.Order == "desc" {
+		order = "DESC"
+	}
+	orderBy := "n.created_at " + order + ", n.id " + order
+	if sortKey == "name" {
+		orderBy = "n.name " + order + ", n.id " + order
+	}
+	args = append(args, request.Limit+1)
+	query := "SELECT n.id::text, n.name, n.credential_state, n.desired_generation, n.observed_generation, n.created_at FROM nodes n WHERE " + strings.Join(clauses, " AND ") + " ORDER BY " + orderBy + " LIMIT $" + strconv.Itoa(len(args))
+	rows, err := a.Store.q(ctx).QueryContext(ctx, query, args...)
+	if err != nil {
+		return page.Response[operatorapi.Node]{}, wrap("list nodes page", err)
+	}
+	defer rows.Close()
+	items := make([]operatorapi.Node, 0, request.Limit)
+	var lastValue, lastID string
+	for rows.Next() {
+		var item operatorapi.Node
+		var created time.Time
+		if err := rows.Scan(&item.ID, &item.Name, &item.CredentialState, &item.DesiredGeneration, &item.ObservedGeneration, &created); err != nil {
+			return page.Response[operatorapi.Node]{}, wrap("scan node page", err)
+		}
+		if len(items) < request.Limit {
+			items = append(items, item)
+			lastID = item.ID
+			if sortKey == "name" {
+				lastValue = item.Name
+			} else {
+				lastValue = created.UTC().Format(time.RFC3339Nano)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return page.Response[operatorapi.Node]{}, wrap("iterate nodes page", err)
+	}
+	hasMore := len(items) == request.Limit && lastID != ""
+	var next *string
+	if hasMore {
+		value, encodeErr := codec.Encode(page.Position{Resource: "nodes", Sort: sortKey, Order: request.Order, Value: lastValue, ID: lastID})
+		if encodeErr != nil {
+			return page.Response[operatorapi.Node]{}, encodeErr
+		}
+		next = &value
+	}
+	return page.NewResponse(items, next, nil, hasMore), nil
 }
 func (a *OperatorAdapter) GetNode(ctx context.Context, id string) (operatorapi.Node, error) {
 	s := a.Store
@@ -134,6 +240,102 @@ func (s *Store) GetAssignment(ctx context.Context, id string) (assignment.Assign
 		return assignment.Assignment{}, pkiNotFound()
 	}
 	return value, nil
+}
+
+// ListAssetsPage performs keyset pagination over asset creation time and ID.
+func (s *Store) ListAssetsPage(ctx context.Context, request page.PageRequest) (page.Response[operatorapi.Asset], error) {
+	request, err := request.Normalize()
+	if err != nil {
+		return page.Response[operatorapi.Asset]{}, err
+	}
+	sortKey := request.Sort
+	if sortKey == "" {
+		sortKey = "createdAt"
+	}
+	if sortKey != "createdAt" && sortKey != "name" {
+		return page.Response[operatorapi.Asset]{}, page.ErrSortInvalid
+	}
+	codec := page.DefaultCodec()
+	var pos page.Position
+	if request.Cursor != "" {
+		pos, err = codec.Decode(request.Cursor)
+		if err != nil || pos.Resource != "assets" || pos.Sort != sortKey || pos.Order != request.Order {
+			return page.Response[operatorapi.Asset]{}, page.ErrCursorInvalid
+		}
+	}
+	clauses := []string{"aa.role = 'original'"}
+	args := make([]any, 0, 5)
+	if request.Search != "" {
+		args = append(args, "%"+strings.ToLower(request.Search)+"%")
+		clauses = append(clauses, "(LOWER(a.id::text) LIKE $"+strconv.Itoa(len(args))+" OR LOWER(a.name) LIKE $"+strconv.Itoa(len(args))+")")
+	}
+	if state := strings.TrimSpace(request.Filters["state"]); state != "" {
+		args = append(args, state)
+		clauses = append(clauses, "r.state = $"+strconv.Itoa(len(args)))
+	}
+	if request.Cursor != "" {
+		args = append(args, pos.Value, pos.ID)
+		op := ">"
+		if request.Order == "desc" {
+			op = "<"
+		}
+		if sortKey == "name" {
+			clauses = append(clauses, "(a.name, a.id::text) "+op+" ($"+strconv.Itoa(len(args)-1)+", $"+strconv.Itoa(len(args))+")")
+		} else {
+			parsed, parseErr := time.Parse(time.RFC3339Nano, pos.Value)
+			if parseErr != nil {
+				return page.Response[operatorapi.Asset]{}, page.ErrCursorInvalid
+			}
+			args[len(args)-2] = parsed
+			clauses = append(clauses, "(a.created_at, a.id::text) "+op+" ($"+strconv.Itoa(len(args)-1)+", $"+strconv.Itoa(len(args))+")")
+		}
+	}
+	order := "ASC"
+	if request.Order == "desc" {
+		order = "DESC"
+	}
+	orderBy := "a.created_at " + order + ", a.id " + order
+	if sortKey == "name" {
+		orderBy = "a.name " + order + ", a.id " + order
+	}
+	args = append(args, request.Limit+1)
+	query := "SELECT a.id::text, a.name, r.digest, r.size_bytes, r.media_type, r.state, a.created_at FROM assets a JOIN asset_artifacts aa ON aa.asset_id = a.id JOIN artifacts r ON r.digest = aa.artifact_digest WHERE " + strings.Join(clauses, " AND ") + " ORDER BY " + orderBy + " LIMIT $" + strconv.Itoa(len(args))
+	rows, err := s.q(ctx).QueryContext(ctx, query, args...)
+	if err != nil {
+		return page.Response[operatorapi.Asset]{}, wrap("list assets page", err)
+	}
+	defer rows.Close()
+	items := make([]operatorapi.Asset, 0, request.Limit)
+	var lastValue, lastID string
+	for rows.Next() {
+		var item operatorapi.Asset
+		var created time.Time
+		if err := rows.Scan(&item.ID, &item.Name, &item.Artifact.Digest, &item.Artifact.Size, &item.Artifact.MediaType, &item.Artifact.State, &created); err != nil {
+			return page.Response[operatorapi.Asset]{}, wrap("scan asset page", err)
+		}
+		if len(items) < request.Limit {
+			items = append(items, item)
+			lastID = item.ID
+			if sortKey == "name" {
+				lastValue = item.Name
+			} else {
+				lastValue = created.UTC().Format(time.RFC3339Nano)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return page.Response[operatorapi.Asset]{}, wrap("iterate assets page", err)
+	}
+	hasMore := len(items) == request.Limit && lastID != ""
+	var next *string
+	if hasMore {
+		value, encodeErr := codec.Encode(page.Position{Resource: "assets", Sort: sortKey, Order: request.Order, Value: lastValue, ID: lastID})
+		if encodeErr != nil {
+			return page.Response[operatorapi.Asset]{}, encodeErr
+		}
+		next = &value
+	}
+	return page.NewResponse(items, next, nil, hasMore), nil
 }
 
 func (s *Store) PutAssignment(ctx context.Context, nodeID string, mutation assignment.Mutation, input assignment.PutInput) (assignment.PutResult, error) {

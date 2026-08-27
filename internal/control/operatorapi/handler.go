@@ -14,6 +14,7 @@ import (
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
 	"github.com/jmill/cable/internal/control/media"
+	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
 	"github.com/jmill/cable/internal/control/release"
 	playerclient "github.com/jmill/cable/internal/player/client"
@@ -28,10 +29,12 @@ var OperationScopes = map[string]string{
 	"getNodeStatus": ScopeNodeRead, "createNodeRecoveryToken": ScopeSecurityAdmin,
 	"getNodeAssignment": ScopeAssignmentRead, "putNodeAssignment": ScopeAssignmentWrite,
 	"listNodeEvents": ScopeNodeRead, "createUpload": ScopeMediaWrite,
-	"headUpload": ScopeMediaWrite, "appendUpload": ScopeMediaWrite,
-	"completeUpload": ScopeMediaWrite, "registerLocalAsset": ScopeLocalMediaRead,
-	"listAssets": ScopeMediaRead, "getAsset": ScopeMediaRead,
-	"publishRelease": ScopeReleaseWrite, "getRelease": ScopeReleaseRead,
+	"listUploads": ScopeMediaRead, "headUpload": ScopeMediaWrite,
+	"appendUpload": ScopeMediaWrite, "completeUpload": ScopeMediaWrite,
+	"registerLocalAsset": ScopeLocalMediaRead, "listAssets": ScopeMediaRead,
+	"getAsset": ScopeMediaRead, "publishRelease": ScopeReleaseWrite,
+	"listReleases": ScopeReleaseRead, "getRelease": ScopeReleaseRead,
+	"listAssignments": ScopeAssignmentRead,
 }
 
 type Handler struct{ deps Dependencies }
@@ -51,8 +54,8 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("POST /nodes/{nodeId}/recovery-tokens", h.authorized(ScopeSecurityAdmin, h.createNodeRecoveryToken))
 	mux.Handle("GET /nodes/{nodeId}/assignment", h.authorized(ScopeAssignmentRead, h.getNodeAssignment))
 	mux.Handle("PUT /nodes/{nodeId}/assignment", h.authorized(ScopeAssignmentWrite, h.putNodeAssignment))
-	mux.Handle("GET /nodes/{nodeId}/events", h.authorized(ScopeNodeRead, h.listNodeEvents))
 	mux.Handle("POST /uploads", h.authorized(ScopeMediaWrite, h.createUpload))
+	mux.Handle("GET /uploads", h.authorized(ScopeMediaRead, h.listUploads))
 	mux.Handle("HEAD /uploads/{uploadId}", h.authorized(ScopeMediaWrite, h.headUpload))
 	mux.Handle("PATCH /uploads/{uploadId}", h.authorized(ScopeMediaWrite, h.appendUpload))
 	mux.Handle("POST /uploads/{uploadId}/complete", h.authorized(ScopeMediaWrite, h.completeUpload))
@@ -60,7 +63,10 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("GET /assets", h.authorized(ScopeMediaRead, h.listAssets))
 	mux.Handle("GET /assets/{assetId}", h.authorized(ScopeMediaRead, h.getAsset))
 	mux.Handle("POST /releases/publish", h.authorized(ScopeReleaseWrite, h.publishRelease))
+	mux.Handle("GET /releases", h.authorized(ScopeReleaseRead, h.listReleases))
 	mux.Handle("GET /releases/{releaseId}", h.authorized(ScopeReleaseRead, h.getRelease))
+	mux.Handle("GET /assignments", h.authorized(ScopeAssignmentRead, h.listAssignments))
+	mux.Handle("GET /operator/me", h.authorized("", h.getOperatorMe))
 	return mux
 }
 
@@ -77,7 +83,6 @@ func (d Dependencies) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(auth.WithActor(r.Context(), actor)))
 	})
 }
-
 func (h *Handler) authorized(scope string, fn http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actor, err := h.deps.authenticate(r, scope)
@@ -85,8 +90,58 @@ func (h *Handler) authorized(scope string, fn http.HandlerFunc) http.Handler {
 			writeError(w, err)
 			return
 		}
+		action := scope
+		if action == "" {
+			action = "operator_read"
+		}
+		authorizer := h.deps.Authorizer
+		if authorizer == nil {
+			authorizer = ScopeAuthorizer{Scopes: map[string]string{
+				ScopeNodeEnroll: ScopeNodeEnroll, ScopeSecurityAdmin: ScopeSecurityAdmin,
+				ScopeNodeRead: ScopeNodeRead, ScopeNodeWrite: ScopeNodeWrite,
+				ScopeAssignmentRead: ScopeAssignmentRead, ScopeAssignmentWrite: ScopeAssignmentWrite,
+				ScopeMediaRead: ScopeMediaRead, ScopeMediaWrite: ScopeMediaWrite,
+				ScopeLocalMediaRead: ScopeLocalMediaRead, ScopeReleaseRead: ScopeReleaseRead,
+				ScopeReleaseWrite: ScopeReleaseWrite, "operator_read": "",
+			}}
+		}
+		if err := authorizer.Authorize(actor, action, resourceType(r), resourceID(r)); err != nil {
+			writeError(w, err)
+			return
+		}
 		fn(w, r.WithContext(auth.WithActor(r.Context(), actor)))
 	})
+}
+func resourceType(r *http.Request) string {
+	switch {
+	case r.PathValue("nodeId") != "" || strings.HasPrefix(r.URL.Path, "/nodes"):
+		return "node"
+	case r.PathValue("uploadId") != "" || strings.HasPrefix(r.URL.Path, "/uploads"):
+		return "upload"
+	case r.PathValue("assetId") != "" || strings.HasPrefix(r.URL.Path, "/assets"):
+		return "asset"
+	case r.PathValue("releaseId") != "" || strings.HasPrefix(r.URL.Path, "/releases"):
+		return "release"
+	case strings.HasPrefix(r.URL.Path, "/assignments"):
+		return "assignment"
+	case strings.HasPrefix(r.URL.Path, "/admin-tokens"):
+		return "token"
+	case strings.HasPrefix(r.URL.Path, "/enrollment-tokens"):
+		return "enrollment-token"
+	case strings.HasPrefix(r.URL.Path, "/operator"):
+		return "operator"
+	default:
+		return strings.Trim(strings.Split(r.URL.Path, "/")[1], "/")
+	}
+}
+
+func resourceID(r *http.Request) string {
+	for _, key := range []string{"nodeId", "uploadId", "assetId", "releaseId", "tokenId"} {
+		if value := r.PathValue(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (d Dependencies) authenticate(r *http.Request, scope string) (auth.Actor, error) {
@@ -126,6 +181,7 @@ func (h *Handler) createEnrollmentToken(w http.ResponseWriter, r *http.Request) 
 	if h.deps.PKI == nil {
 		writeError(w, errors.New("PKI service is not configured"))
 		return
+
 	}
 	actor, _ := auth.ActorFromContext(r.Context())
 	v, err := h.deps.PKI.CreateEnrollmentToken(r.Context(), pki.Mutation{ActorID: actor.ID, IdempotencyKey: key})
@@ -134,6 +190,22 @@ func (h *Handler) createEnrollmentToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusCreated, EnrollmentTokenCreated{ID: v.ID, Secret: v.Secret, ExpiresAt: v.ExpiresAt})
+}
+
+func (h *Handler) getOperatorMe(w http.ResponseWriter, r *http.Request) {
+	actor, ok := auth.ActorFromContext(r.Context())
+	if !ok {
+		writeError(w, ErrUnauthorized)
+		return
+	}
+	capabilities := make(map[string]bool, len(actor.Scopes))
+	for _, scope := range actor.Scopes {
+		capabilities[scope] = true
+	}
+	writeJSON(w, http.StatusOK, OperatorMe{
+		ID: actor.ID, TokenID: actor.TokenID,
+		Scopes: append([]string(nil), actor.Scopes...), Capabilities: capabilities,
+	})
 }
 
 func (h *Handler) listAdminTokens(w http.ResponseWriter, r *http.Request) {
@@ -183,6 +255,24 @@ func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errors.New("node service is not configured"))
 		return
 	}
+	request, err := page.Parse(r.URL.Query())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if service, ok := h.deps.Nodes.(NodePageService); ok {
+		response, err := service.ListNodesPage(r.Context(), request)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	if request.Cursor != "" {
+		writeError(w, ErrCursorInvalid)
+		return
+	}
 	items, err := h.deps.Nodes.ListNodes(r.Context())
 	if err != nil {
 		writeError(w, err)
@@ -191,7 +281,21 @@ func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []Node{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	if request.Search != "" {
+		search := strings.ToLower(request.Search)
+		filtered := items[:0]
+		for _, item := range items {
+			if strings.Contains(strings.ToLower(item.ID), search) || strings.Contains(strings.ToLower(item.Name), search) {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+	hasMore := len(items) > request.Limit
+	if hasMore {
+		items = items[:request.Limit]
+	}
+	writeJSON(w, http.StatusOK, page.NewResponse(items, nil, nil, hasMore))
 }
 func (h *Handler) getNode(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Nodes == nil {
@@ -332,7 +436,70 @@ func (h *Handler) listNodeEvents(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []playerclient.NodeEvent{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+	// Event cursors are sequence positions rather than opaque keyset tokens.
+	// Keep the legacy top-level nextCursor while exposing the common envelope.
+	writeJSON(w, http.StatusOK, map[string]any{
+
+		"items": items, "nextCursor": next,
+		"page": page.Info{NextCursor: next, HasMore: next != nil},
+	})
+}
+
+func (h *Handler) listUploads(w http.ResponseWriter, r *http.Request) {
+	service, ok := h.deps.Media.(UploadPageService)
+	if !ok {
+		writeError(w, errors.New("upload list service is not configured"))
+		return
+	}
+	request, err := page.Parse(r.URL.Query())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	response, err := service.ListUploadsPage(r.Context(), request)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) listReleases(w http.ResponseWriter, r *http.Request) {
+	service, ok := h.deps.Releases.(ReleasePageService)
+	if !ok {
+		writeError(w, errors.New("release list service is not configured"))
+		return
+	}
+	request, err := page.Parse(r.URL.Query())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	response, err := service.ListReleasesPage(r.Context(), request)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
+	service, ok := h.deps.Assignments.(AssignmentPageService)
+	if !ok {
+		writeError(w, errors.New("assignment list service is not configured"))
+		return
+	}
+	request, err := page.Parse(r.URL.Query())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	response, err := service.ListAssignmentsPage(r.Context(), request)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) createUpload(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +619,24 @@ func (h *Handler) listAssets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errors.New("asset service is not configured"))
 		return
 	}
+	request, err := page.Parse(r.URL.Query())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if service, ok := h.deps.Assets.(AssetPageService); ok {
+		response, err := service.ListAssetsPage(r.Context(), request)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	if request.Cursor != "" {
+		writeError(w, ErrCursorInvalid)
+		return
+	}
 	v, err := h.deps.Assets.ListAssets(r.Context())
 	if err != nil {
 		writeError(w, err)
@@ -461,7 +646,21 @@ func (h *Handler) listAssets(w http.ResponseWriter, r *http.Request) {
 	for i := range v {
 		out[i] = assetJSON(v[i])
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+	if request.Search != "" {
+		search := strings.ToLower(request.Search)
+		filtered := out[:0]
+		for _, item := range out {
+			if strings.Contains(strings.ToLower(item.ID), search) || strings.Contains(strings.ToLower(item.Name), search) {
+				filtered = append(filtered, item)
+			}
+		}
+		out = filtered
+	}
+	hasMore := len(out) > request.Limit
+	if hasMore {
+		out = out[:request.Limit]
+	}
+	writeJSON(w, http.StatusOK, page.NewResponse(out, nil, nil, hasMore))
 }
 func (h *Handler) getAsset(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Assets == nil {
@@ -609,7 +808,10 @@ func statusFor(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, auth.ErrNotFound), errors.Is(err, pki.ErrNodeNotFound), errors.Is(err, pki.ErrTokenNotFound), errors.Is(err, media.ErrNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrCursorInvalid), errors.Is(err, ErrWaitInvalid), errors.Is(err, media.ErrInvalidArgument), errors.Is(err, assignment.ErrInvalidAssignment), errors.Is(err, release.ErrInvalidMutation):
+	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrCursorInvalid), errors.Is(err, ErrWaitInvalid),
+		errors.Is(err, page.ErrCursorInvalid), errors.Is(err, page.ErrCursorTampered), errors.Is(err, page.ErrLimitInvalid),
+		errors.Is(err, page.ErrSortInvalid), errors.Is(err, page.ErrOrderInvalid),
+		errors.Is(err, media.ErrInvalidArgument), errors.Is(err, assignment.ErrInvalidAssignment), errors.Is(err, release.ErrInvalidMutation):
 		return http.StatusBadRequest
 	case errors.Is(err, assignment.ErrIdempotencyConflict), errors.Is(err, release.ErrIdempotencyConflict), errors.Is(err, pki.ErrIdempotencyConflict):
 		return http.StatusConflict

@@ -134,10 +134,83 @@ func (c *Client) ListNodes(ctx context.Context) ([]Node, error) {
 	return response.Items, err
 }
 
+// ListNodesPage fetches one server-paginated node page. The older ListNodes
+// method remains a compatibility convenience and reads only the first page.
+func (c *Client) ListNodesPage(ctx context.Context, request PageRequest) (Page[Node], error) {
+	path, err := pagePath("/nodes", request)
+	if err != nil {
+		return Page[Node]{}, err
+	}
+	var response Page[Node]
+	err = c.doJSON(ctx, http.MethodGet, path, nil, "", "", &response, http.StatusOK)
+	if err == nil && response.Items == nil {
+		response.Items = []Node{}
+	}
+	return response, err
+}
+
+func (c *Client) OperatorMe(ctx context.Context) (OperatorMe, error) {
+	var result OperatorMe
+	err := c.doJSON(ctx, http.MethodGet, "/operator/me", nil, "", "", &result, http.StatusOK)
+	return result, err
+}
 func (c *Client) GetNode(ctx context.Context, nodeID string) (Node, error) {
+
 	var result Node
 	err := c.doJSON(ctx, http.MethodGet, "/nodes/"+url.PathEscape(nodeID), nil, "", "", &result, http.StatusOK)
 	return result, err
+}
+
+func (c *Client) ListAssetsPage(ctx context.Context, request PageRequest) (Page[Asset], error) {
+	path, err := pagePath("/assets", request)
+	if err != nil {
+		return Page[Asset]{}, err
+	}
+	var response Page[Asset]
+	err = c.doJSON(ctx, http.MethodGet, path, nil, "", "", &response, http.StatusOK)
+	if err == nil && response.Items == nil {
+		response.Items = []Asset{}
+	}
+	return response, err
+}
+
+func (c *Client) ListUploadsPage(ctx context.Context, request PageRequest) (Page[Upload], error) {
+	path, err := pagePath("/uploads", request)
+	if err != nil {
+		return Page[Upload]{}, err
+	}
+	var response Page[Upload]
+	err = c.doJSON(ctx, http.MethodGet, path, nil, "", "", &response, http.StatusOK)
+	if err == nil && response.Items == nil {
+		response.Items = []Upload{}
+	}
+	return response, err
+}
+
+func (c *Client) ListReleasesPage(ctx context.Context, request PageRequest) (Page[Document], error) {
+	path, err := pagePath("/releases", request)
+	if err != nil {
+		return Page[Document]{}, err
+	}
+	var response Page[Document]
+	err = c.doJSON(ctx, http.MethodGet, path, nil, "", "", &response, http.StatusOK)
+	if err == nil && response.Items == nil {
+		response.Items = []Document{}
+	}
+	return response, err
+}
+
+func (c *Client) ListAssignmentsPage(ctx context.Context, request PageRequest) (Page[Assignment], error) {
+	path, err := pagePath("/assignments", request)
+	if err != nil {
+		return Page[Assignment]{}, err
+	}
+	var response Page[Assignment]
+	err = c.doJSON(ctx, http.MethodGet, path, nil, "", "", &response, http.StatusOK)
+	if err == nil && response.Items == nil {
+		response.Items = []Assignment{}
+	}
+	return response, err
 }
 func (c *Client) GetAssignment(ctx context.Context, nodeID string) (Assignment, error) {
 	var result Assignment
@@ -246,6 +319,37 @@ func (c *Client) PutAssignment(ctx context.Context, nodeID, ifMatch, idempotency
 	path := "/nodes/" + url.PathEscape(nodeID) + "/assignment"
 	err := c.doJSON(ctx, http.MethodPut, path, input, idempotencyKey, ifMatch, &result, http.StatusOK, http.StatusCreated)
 	return result, err
+}
+
+func pagePath(path string, request PageRequest) (string, error) {
+	if request.Limit < 0 || request.Limit > 100 {
+		return "", errors.New("page limit must be between 1 and 100")
+	}
+	values := url.Values{}
+	if request.Cursor != "" {
+		values.Set("cursor", request.Cursor)
+	}
+	if request.Limit != 0 {
+		values.Set("limit", strconv.Itoa(request.Limit))
+	}
+	if request.Sort != "" {
+		values.Set("sort", request.Sort)
+	}
+	if request.Order != "" {
+		values.Set("order", request.Order)
+	}
+	if request.Search != "" {
+		values.Set("search", request.Search)
+	}
+	for key, value := range request.Filters {
+		if key != "" && value != "" {
+			values.Set(key, value)
+		}
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return path + "?" + encoded, nil
+	}
+	return path, nil
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, input any, idempotencyKey, ifMatch string, output any, expected ...int) error {
