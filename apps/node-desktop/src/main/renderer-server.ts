@@ -72,6 +72,7 @@ export class RendererServer {
         fullscreen: this.fullScreen,
         webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
       });
+      output.on("close", (event) => event.preventDefault());
       output.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       output.webContents.on("will-navigate", (event, destination) => {
         try {

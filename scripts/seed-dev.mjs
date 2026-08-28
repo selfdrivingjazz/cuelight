@@ -1,5 +1,6 @@
 import ffmpeg from "@ffmpeg-installer/ffmpeg";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,13 +95,13 @@ async function findByName(route, name) {
 async function createNamed(route, name, body, key) {
   return await findByName(route, name) ?? request(route, { method: "POST", headers: { "Idempotency-Key": key }, body });
 }
-
 async function buildShell() {
   await run("pnpm", ["--filter", "@cable/cable-web", "build"]);
   const archive = path.join(output, "cable-web-shell.tar.gz");
   await rm(archive, { force: true });
-  await run("tar", ["-czf", archive, "-C", path.join(root, "apps/cable-web/dist"), "."]);
-  const asset = await upload(archive, "Seed Cable TV shell.tar.gz", "application/gzip");
+  await run("tar", ["-czf", archive, "-C", path.join(root, "apps/cable-web/dist"), "index.html", "assets"]);
+  const archiveDigest = createHash("sha256").update(await readFile(archive)).digest("hex").slice(0, 12);
+  const asset = await upload(archive, `Seed Cable TV shell ${archiveDigest}.tar.gz`, "application/gzip");
   const builds = await list("/cable/shell-builds");
   const existing = builds.items.find((build) => build.digest === asset.artifact.digest);
   if (existing) return existing;
@@ -167,17 +168,17 @@ async function seed() {
 
   const window = { startsAt: blockStart.toISOString(), endsAt: new Date(blockStart.getTime() + 4 * 60 * 60 * 1000).toISOString() };
   const revision = await request(`/cable/deployments/${deployment.id}/publish`, {
-    method: "POST", headers: { "Idempotency-Key": `seed-revision-${blockDate}`, "If-Match": `"v${deployment.version}"` },
+    method: "POST", headers: { "Idempotency-Key": `seed-revision-${blockDate}-${shellBuild.digest.slice(0, 12)}`, "If-Match": `"v${deployment.version}"` },
     body: { shellBuildId: shellBuild.id, window },
   });
   const cableRelease = await request(`/cable/revisions/${revision.id}/release`, {
-    method: "POST", headers: { "Idempotency-Key": `seed-cable-release-${blockDate}` },
+    method: "POST", headers: { "Idempotency-Key": `seed-cable-release-${revision.id.slice(0, 16)}` },
   });
-  const profileName = `Cable Dev TV ${blockDate}`;
+  const profileName = `Cable Dev TV ${blockDate} ${shellBuild.digest.slice(0, 6)}`;
   const profile = await createNamed("/cable/profiles", profileName, {
     name: profileName, description: "Seeded TV guide backed by generated playlists and scheduled blocks.",
     deploymentId: deployment.id, shellBuildId: shellBuild.id, releaseId: cableRelease.id,
-  }, `seed-profile-${blockDate}`);
+  }, `seed-profile-${blockDate}-${shellBuild.digest.slice(0, 12)}`);
 
   console.log(JSON.stringify({ assets, mediaReleases, playlists, blocks, channels, profile, cableRelease }, null, 2));
 }
