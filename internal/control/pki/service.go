@@ -381,6 +381,40 @@ func (service *Service) Revoke(ctx context.Context, mutation Mutation, nodeID, s
 	return result, nil
 }
 
+func (service *Service) RevokeNode(ctx context.Context, mutation Mutation, nodeID string) (NodeRevocationRecord, error) {
+	if mutation.ActorID == "" || mutation.IdempotencyKey == "" {
+		return NodeRevocationRecord{}, ErrInvalidMutation
+	}
+	if err := validateNodeID(nodeID); err != nil {
+		return NodeRevocationRecord{}, err
+	}
+	now := service.clock.Now().UTC()
+	hash := requestDigest(string(OperationRevokeNode), nodeID)
+	idempotency := service.idempotency(OperationRevokeNode, mutation.ActorID, mutation.IdempotencyKey, hash, now)
+	result, err := executeIdempotent(ctx, service.repository, service.sealer, idempotency, func(store Store) (NodeRevocationRecord, error) {
+		node, err := store.Node(ctx, nodeID)
+		if err != nil {
+			return NodeRevocationRecord{}, err
+		}
+		credentials, err := store.RevokeNodeCredentials(ctx, nodeID, now)
+		if err != nil {
+			return NodeRevocationRecord{}, err
+		}
+		node.CredentialState = CredentialRevoked
+		if err := store.UpdateNode(ctx, node); err != nil {
+			return NodeRevocationRecord{}, err
+		}
+		return NodeRevocationRecord{NodeID: nodeID, RevokedCredentials: len(credentials), RevokedAt: now}, nil
+	})
+	if err != nil {
+		return NodeRevocationRecord{}, err
+	}
+	if result.NodeID != nodeID || result.RevokedAt.IsZero() {
+		return NodeRevocationRecord{}, ErrInvalidIdempotencyResult
+	}
+	return result, nil
+}
+
 func (service *Service) issue(ctx context.Context, nodeID string, publicKey crypto.PublicKey, now time.Time) (ClientCredential, Credential, error) {
 	serial, err := service.serials.NextSerial(ctx)
 	if err != nil {

@@ -49,6 +49,7 @@ const (
 	OperationRecover               IdempotencyOperation = "pki.recover"
 	OperationRotate                IdempotencyOperation = "pki.rotate"
 	OperationRevoke                IdempotencyOperation = "pki.revoke"
+	OperationRevokeNode            IdempotencyOperation = "pki.revoke-node"
 )
 
 type CredentialState string
@@ -131,6 +132,11 @@ type RevocationRecord struct {
 	NodeID    string    `json:"nodeId"`
 	Serial    string    `json:"serial"`
 	RevokedAt time.Time `json:"revokedAt"`
+}
+type NodeRevocationRecord struct {
+	NodeID             string    `json:"nodeId"`
+	RevokedCredentials int       `json:"revokedCredentials"`
+	RevokedAt          time.Time `json:"revokedAt"`
 }
 
 type RecoveryRecord struct {

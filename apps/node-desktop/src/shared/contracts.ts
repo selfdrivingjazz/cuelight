@@ -12,6 +12,7 @@ export type ProvisionInput = z.infer<typeof provisionInputSchema>;
 export const settingsSchema = z.object({
   autoStart: z.boolean().default(false),
   fullScreen: z.boolean().default(true),
+  presentationMode: z.enum(["automatic", "media", "cable"]).default("automatic"),
 });
 export type DesktopSettings = z.infer<typeof settingsSchema>;
 
@@ -45,6 +46,7 @@ export interface CableNodeDesktopAPI {
   provision(input: ProvisionInput): Promise<DesktopStatus>;
   start(): Promise<DesktopStatus>;
   stop(): Promise<DesktopStatus>;
+  forget(): Promise<DesktopStatus>;
   updateSettings(settings: DesktopSettings): Promise<DesktopStatus>;
   openLogs(): Promise<void>;
   onStatus(listener: (status: DesktopStatus) => void): () => void;

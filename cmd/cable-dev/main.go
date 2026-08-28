@@ -38,6 +38,8 @@ func run(ctx context.Context, args []string, streams commandIO) int {
 	control := flags.String("control-binary", "cable-control", "cable-control executable")
 	simulator := flags.String("simulator-binary", "cable-node-sim", "cable-node-sim executable")
 	image := flags.String("postgres-image", "postgres:17-alpine", "PostgreSQL Docker image")
+	controlAddress := flags.String("control-address", "", "fixed control listen address (for example 127.0.0.1:4179)")
+	withoutSimulator := flags.Bool("without-simulator", false, "start the control stack without enrolling a simulated node")
 	jsonOutput := flags.Bool("json", true, "emit structured JSON (the default)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -49,7 +51,7 @@ func run(ctx context.Context, args []string, streams commandIO) int {
 		fmt.Fprintln(streams.stderr, "usage: cable-dev [--root PATH] [--json] {up|status|reset|down}")
 		return 2
 	}
-	manager, err := dev.New(dev.Config{Root: *root, MigrationsPath: *migrations, ControlBinary: *control, SimulatorBinary: *simulator, PostgresImage: *image}, dev.Options{})
+	manager, err := dev.New(dev.Config{Root: *root, MigrationsPath: *migrations, ControlBinary: *control, SimulatorBinary: *simulator, PostgresImage: *image, ControlAddress: *controlAddress, DisableSimulator: *withoutSimulator}, dev.Options{})
 	if err != nil {
 		fmt.Fprintln(streams.stderr, err)
 		return 1

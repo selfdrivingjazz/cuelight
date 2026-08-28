@@ -46,8 +46,10 @@ func (a testAuth) Revoke(context.Context, string) (auth.TokenMetadata, error) {
 }
 
 type testPKI struct {
-	secret   pki.TokenSecret
-	mutation pki.Mutation
+	secret         pki.TokenSecret
+	mutation       pki.Mutation
+	revokeMutation pki.Mutation
+	revokedNode    string
 }
 
 func (p *testPKI) CreateEnrollmentToken(_ context.Context, m pki.Mutation) (pki.TokenSecret, error) {
@@ -57,6 +59,11 @@ func (p *testPKI) CreateEnrollmentToken(_ context.Context, m pki.Mutation) (pki.
 func (p *testPKI) CreateRecoveryToken(_ context.Context, m pki.Mutation, _ string) (pki.TokenSecret, error) {
 	p.mutation = m
 	return p.secret, nil
+}
+func (p *testPKI) RevokeNode(_ context.Context, mutation pki.Mutation, nodeID string) (pki.NodeRevocationRecord, error) {
+	p.revokeMutation = mutation
+	p.revokedNode = nodeID
+	return pki.NodeRevocationRecord{NodeID: nodeID, RevokedCredentials: 1, RevokedAt: time.Now()}, nil
 }
 
 type testNodes struct {
@@ -226,5 +233,20 @@ func TestOperatorAssignmentAndReleaseMappings(t *testing.T) {
 	}
 	if statusFor(assignment.ErrIdempotencyConflict) != 409 {
 		t.Fatal("idempotency conflict mapping changed")
+	}
+}
+
+func TestOperatorCanUnregisterNode(t *testing.T) {
+	pkiService := &testPKI{}
+	handler := NewHandler(Dependencies{Auth: testAuth{scopes: []string{ScopeSecurityAdmin}}, PKI: pkiService})
+	if response := request(handler, http.MethodDelete, "/nodes/node-one", "token", nil); response.Code != http.StatusBadRequest {
+		t.Fatalf("missing idempotency status = %d", response.Code)
+	}
+	response := withHeader(handler, http.MethodDelete, "/nodes/node-one", "token", nil, map[string]string{"Idempotency-Key": "unregister-node-one"})
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("unregister status=%d body=%s", response.Code, response.Body.String())
+	}
+	if pkiService.revokedNode != "node-one" || pkiService.revokeMutation.ActorID != "actor" || pkiService.revokeMutation.IdempotencyKey != "unregister-node-one" {
+		t.Fatalf("node=%q mutation=%#v", pkiService.revokedNode, pkiService.revokeMutation)
 	}
 }

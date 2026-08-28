@@ -58,6 +58,7 @@ function registerIPC(): void {
   ipcMain.handle("node:stop", () => manager.stop());
   ipcMain.handle("node:settings", async (_event, input: unknown) => manager.updateSettings(settingsSchema.parse(input)));
   ipcMain.handle("node:open-logs", () => manager.openLogs());
+  ipcMain.handle("node:forget", () => manager.forget());
 }
 
 app.whenReady().then(async () => {

@@ -1,7 +1,7 @@
 import { app, powerSaveBlocker, shell } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, existsSync, type WriteStream } from "node:fs";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { DesktopSettings, DesktopStatus, ProvisionInput, ProvisionedNode } from "../shared/contracts";
 import { settingsSchema } from "../shared/contracts";
@@ -12,7 +12,7 @@ export class SidecarManager {
   private node?: ProvisionedNode;
   private phase: DesktopStatus["phase"] = "unprovisioned";
   private lastError?: string;
-  private settings: DesktopSettings = { autoStart: false, fullScreen: true };
+  private settings: DesktopSettings = { autoStart: false, fullScreen: true, presentationMode: "automatic" };
   private sleepBlocker?: number;
   private rendererUrl?: string;
 
@@ -85,6 +85,7 @@ export class SidecarManager {
       CABLE_PLAYER_LOOPBACK_ADDR: "127.0.0.1:0",
       CABLE_PLAYER_FEATURES: "chromium",
       CABLE_PLAYER_ACCEPTED_MEDIA_TYPES: "video/mp4,image/jpeg,image/png,image/webp",
+      CABLE_PLAYER_PRESENTATION_MODE: this.settings.presentationMode,
       CABLE_PLAYER_PROBATION: "2s",
     };
     await mkdir(path.join(this.stateDirectory(), "cas"), { recursive: true });
@@ -123,11 +124,32 @@ export class SidecarManager {
     return this.status();
   }
 
+  async forget(): Promise<DesktopStatus> {
+    await this.stop();
+    await Promise.all([
+      rm(this.identityDirectory(), { recursive: true, force: true }),
+      rm(this.stateDirectory(), { recursive: true, force: true }),
+    ]);
+    await Promise.all([
+      mkdir(this.identityDirectory(), { recursive: true }),
+      mkdir(this.stateDirectory(), { recursive: true }),
+    ]);
+    this.node = undefined;
+    this.phase = "unprovisioned";
+    this.lastError = undefined;
+    this.emit();
+    return this.status();
+  }
+
   async updateSettings(settings: DesktopSettings): Promise<DesktopStatus> {
-    this.settings = settingsSchema.parse(settings);
+    const next = settingsSchema.parse(settings);
+    const restart = Boolean(this.child) && next.presentationMode !== this.settings.presentationMode;
+    if (restart) await this.stop();
+    this.settings = next;
     this.renderer.setFullScreen(this.settings.fullScreen);
     await this.atomicJSON(this.settingsPath(), this.settings);
     await this.updateLoginItem();
+    if (restart) return this.start();
     this.emit();
     return this.status();
   }

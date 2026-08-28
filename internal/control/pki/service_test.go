@@ -281,6 +281,26 @@ func TestRevocationRecordsCredentialAndRejectsRepeat(t *testing.T) {
 	}
 }
 
+func TestRevokeNodeRevokesEveryCredentialAndReplays(t *testing.T) {
+	environment := newTestEnvironment(t)
+	enrollment, _ := enrollNode(t, environment)
+	mutation := Mutation{ActorID: "security-admin", IdempotencyKey: "revoke-node-1"}
+	record, err := environment.service.RevokeNode(context.Background(), mutation, enrollment.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.NodeID != enrollment.NodeID || record.RevokedCredentials != 1 || record.RevokedAt.IsZero() {
+		t.Fatalf("node revocation = %#v", record)
+	}
+	if state := environment.repository.nodes[enrollment.NodeID].CredentialState; state != CredentialRevoked {
+		t.Fatalf("node credential state = %q", state)
+	}
+	replayed, err := environment.service.RevokeNode(context.Background(), mutation, enrollment.NodeID)
+	if err != nil || replayed != record {
+		t.Fatalf("replayed node revocation = %#v, %v", replayed, err)
+	}
+}
+
 func TestRecoveryPreservesNodeAndCreatesNewEpoch(t *testing.T) {
 	environment := newTestEnvironment(t)
 	ctx := context.Background()

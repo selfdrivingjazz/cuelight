@@ -26,7 +26,7 @@ import (
 var OperationScopes = map[string]string{
 	"createEnrollmentToken": ScopeNodeEnroll, "listAdminTokens": ScopeSecurityAdmin,
 	"revokeAdminToken": ScopeSecurityAdmin, "listNodes": ScopeNodeRead,
-	"getNode": ScopeNodeRead, "updateNode": ScopeNodeWrite,
+	"getNode": ScopeNodeRead, "updateNode": ScopeNodeWrite, "unregisterNode": ScopeSecurityAdmin,
 	"getNodeStatus": ScopeNodeRead, "getNodeCapabilities": ScopeNodeRead, "createNodeRecoveryToken": ScopeSecurityAdmin,
 	"getNodeAssignment": ScopeAssignmentRead, "putNodeAssignment": ScopeAssignmentWrite,
 	"listNodeEvents": ScopeNodeRead, "createUpload": ScopeMediaWrite,
@@ -63,6 +63,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("GET /nodes", h.authorized(ScopeNodeRead, h.listNodes))
 	mux.Handle("GET /nodes/{nodeId}", h.authorized(ScopeNodeRead, h.getNode))
 	mux.Handle("PATCH /nodes/{nodeId}", h.authorized(ScopeNodeWrite, h.updateNode))
+	mux.Handle("DELETE /nodes/{nodeId}", h.authorized(ScopeSecurityAdmin, h.unregisterNode))
 	mux.Handle("GET /nodes/{nodeId}/status", h.authorized(ScopeNodeRead, h.getNodeStatus))
 	mux.Handle("GET /nodes/{nodeId}/capabilities", h.authorized(ScopeNodeRead, h.getNodeCapabilities))
 	mux.Handle("POST /nodes/{nodeId}/recovery-tokens", h.authorized(ScopeSecurityAdmin, h.createNodeRecoveryToken))
@@ -389,6 +390,24 @@ func (h *Handler) updateNode(w http.ResponseWriter, r *http.Request) {
 	}
 	setNodeETag(w, v)
 	writeJSON(w, http.StatusOK, v)
+}
+func (h *Handler) unregisterNode(w http.ResponseWriter, r *http.Request) {
+	key, err := idempotencyKey(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	service, ok := h.deps.PKI.(NodeRevocationService)
+	if !ok {
+		writeError(w, errors.New("node revocation service is not configured"))
+		return
+	}
+	actor, _ := auth.ActorFromContext(r.Context())
+	if _, err := service.RevokeNode(r.Context(), pki.Mutation{ActorID: actor.ID, IdempotencyKey: key}, r.PathValue("nodeId")); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func (h *Handler) getNodeStatus(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Nodes == nil {

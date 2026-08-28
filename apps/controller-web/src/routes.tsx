@@ -112,6 +112,20 @@ type NodeAssignmentData = components["schemas"]["Assignment"];
 type NodeEvent = components["schemas"]["NodeEvent"];
 type NodeCapabilities = components["schemas"]["CapabilityReport"];
 function NodeDetailPage({ nodeId, tab = "" }: { nodeId: string; tab?: NodeTab }) {
+  const auth = useAuth();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [confirmUnregister, setConfirmUnregister] = React.useState(false);
+  const unregister = useMutation({
+    mutationFn: async () => {
+      const result = await api.DELETE("/nodes/{nodeId}", { params: { path: { nodeId }, header: { "Idempotency-Key": crypto.randomUUID() } } });
+      if (result.error) throw new ApiRequestError(result.response.status, "The node could not be unregistered.");
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["controller", "nodes"] });
+      void navigate({ to: "/nodes" });
+    },
+  });
   const node = useQuery({ queryKey: queryKeys.node(nodeId), queryFn: () => getNode(nodeId) });
   const needsStatus = tab === "" || tab === "playback" || tab === "cache";
   const status = useQuery({ queryKey: queryKeys.nodeStatus(nodeId), queryFn: () => getNodeStatus(nodeId), enabled: needsStatus });
@@ -123,8 +137,10 @@ function NodeDetailPage({ nodeId, tab = "" }: { nodeId: string; tab?: NodeTab })
   const detail = node.data;
   const tabTitle = nodeTabs.find((item) => item.slug === tab)?.label ?? "Overview";
   const statusContent = status.isPending ? <LoadingCard /> : status.isError ? <QueryError error={status.error} retry={() => void status.refetch()} /> : tab === "playback" ? <NodePlayback status={status.data} /> : tab === "cache" ? <NodeCache status={status.data} /> : <NodeOverview node={detail} status={status.data} />;
+  const canUnregister = auth.operator?.scopes.includes("security_admin") === true || auth.operator?.capabilities.security_admin === true;
   return <PageFrame breadcrumbs={[{ label: "Fleet", href: "/nodes" }, { label: detail.name }, ...(tab ? [{ label: tabTitle }] : [])]}>
-    <PageHeader title={detail.name} description={`Node ID ${detail.id}`}><StatusBadge tone={detail.credentialState === "active" ? "success" : "warning"}>{detail.credentialState}</StatusBadge></PageHeader>
+    <PageHeader title={detail.name} description={`Node ID ${detail.id}`}><StatusBadge tone={detail.credentialState === "active" ? "success" : "warning"}>{detail.credentialState}</StatusBadge>{canUnregister && !confirmUnregister && <Button variant="secondary" onClick={() => setConfirmUnregister(true)}>Unregister node</Button>}{confirmUnregister && <><Button variant="secondary" onClick={() => setConfirmUnregister(false)}>Cancel</Button><Button onClick={() => unregister.mutate()} disabled={unregister.isPending}>{unregister.isPending ? "Unregistering…" : "Confirm unregister"}</Button></>}</PageHeader>
+    {unregister.isError && <QueryError error={unregister.error} retry={() => unregister.reset()} />}
     <nav aria-label="Node sections" className="flex gap-1 overflow-x-auto border-b border-border pb-px">{nodeTabs.map((item) => <Link key={item.slug || "overview"} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm ${item.slug === tab ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`} to={item.slug ? `/nodes/$nodeId/${item.slug}` : "/nodes/$nodeId"} params={{ nodeId }} aria-current={item.slug === tab ? "page" : undefined}>{item.label}</Link>)}</nav>
     {needsStatus && statusContent}
     {tab === "capabilities" && (capabilities.isPending ? <LoadingCard /> : capabilities.isError ? <QueryError error={capabilities.error} retry={() => void capabilities.refetch()} /> : <NodeCapabilityDetails capabilities={capabilities.data} />)}

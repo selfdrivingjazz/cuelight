@@ -1,12 +1,13 @@
 import * as React from "react";
 import type { DesktopStatus, ProvisionInput } from "../shared/contracts";
 
-const EMPTY_STATUS: DesktopStatus = { phase: "unprovisioned", outputWindows: 0, settings: { autoStart: false, fullScreen: true }, logPath: "" };
+const EMPTY_STATUS: DesktopStatus = { phase: "unprovisioned", outputWindows: 0, settings: { autoStart: false, fullScreen: true, presentationMode: "automatic" }, logPath: "" };
 
 export function App() {
   const [status, setStatus] = React.useState<DesktopStatus>(EMPTY_STATUS);
   const [busy, setBusy] = React.useState<string>();
   const [error, setError] = React.useState<string>();
+  const [confirmForget, setConfirmForget] = React.useState(false);
   const [form, setForm] = React.useState<ProvisionInput>({ controllerUrl: "", caPath: "", token: "", nodeName: `${navigator.platform} Cable Node`, recover: false });
 
   React.useEffect(() => {
@@ -47,12 +48,12 @@ export function App() {
     <div className="workspace">
       <section className="panel">
         <div className="panel-heading"><div><p className="eyebrow">IDENTITY</p><h2>{status.node ? "Provisioned node" : "Enroll this node"}</h2></div><span>{status.node?.nodeId ? status.node.nodeId.slice(0, 8) : "UNBOUND"}</span></div>
-        {status.node ? <dl className="facts">
+        {status.node ? <><dl className="facts">
           <div><dt>Node ID</dt><dd>{status.node.nodeId}</dd></div>
           <div><dt>Controller</dt><dd>{status.node.controlUrl}</dd></div>
           <div><dt>Event epoch</dt><dd>{status.node.eventEpoch}</dd></div>
           <div><dt>Publisher</dt><dd>{status.node.publisherKeyId}</dd></div>
-        </dl> : <form className="form" onSubmit={provision}>
+        </dl><div className="actions identity-actions">{confirmForget ? <><button type="button" onClick={() => setConfirmForget(false)}>Cancel</button><button type="button" onClick={() => void perform("Forgetting", async () => { const next = await window.cableNode.forget(); setConfirmForget(false); return next; })}>Confirm forget identity</button></> : <button type="button" disabled={active} onClick={() => setConfirmForget(true)}>Forget local identity</button>}</div></> : <form className="form" onSubmit={provision}>
           <label>Controller URL<input required type="url" value={form.controllerUrl} placeholder="https://desktop.tailnet.example/api/v1" onChange={(event) => updateForm("controllerUrl", event.currentTarget.value)} /></label>
           <label>Node name<input required value={form.nodeName} onChange={(event) => updateForm("nodeName", event.currentTarget.value)} /></label>
           <label className="span-two">Controller CA<div className="field-action"><input required value={form.caPath} placeholder="Choose the controller CA PEM" onChange={(event) => updateForm("caPath", event.currentTarget.value)} /><button type="button" onClick={() => void window.cableNode.chooseCA().then((value) => value && updateForm("caPath", value))}>Choose</button></div></label>
@@ -73,6 +74,7 @@ export function App() {
         <div className="settings">
           <label className="check"><input type="checkbox" checked={status.settings.fullScreen} onChange={(event) => void perform("Updating", () => window.cableNode.updateSettings({ ...status.settings, fullScreen: event.currentTarget.checked }))} />Full-screen output</label>
           <label className="check"><input type="checkbox" checked={status.settings.autoStart} onChange={(event) => void perform("Updating", () => window.cableNode.updateSettings({ ...status.settings, autoStart: event.currentTarget.checked }))} />Start node at login</label>
+          <label>Presentation mode<select value={status.settings.presentationMode} onChange={(event) => void perform("Updating", () => window.cableNode.updateSettings({ ...status.settings, presentationMode: event.currentTarget.value as DesktopStatus["settings"]["presentationMode"] }))}><option value="automatic">Automatic</option><option value="media">Media</option><option value="cable">Cable</option></select></label>
         </div>
         {status.lastError && <p className="runtime-error">{status.lastError}</p>}
       </section>

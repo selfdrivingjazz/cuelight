@@ -139,6 +139,17 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Node"}
         default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [operator]
+      operationId: unregisterNode
+      security: [{operatorToken: []}]
+      x-required-scopes: [security_admin]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": {description: Node credentials revoked and node removed from the active Fleet view.}
+        default: {$ref: "#/components/responses/Problem"}
   /nodes/{nodeId}/status:
     get:
       tags: [operator]

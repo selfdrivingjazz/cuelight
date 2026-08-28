@@ -110,7 +110,7 @@ export interface paths {
         get: operations["getNode"];
         put?: never;
         post?: never;
-        delete?: never;
+        delete: operations["unregisterNode"];
         options?: never;
         head?: never;
         patch: operations["updateNode"];
@@ -1429,6 +1429,29 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Node"];
                 };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    unregisterNode: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Node credentials revoked and node removed from the active Fleet view. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Problem"];
         };

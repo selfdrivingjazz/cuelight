@@ -259,6 +259,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, assignment playerclient.Assi
 	if err := release.Verify(envelope, r.config.PublisherKeyID, r.config.PublisherPublicKey, r.config.Capabilities.ProtocolVersion); err != nil {
 		return r.fail(ctx, generation, "verify release", err)
 	}
+	if err := r.checkProfile(envelope, assignment.DeliveryMode); err != nil {
+		return r.fail(ctx, generation, "check player profile", err)
+	}
 
 	candidate, revoke, err := r.materialize(ctx, envelope, assignment.DeliveryMode)
 	if err != nil {
@@ -335,6 +338,9 @@ func validateAssignment(assignment playerclient.Assignment) (uint64, error) {
 }
 
 func (r *Reconciler) checkProfile(envelope release.EnvelopeV1, mode string) error {
+	if r.config.PresentationMode != "" && envelope.Payload.PresentationMode() != r.config.PresentationMode {
+		return fmt.Errorf("%w: node is locked to %q presentation", ErrIncompatibleRelease, r.config.PresentationMode)
+	}
 	if !envelope.Payload.AllowsDeliveryMode(mode) {
 		return fmt.Errorf("%w: delivery mode %q", ErrIncompatibleRelease, mode)
 	}

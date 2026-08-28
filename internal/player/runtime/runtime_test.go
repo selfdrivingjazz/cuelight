@@ -140,6 +140,18 @@ func TestCableReleaseMaterializesExactClosureForChromium(t *testing.T) {
 	}
 }
 
+func TestPresentationModeRejectsOtherReleaseKind(t *testing.T) {
+	h := newHarness(t, []byte("media"), DeliveryStream)
+	h.runtime.config.PresentationMode = release.PresentationCable
+	err := h.runtime.Reconcile(context.Background(), h.assignment(1, DeliveryStream))
+	if !errors.Is(err, ErrIncompatibleRelease) || !errors.Is(err, ErrSafeMode) {
+		t.Fatalf("error = %v", err)
+	}
+	if h.controller.downloads != 0 || len(h.renderer.commits) != 0 {
+		t.Fatalf("downloads=%d commits=%v", h.controller.downloads, h.renderer.commits)
+	}
+}
+
 func TestCacheRejectsInsufficientCapacityBeforeDownload(t *testing.T) {
 	h := newHarness(t, []byte("too large"), DeliveryCacheThenPlay)
 	h.capacity.free = 1

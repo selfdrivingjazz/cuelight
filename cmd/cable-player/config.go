@@ -36,6 +36,7 @@ type playerConfig struct {
 	LoopbackAddress        string
 	Features               []string
 	AcceptedMediaTypes     []string
+	PresentationMode       release.PresentationKind
 	Probation              time.Duration
 	PollWait               time.Duration
 	ReconnectMinimum       time.Duration
@@ -62,7 +63,8 @@ func loadConfig(lookup func(string) (string, bool)) (playerConfig, error) {
 		ChromiumRuntimeRoot: envDefault(lookup, "CABLE_PLAYER_CHROMIUM_RUNTIME_ROOT", "/var/lib/cable/chromium"),
 		ChromiumArgs:        listEnv(lookup, "CABLE_PLAYER_CHROMIUM_ARGS"), LoopbackAddress: envDefault(lookup, "CABLE_PLAYER_LOOPBACK_ADDR", "127.0.0.1:0"),
 		Features: listEnv(lookup, "CABLE_PLAYER_FEATURES"), AcceptedMediaTypes: listEnv(lookup, "CABLE_PLAYER_ACCEPTED_MEDIA_TYPES"),
-		Probation: 30 * time.Second, PollWait: 30 * time.Second, ReconnectMinimum: time.Second, ReconnectMaximum: 30 * time.Second,
+		PresentationMode: release.PresentationKind(envDefault(lookup, "CABLE_PLAYER_PRESENTATION_MODE", "automatic")),
+		Probation:        30 * time.Second, PollWait: 30 * time.Second, ReconnectMinimum: time.Second, ReconnectMaximum: 30 * time.Second,
 		PartialGrace: time.Hour, StreamTTL: 10 * time.Minute, MPVTimeout: 5 * time.Second, ChromiumTimeout: 15 * time.Second,
 	}
 	var err error
@@ -122,6 +124,9 @@ func (c playerConfig) validate() error {
 	if len(c.AcceptedMediaTypes) == 0 {
 		return &configError{"CABLE_PLAYER_ACCEPTED_MEDIA_TYPES", "must contain at least one media type"}
 	}
+	if c.PresentationMode != "automatic" && c.PresentationMode != release.PresentationMedia && c.PresentationMode != release.PresentationCable {
+		return &configError{"CABLE_PLAYER_PRESENTATION_MODE", "must be automatic, media, or cable"}
+	}
 	if c.Probation <= 0 || c.PollWait < 0 || c.ReconnectMinimum <= 0 || c.ReconnectMaximum < c.ReconnectMinimum || c.PartialGrace < 0 || c.StreamTTL <= c.Probation || c.MPVTimeout <= 0 || c.ChromiumTimeout <= 0 {
 		return &configError{"timing", "durations must be positive, reconnect max must be at least min, and stream TTL must exceed probation"}
 	}
@@ -136,8 +141,15 @@ func (c playerConfig) runtimeConfig(publisherKey []byte) playerruntime.Config {
 		Capabilities: capabilityReport(c), EventEpoch: c.EventEpoch, PublisherKeyID: c.PublisherKeyID, PublisherPublicKey: publisherKey,
 		Features: c.Features, AcceptedMediaTypes: c.AcceptedMediaTypes, Probation: c.Probation, PollWait: c.PollWait,
 		ReconnectMinimum: c.ReconnectMinimum, ReconnectMaximum: c.ReconnectMaximum, PartialGrace: c.PartialGrace, StreamTTL: c.StreamTTL,
-		MaxEvents: 256, MaxEventBatch: 32, MaxConditions: 32, MaxMessageRunes: 256,
+		PresentationMode: c.runtimePresentationMode(),
+		MaxEvents:        256, MaxEventBatch: 32, MaxConditions: 32, MaxMessageRunes: 256,
 	}
+}
+func (c playerConfig) runtimePresentationMode() release.PresentationKind {
+	if c.PresentationMode == "automatic" {
+		return ""
+	}
+	return c.PresentationMode
 }
 
 func capabilityReport(c playerConfig) playerclient.CapabilityReport {

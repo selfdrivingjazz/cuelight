@@ -33,7 +33,7 @@ var _ operatorapi.AssetPageService = (*Store)(nil)
 
 func (a *OperatorAdapter) ListNodes(ctx context.Context) ([]operatorapi.Node, error) {
 	s := a.Store
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT id::text, name, credential_state, desired_generation, observed_generation FROM nodes ORDER BY created_at, id`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT id::text, name, credential_state, desired_generation, observed_generation FROM nodes WHERE credential_state <> 'revoked' ORDER BY created_at, id`)
 	if err != nil {
 		return nil, wrap("list nodes", err)
 	}
@@ -83,6 +83,8 @@ func (a *OperatorAdapter) ListNodesPage(ctx context.Context, request page.PageRe
 	if state := strings.TrimSpace(request.Filters["credentialState"]); state != "" {
 		args = append(args, state)
 		clauses = append(clauses, "n.credential_state = $"+strconv.Itoa(len(args)))
+	} else {
+		clauses = append(clauses, "n.credential_state <> 'revoked'")
 	}
 	if request.Cursor != "" {
 		if sortKey == "name" {

@@ -27,7 +27,10 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px rgb(94 234 212 
 .form { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; padding-top: 1.25rem; }
 .form label { color: #cbe3df; font-size: .78rem; }
 .span-two { grid-column: 1 / -1; }
+.identity-actions { margin-top: 1.25rem; }
 .field-action { display: grid; grid-template-columns: 1fr auto; gap: .5rem; }
+.settings label:not(.check) { display: grid; gap: .35rem; color: #cbe3df; font-size: .78rem; }
+.settings select { min-width: 10rem; border: 1px solid var(--line); border-radius: 8px; background: #081616; color: var(--text); padding: .55rem .65rem; }
 .field-action button { align-self: end; }
 .check { display: flex; align-items: center; gap: .6rem; color: var(--muted); font-size: .78rem; }
 .check input { width: 1rem; min-height: auto; margin: 0; accent-color: var(--signal); }

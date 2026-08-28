@@ -88,6 +88,7 @@ type Config struct {
 	PublisherKeyID     string
 	PublisherPublicKey ed25519.PublicKey
 	Features           []string
+	PresentationMode   release.PresentationKind
 	AcceptedMediaTypes []string
 	Probation          time.Duration
 	PollWait           time.Duration

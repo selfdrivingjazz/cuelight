@@ -58,6 +58,7 @@ type Config struct {
 	PostgresDatabase string
 	ControlAddress   string
 	ReadinessTimeout time.Duration
+	DisableSimulator bool
 	ShutdownTimeout  time.Duration
 }
 
@@ -282,23 +283,25 @@ func (m *Manager) Up(ctx context.Context) (Status, error) {
 	if err := operator.SaveConfig(m.path("operator.json"), operator.Config{Server: r.Endpoint + "/api/v1", Token: admin, CAPath: m.path("trust", "ca.pem")}); err != nil {
 		return writeErr(err)
 	}
-	enrollment := ""
-	if _, stateErr := os.Stat(m.path("state", "node.state.json")); errors.Is(stateErr, os.ErrNotExist) {
-		enrollment, err = m.enrollment(ctx, r.Endpoint, admin)
-		if err != nil {
-			return writeErr(err)
+	if !m.config.DisableSimulator {
+		enrollment := ""
+		if _, stateErr := os.Stat(m.path("state", "node.state.json")); errors.Is(stateErr, os.ErrNotExist) {
+			enrollment, err = m.enrollment(ctx, r.Endpoint, admin)
+			if err != nil {
+				return writeErr(err)
+			}
 		}
+		simulatorArgs := []string{"-control-url", r.Endpoint + "/api/v1", "-server-ca", m.path("trust", "ca.pem"), "-state", m.path("state", "node.state.json")}
+		if enrollment != "" {
+			simulatorArgs = append(simulatorArgs, "-enrollment-token", enrollment)
+		}
+		sim, err := m.processes.Start(ctx, ProcessSpec{Name: m.config.SimulatorBinary, Args: simulatorArgs, Env: nil, Dir: m.config.Root})
+		if err != nil {
+			return writeErr(fmt.Errorf("start simulator: %w", err))
+		}
+		m.live["simulator"] = sim
+		r.Simulator = componentReceipt{Kind: "process", PID: sim.PID(), PIDStart: pidStartToken(sim.PID()), Owned: true}
 	}
-	simulatorArgs := []string{"-control-url", r.Endpoint + "/api/v1", "-server-ca", m.path("trust", "ca.pem"), "-state", m.path("state", "node.state.json")}
-	if enrollment != "" {
-		simulatorArgs = append(simulatorArgs, "-enrollment-token", enrollment)
-	}
-	sim, err := m.processes.Start(ctx, ProcessSpec{Name: m.config.SimulatorBinary, Args: simulatorArgs, Env: nil, Dir: m.config.Root})
-	if err != nil {
-		return writeErr(fmt.Errorf("start simulator: %w", err))
-	}
-	m.live["simulator"] = sim
-	r.Simulator = componentReceipt{Kind: "process", PID: sim.PID(), PIDStart: pidStartToken(sim.PID()), Owned: true}
 	r.State = "ready"
 	r.UpdatedAt = m.clock().UTC()
 	if err := m.writeReceipt(r); err != nil {

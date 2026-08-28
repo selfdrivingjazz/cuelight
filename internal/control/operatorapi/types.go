@@ -121,6 +121,9 @@ type NodeService interface {
 type NodeCapabilityService interface {
 	GetNodeCapabilities(context.Context, string) (playerclient.CapabilityReport, error)
 }
+type NodeRevocationService interface {
+	RevokeNode(context.Context, pki.Mutation, string) (pki.NodeRevocationRecord, error)
+}
 
 type AssignmentService interface {
 	GetAssignment(context.Context, string) (assignment.Assignment, error)

@@ -104,6 +104,21 @@ func TestUpDownIdempotentWithFakeBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+func TestUpCanOmitDevelopmentSimulator(t *testing.T) {
+	processes, commands, containers := &fakeProcesses{}, &fakeCommands{}, &fakeContainers{}
+	manager := testManager(t, securedTempDir(t), processes, commands, containers)
+	manager.config.DisableSimulator = true
+	status, err := manager.Up(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(processes.started) != 1 || status.Simulator.State != "stopped" {
+		t.Fatalf("simulator-free status=%#v processes=%d", status, len(processes.started))
+	}
+	if err := manager.Down(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestStatusRedactsSecrets(t *testing.T) {
 	manager, err := New(Config{Root: securedTempDir(t)}, Options{})

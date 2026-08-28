@@ -7,6 +7,7 @@ const api: CableNodeDesktopAPI = {
   provision: (input: ProvisionInput) => ipcRenderer.invoke("node:provision", input),
   start: () => ipcRenderer.invoke("node:start"),
   stop: () => ipcRenderer.invoke("node:stop"),
+  forget: () => ipcRenderer.invoke("node:forget"),
   updateSettings: (settings: DesktopSettings) => ipcRenderer.invoke("node:settings", settings),
   openLogs: () => ipcRenderer.invoke("node:open-logs"),
   onStatus: (listener: (status: DesktopStatus) => void) => {

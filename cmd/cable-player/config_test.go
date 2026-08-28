@@ -12,7 +12,7 @@ func TestLoadConfigValidatesRequiredAndLoopbackInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.ControlURL != "https://control.example/api/v1" || config.LoopbackAddress != "127.0.0.1:0" || config.Probation != 20*time.Second {
+	if config.ControlURL != "https://control.example/api/v1" || config.LoopbackAddress != "127.0.0.1:0" || config.Probation != 20*time.Second || config.PresentationMode != "automatic" {
 		t.Fatalf("config = %+v", config)
 	}
 	if len(config.Features) != 2 || len(config.AcceptedMediaTypes) != 1 {
@@ -31,6 +31,13 @@ func TestLoadConfigValidatesRequiredAndLoopbackInputs(t *testing.T) {
 	_, err = loadConfig(mapLookup(values))
 	if !errors.As(err, &configErr) || configErr.Field != "CABLE_PLAYER_LOOPBACK_ADDR" {
 		t.Fatalf("non-loopback error = %v", err)
+	}
+
+	values = validEnvironment()
+	values["CABLE_PLAYER_PRESENTATION_MODE"] = "kiosk"
+	_, err = loadConfig(mapLookup(values))
+	if !errors.As(err, &configErr) || configErr.Field != "CABLE_PLAYER_PRESENTATION_MODE" {
+		t.Fatalf("presentation mode error = %v", err)
 	}
 }
 func TestLoadConfigAcceptsAuthenticatedDesktopRendererWithoutMPV(t *testing.T) {
