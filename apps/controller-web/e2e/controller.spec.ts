@@ -4,13 +4,16 @@ const pageInfo = { nextCursor: null, previousCursor: null, hasMore: false };
 const node = { id: "11111111-1111-1111-1111-111111111111", name: "Lobby display", credentialState: "active", desiredGeneration: 4, observedGeneration: 4 };
 const deployment = { id: "22222222-2222-2222-2222-222222222222", name: "Atrium Cable", timezone: "America/New_York", theme: "gallery", guideHorizonSeconds: 86_400, guideDensity: "hour", version: 3, createdBy: "33333333-3333-3333-3333-333333333333", updatedBy: "33333333-3333-3333-3333-333333333333", createdAt: "2026-08-27T10:00:00Z", updatedAt: "2026-08-27T12:00:00Z" };
 
-async function installControllerApi(page: Page) {
+async function installControllerApi(page: Page, requireToken = false) {
   await page.route("**/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", version: "browser-test" }) }));
   await page.route("**/api/v1/**", async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
     const reply = (json: unknown, status = 200, headers: Record<string, string> = {}) => route.fulfill({ status, headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(json) });
-    if (path === "/operator/me") return reply({ id: "operator-one", scopes: ["admin", "nodes:read", "cable:read", "cable:write"], capabilities: { "cable:deployments:create": true } });
+    if (path === "/operator/me") {
+      if (requireToken && request.headers().authorization !== "Bearer operator-token") return reply({ title: "Unauthorized", status: 401 }, 401);
+      return reply({ id: "operator-one", scopes: ["node_read", "node_enroll", "cable_read", "cable_write"], capabilities: { node_read: true, node_enroll: true, cable_read: true, cable_write: true } });
+    }
     if (path === "/health") return reply({ status: "ok", version: "browser-test" });
     if (path === "/nodes") return reply({ items: [node], page: pageInfo });
     if (path === `/nodes/${node.id}`) return reply(node, 200, { ETag: '"node:4:4"' });
@@ -22,7 +25,7 @@ async function installControllerApi(page: Page) {
 }
 
 test("operator authenticates and browses fleet detail", async ({ page }) => {
-  await installControllerApi(page);
+  await installControllerApi(page, true);
   await page.goto("/");
   await page.getByRole("textbox", { name: "Operator token" }).fill("operator-token");
   await page.getByRole("button", { name: "Continue" }).click();
@@ -37,8 +40,7 @@ test("operator authenticates and browses fleet detail", async ({ page }) => {
 test("operator browses Cable deployment hierarchy", async ({ page }) => {
   await installControllerApi(page);
   await page.goto("/");
-  await page.getByRole("textbox", { name: "Operator token" }).fill("operator-token");
-  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("textbox", { name: "Operator token" })).toHaveCount(0);
   await page.getByRole("link", { name: "Deployments" }).click();
   await expect(page.getByRole("heading", { name: "Cable deployments" })).toBeVisible();
   await page.getByRole("link", { name: "Atrium Cable" }).click();

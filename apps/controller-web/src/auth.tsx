@@ -22,46 +22,47 @@ function readStoredToken(): string | undefined {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = React.useState<string | undefined>(readStoredToken);
+  const initialToken = React.useRef(readStoredToken());
+  const [token, setToken] = React.useState<string | undefined>(initialToken.current);
   const [operator, setOperator] = React.useState<Operator | undefined>();
-  const [state, setState] = React.useState<AuthState>(token ? "checking" : "signedOut");
+  const [state, setState] = React.useState<AuthState>("checking");
   const [error, setError] = React.useState<string>();
 
   const validate = React.useCallback(async (candidate: string): Promise<boolean> => {
+    const normalized = candidate.trim();
     setState("checking");
     setError(undefined);
-    setApiToken(candidate);
+    setApiToken(normalized || undefined);
     try {
       const identity = readApiResult(await api.GET("/operator/me"));
-      setToken(candidate);
+      setToken(normalized || undefined);
       setOperator(identity);
       setState("authenticated");
-      if (typeof window !== "undefined") window.sessionStorage.setItem(TOKEN_KEY, candidate);
+      if (typeof window !== "undefined") {
+        if (normalized) window.sessionStorage.setItem(TOKEN_KEY, normalized);
+        else window.sessionStorage.removeItem(TOKEN_KEY);
+      }
       return true;
     } catch (cause) {
       setApiToken(undefined);
       setToken(undefined);
       setOperator(undefined);
-      setState("invalid");
-      setError(cause instanceof Error ? cause.message : "The operator token was rejected.");
+      setState(normalized ? "invalid" : "signedOut");
+      setError(normalized && cause instanceof Error ? cause.message : undefined);
       if (typeof window !== "undefined") window.sessionStorage.removeItem(TOKEN_KEY);
       return false;
     }
   }, []);
 
   React.useEffect(() => {
-    if (token) void validate(token);
-  }, [token, validate]);
+    void validate(initialToken.current ?? "");
+  }, [validate]);
 
   const signOut = React.useCallback(() => {
-    setApiToken(undefined);
-    setToken(undefined);
-    setOperator(undefined);
-    setState("signedOut");
-    setError(undefined);
-    if (typeof window !== "undefined") window.sessionStorage.removeItem(TOKEN_KEY);
-  }, []);
-  const signIn = React.useCallback((candidate: string) => validate(candidate.trim()), [validate]);
+    initialToken.current = undefined;
+    void validate("");
+  }, [validate]);
+  const signIn = React.useCallback((candidate: string) => validate(candidate), [validate]);
   const value = React.useMemo(() => ({ token, operator, state, error, signIn, signOut }), [token, operator, state, error, signIn, signOut]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
