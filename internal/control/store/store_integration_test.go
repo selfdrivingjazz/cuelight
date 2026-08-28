@@ -507,13 +507,13 @@ func TestPostgresCableAuthoringAndRevisionRoundTrip(t *testing.T) {
 		ID: revisionDigest, Digest: revisionDigest, DeploymentID: deployment.ID, DeploymentVersion: deployment.Version,
 		ShellBuildID: shell.ID, ShellBuildDigest: shellDigest, Entrypoint: "index.html", BridgeProtocol: "1",
 		Timezone: deployment.Timezone, Theme: deployment.Theme, GeneratedAt: start, Window: cable.RevisionWindow{StartsAt: start, EndsAt: start.Add(time.Hour)},
-		JSON: []byte(`{"schema":"cable.revision.v1"}`), ArtifactDigests: []string{assetDigest, shellDigest, revisionDigest}, CreatedBy: actorID, CreatedAt: start,
+		JSON: []byte(`{"schema":"cable.revision.v1","channels":[{"id":"channel-7","number":7,"name":"Gallery","callsign":"GALL","enabled":true,"standby":false,"programs":[]}]}`), ArtifactDigests: []string{assetDigest, shellDigest, revisionDigest}, CreatedBy: actorID, CreatedAt: start,
 	}
 	if err := repository.CreateRevision(ctx, revision); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := repository.Revision(ctx, revisionDigest)
-	if err != nil || stored.Theme != "gallery" || len(stored.ArtifactDigests) != 3 || stored.Errors == nil || stored.Warnings == nil {
+	if err != nil || stored.Theme != "gallery" || len(stored.Channels) != 1 || stored.Channels[0].Callsign != "GALL" || len(stored.ArtifactDigests) != 3 || stored.Errors == nil || stored.Warnings == nil {
 		t.Fatalf("revision = %#v, %v", stored, err)
 	}
 	page, err := repository.ListRevisions(ctx, deployment.ID, "", 10)

@@ -551,6 +551,16 @@ func (s *Store) Revision(ctx context.Context, id string) (cable.CableRevision, e
 		}
 	}
 	r.JSON = document
+	var revisionDocument struct {
+		Channels []cable.RevisionChannel `json:"channels"`
+	}
+	if err := json.Unmarshal(document, &revisionDocument); err != nil {
+		return r, fmt.Errorf("decode cable revision document: %w", err)
+	}
+	r.Channels = revisionDocument.Channels
+	if r.Channels == nil {
+		r.Channels = []cable.RevisionChannel{}
+	}
 	return r, nil
 }
 func (s *Store) ListRevisions(ctx context.Context, did, cursor string, limit int) (cable.RevisionPage, error) {
