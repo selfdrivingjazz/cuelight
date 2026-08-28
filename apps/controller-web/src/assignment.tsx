@@ -83,7 +83,7 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
 
   const pending = nodeQuery.isPending || assetQuery.isPending || profileQuery.isPending;
   const queryError = nodeQuery.error ?? assetQuery.error ?? profileQuery.error;
-  const options = kind === "media" ? assetQuery.data?.items ?? [] : kind === "profile" ? profileQuery.data?.items ?? [] : [];
+  const options = kind === "media" ? (assetQuery.data?.items ?? []).filter((item) => item.artifact.mediaType.startsWith("video/") || ["image/jpeg", "image/png", "image/webp"].includes(item.artifact.mediaType)) : kind === "profile" ? profileQuery.data?.items ?? [] : [];
   return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="space-y-4">
     {queryError instanceof Error && <ErrorState title="Assignment options unavailable" description={queryError.message} onRetry={() => { void nodeQuery.refetch(); void assetQuery.refetch(); void profileQuery.refetch(); }} />}
     {!fixedNodeId && <label className="block text-sm font-medium">Target node<select className={selectClass} value={nodeId} onChange={(event) => setNodeId(event.currentTarget.value)} disabled={pending}><option value="">Choose a node</option>{nodeQuery.data?.items.map((node) => <option key={node.id} value={node.id}>{node.name} · generation {node.desiredGeneration ?? 0}</option>)}</select></label>}

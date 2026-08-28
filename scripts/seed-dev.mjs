@@ -153,7 +153,7 @@ async function seed() {
   const blocks = [];
   for (const spec of channelSpecs) {
     const channel = channelPage.items.find((item) => item.number === spec.number) ?? await request(`/cable/deployments/${deployment.id}/channels`, {
-      method: "POST", headers: { "Idempotency-Key": `seed-channel-${spec.number}` },
+      method: "POST", headers: { "Idempotency-Key": `seed-cable-channel-${spec.number}` },
       body: { number: spec.number, name: spec.name, callsign: spec.callsign, description: "Generated development channel", accent: spec.accent, enabled: true, standby: false },
     });
     channels.push(channel);
