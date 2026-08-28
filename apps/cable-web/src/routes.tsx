@@ -1,7 +1,9 @@
 import * as React from "react";
 import { createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { HttpPresentationSource, loadPresentation, type Channel, type Occurrence, type Presentation, type PresentationSource } from "./presentation";
+import { HttpPresentationSource, loadPresentation, type Occurrence, type Presentation, type PresentationSource } from "./presentation";
 import { initialRuntimeState, runtimeReducer, type RuntimeAction, type RuntimeState } from "./state";
+import { LegacyGuide } from "./components/LegacyGuide";
+import { SplashScreen } from "./components/SplashScreen";
 
 interface RuntimeContextValue {
   state: RuntimeState;
@@ -85,9 +87,6 @@ function formatInstant(value: string, timezone: string, options: Intl.DateTimeFo
   return new Intl.DateTimeFormat(undefined, { timeZone: timezone, dateStyle: "medium", timeStyle: "short", ...options }).format(new Date(value));
 }
 
-function channelFor(presentation: Presentation, channelId: string | null): Channel | undefined {
-  return presentation.channels.find((channel) => channel.id === channelId);
-}
 
 function occurrenceForState(state: RuntimeState): Occurrence | undefined {
   if (state.kind === "warming" || state.kind === "player-opening" || state.kind === "player-ready" || state.kind === "player-failure") return state.occurrence;
@@ -98,42 +97,14 @@ function occurrenceForState(state: RuntimeState): Occurrence | undefined {
 }
 
 function Shell() {
-  const { state, dispatch } = useRuntime();
-  const navigate = useNavigate();
+  const { state } = useRuntime();
   const presentation = presentationOf(state);
-  const selectedChannel = presentation && "selectedId" in state ? channelFor(presentation, state.selectedId) : undefined;
-  const activeOccurrence = occurrenceForState(state);
-  const headerChannel = selectedChannel ?? (presentation && activeOccurrence ? channelFor(presentation, activeOccurrence.channelId) : undefined);
-  const openDiagnostics = () => {
-    dispatch({ type: "OPEN_DIAGNOSTICS" });
-    void navigate({ to: "/diagnostics" });
-  };
-  return (
-    <div className={`cable-shell theme-${presentation?.theme ?? "nebula"}`} data-runtime-state={state.kind}>
-      <header className="cable-header">
-        <Link className="wordmark" to="/" aria-label="Cable guide">CABLE<span>·</span></Link>
-        <div className="header-selection" aria-live="polite">
-          <span className="header-selection-label">TUNED</span>
-          <strong>{headerChannel ? `${String(headerChannel.number).padStart(2, "0")} / ${headerChannel.callsign}` : "SCANNING"}</strong>
-        </div>
-        <nav aria-label="Runtime navigation">
-          <Link to="/">Guide</Link>
-          <Link to="/placard">Placard</Link>
-          <Link to="/diagnostics">Diagnostics</Link>
-        </nav>
-        <div className="signal-state" data-state={presentation?.bridge.state ?? "syncing"}>
-          <span aria-hidden="true" />
-          <span>{presentation?.bridge.state ?? "syncing"}</span>
-        </div>
-      </header>
-      <main className="cable-main"><Outlet /></main>
-      <footer className="cable-footer">
-        <span>REV {presentation?.revision.id ?? "—"}</span>
-        <span>{presentation ? `GENERATED ${formatInstant(presentation.revision.generatedAt, presentation.revision.timezone)}` : "WAITING FOR REVISION"}</span>
-        <button type="button" onClick={openDiagnostics}>Signal details <span aria-hidden="true">↗</span></button>
-      </footer>
-    </div>
-  );
+  const [showSplash, setShowSplash] = React.useState(true);
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setShowSplash(false), 4_700);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return <div className={`legacy-root theme-${presentation?.theme ?? "nebula"}`} data-runtime-state={state.kind}><Outlet /><SplashScreen active={showSplash} /></div>;
 }
 
 function SyncState() {
@@ -180,69 +151,19 @@ function GuidePage() {
   if (state.kind === "diagnostics") return <DiagnosticsPage />;
   if (!("presentation" in state)) return <SyncState />;
   const presentation = state.presentation;
-  const enabledChannels = presentation.channels.filter((channel) => channel.enabled);
-  const activeChannelId = (state.kind === "ready" || state.kind === "stale-offline") ? state.selectedId ?? enabledChannels[0]?.id : enabledChannels[0]?.id;
-  const activeChannelIndex = Math.max(0, enabledChannels.findIndex((channel) => channel.id === activeChannelId));
-  const isOffline = state.kind === "stale-offline";
-  const selectChannel = (channel: Channel) => dispatch({ type: "SELECT_CHANNEL", channelId: channel.id });
-  const tune = (occurrence: Occurrence) => {
-    dispatch({ type: "SELECT_PROGRAM", occurrence });
-    void navigate({ to: "/player" });
-  };
-  const moveChannel = (delta: number) => {
-    const channel = enabledChannels[(activeChannelIndex + delta + enabledChannels.length) % enabledChannels.length];
-    if (channel) selectChannel(channel);
-  };
-  const activeOccurrence = presentation.occurrences.find((occurrence) => occurrence.channelId === activeChannelId) ?? presentation.occurrences[0];
-
-  return (
-    <section className="guide-page" aria-label="Cable programme guide">
-      <div className="guide-intro">
-        <div>
-          <p className="eyebrow">CABLE / TONIGHT</p>
-          <h1>Tonight on Cable</h1>
-          <p className="guide-deck">A precise window into the assigned presentation. Tune a channel, then open its verified artifact.</p>
-        </div>
-        <div className="guide-revision" aria-label="Presentation revision">
-          <span>REVISION</span>
-          <strong>{presentation.revision.id}</strong>
-          <small>{formatInstant(presentation.revision.generatedAt, presentation.revision.timezone)}</small>
-        </div>
-      </div>
-      {isOffline && <div className="state-banner state-banner-warning" role="status"><span className="status-dot" aria-hidden="true" />Offline presentation · showing the last verified revision</div>}
-      <div className="channel-rail" aria-label="Tune channel">
-        {enabledChannels.map((channel) => <button key={channel.id} className={`channel-chip ${channel.id === activeChannelId ? "is-selected" : ""}`} type="button" aria-pressed={channel.id === activeChannelId} onClick={() => selectChannel(channel)}><b>{String(channel.number).padStart(2, "0")}</b><span>{channel.callsign}</span></button>)}
-      </div>
-      <div className="guide-key-hint"><span>CHANNEL SCAN</span><kbd>↑</kbd><kbd>↓</kbd><span>to tune</span><span className="guide-key-hint-touch">Touch a channel or programme to tune</span></div>
-      <div className="guide-grid" tabIndex={0} aria-label="Programme grid" onKeyDown={(event) => { if (event.key === "ArrowUp" || event.key === "ArrowLeft") { event.preventDefault(); moveChannel(-1); } if (event.key === "ArrowDown" || event.key === "ArrowRight") { event.preventDefault(); moveChannel(1); } }}>
-        {presentation.channels.map((channel) => {
-          const occurrences = presentation.occurrences.filter((occurrence) => occurrence.channelId === channel.id);
-          const selected = channel.id === activeChannelId;
-          return (
-            <article key={channel.id} className={`channel-row ${selected ? "is-selected" : ""} ${!channel.enabled ? "is-disabled" : ""}`} style={{ "--accent": channel.accent } as React.CSSProperties}>
-              <button className="channel-label" type="button" disabled={!channel.enabled} aria-label={`Tune ${channel.number} ${channel.callsign}`} aria-pressed={selected} onClick={() => selectChannel(channel)}>
-                <b>{String(channel.number).padStart(2, "0")}</b><span>{channel.callsign}</span><small>{channel.name}</small><i aria-hidden="true">{selected ? "●" : "○"}</i>
-              </button>
-              <div className="programs" aria-label={`${channel.callsign} programmes`}>
-                {occurrences.length ? occurrences.map((occurrence) => <button key={occurrence.id} className={`program-card ${activeOccurrence?.id === occurrence.id ? "is-selected" : ""}`} type="button" onClick={() => tune(occurrence)}>
-                  <span className="program-time">{formatInstant(occurrence.startsAt, presentation.revision.timezone, { dateStyle: undefined, timeStyle: "short" })} — {formatInstant(occurrence.endsAt, presentation.revision.timezone, { dateStyle: undefined, timeStyle: "short" })}</span>
-                  <strong>{occurrence.title}</strong>
-                  <span>{occurrence.subtitle ?? "Programme"}</span>
-                  <small>{occurrence.media.kind.toUpperCase()} · {occurrence.media.mime}</small>
-                  <em>OPEN PROGRAMME <span aria-hidden="true">↗</span></em>
-                </button>) : <div className="channel-standby"><span aria-hidden="true">∿</span>{channel.standbyMessage ?? "No verified occurrence"}</div>}
-              </div>
-            </article>
-          );
-        })}
-      </div>
-      {activeOccurrence && <aside className="guide-placard" aria-label="Selected programme placard">
-        <div className="placard-marker"><span aria-hidden="true" />NOW SELECTED</div>
-        <div className="guide-placard-copy"><strong>{activeOccurrence.title}</strong><span>{activeOccurrence.subtitle ?? "Ready to tune"}</span></div>
-        <Link className="placard-link" to="/placard" onClick={() => dispatch({ type: "OPEN_PLACARD" })}>Open placard <span aria-hidden="true">↗</span></Link>
-      </aside>}
-    </section>
-  );
+  const selectedId = state.kind === "ready" || state.kind === "stale-offline" ? state.selectedId : null;
+  const selectedOccurrence = presentation.occurrences.find((occurrence) => occurrence.channelId === selectedId) ?? presentation.occurrences[0];
+  return <LegacyGuide
+    presentation={presentation}
+    selectedChannelId={selectedId}
+    selectedOccurrence={selectedOccurrence}
+    offline={state.kind === "stale-offline" || presentation.revision.stale}
+    onSelectChannel={(channel) => dispatch({ type: "SELECT_CHANNEL", channelId: channel.id })}
+    onTune={(occurrence) => {
+      dispatch({ type: "SELECT_PROGRAM", occurrence });
+      void navigate({ to: "/player" });
+    }}
+  />;
 }
 
 function PlayerPage() {
