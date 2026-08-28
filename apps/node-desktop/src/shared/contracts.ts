@@ -48,6 +48,8 @@ export interface CableNodeDesktopAPI {
   stop(): Promise<DesktopStatus>;
   forget(): Promise<DesktopStatus>;
   updateSettings(settings: DesktopSettings): Promise<DesktopStatus>;
+  showOutput(): Promise<void>;
+  showControls(): Promise<void>;
   openLogs(): Promise<void>;
   onStatus(listener: (status: DesktopStatus) => void): () => void;
 }

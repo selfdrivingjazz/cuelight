@@ -10,6 +10,8 @@ const api: CableNodeDesktopAPI = {
   forget: () => ipcRenderer.invoke("node:forget"),
   updateSettings: (settings: DesktopSettings) => ipcRenderer.invoke("node:settings", settings),
   openLogs: () => ipcRenderer.invoke("node:open-logs"),
+  showOutput: () => ipcRenderer.invoke("node:show-output"),
+  showControls: () => ipcRenderer.invoke("node:show-controls"),
   onStatus: (listener: (status: DesktopStatus) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, status: DesktopStatus) => listener(status);
     ipcRenderer.on("node:status-changed", handler);

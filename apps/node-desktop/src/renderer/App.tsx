@@ -65,10 +65,11 @@ export function App() {
 
       <section className="panel operations">
         <div className="panel-heading"><div><p className="eyebrow">RUNTIME</p><h2>Player process</h2></div><span>{status.playerPid ? `PID ${status.playerPid}` : "OFFLINE"}</span></div>
-        <div className="runtime-mark"><span className={active ? "pulse" : "idle"} /><strong>{active ? "Ready for assignments" : "Player stopped"}</strong><small>{status.outputWindows} output window{status.outputWindows === 1 ? "" : "s"}</small></div>
+        <div className="runtime-mark"><span className={active ? "pulse" : "idle"} /><strong>{active ? "Ready for assignments" : "Player stopped"}</strong><small>{status.outputWindows ? "Output active in this window · Esc returns to controls" : "No active output"}</small></div>
         <div className="actions">
           <button className="primary" disabled={!status.node || active || Boolean(busy)} onClick={() => void perform("Starting", () => window.cableNode.start())}>{status.phase === "starting" ? "Starting…" : "Start node"}</button>
           <button disabled={!active || Boolean(busy)} onClick={() => void perform("Stopping", () => window.cableNode.stop())}>Stop node</button>
+          <button disabled={status.outputWindows === 0 || Boolean(busy)} onClick={() => void window.cableNode.showOutput()}>Show output</button>
           <button onClick={() => void window.cableNode.openLogs()}>Show logs</button>
         </div>
         <div className="settings">

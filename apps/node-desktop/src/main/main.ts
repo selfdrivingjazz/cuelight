@@ -38,13 +38,18 @@ async function createSetupWindow(): Promise<void> {
       sandbox: true,
     },
   });
-  setupWindow.webContents.setWindowOpenHandler(({ url }) => {
+  const window = setupWindow;
+  rendererServer.attachHost(window);
+  window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url);
     return { action: "deny" };
   });
-  setupWindow.once("closed", () => { setupWindow = undefined; });
-  if (app.isPackaged) await setupWindow.loadFile(path.join(__dirname, "../../dist/index.html"));
-  else await setupWindow.loadURL("http://127.0.0.1:4175");
+  window.once("closed", () => {
+    rendererServer.detachHost(window);
+    if (setupWindow === window) setupWindow = undefined;
+  });
+  if (app.isPackaged) await window.loadFile(path.join(__dirname, "../../dist/index.html"));
+  else await window.loadURL("http://127.0.0.1:4175");
 }
 
 function registerIPC(): void {
@@ -58,6 +63,8 @@ function registerIPC(): void {
   ipcMain.handle("node:stop", () => manager.stop());
   ipcMain.handle("node:settings", async (_event, input: unknown) => manager.updateSettings(settingsSchema.parse(input)));
   ipcMain.handle("node:open-logs", () => manager.openLogs());
+  ipcMain.handle("node:show-output", () => rendererServer.showOutput());
+  ipcMain.handle("node:show-controls", () => rendererServer.showControls());
   ipcMain.handle("node:forget", () => manager.forget());
 }
 
