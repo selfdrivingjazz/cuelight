@@ -99,7 +99,7 @@ async function buildShell() {
   await run("pnpm", ["--filter", "@cable/cable-web", "build"]);
   const archive = path.join(output, "cable-web-shell.tar.gz");
   await rm(archive, { force: true });
-  await run("tar", ["-czf", archive, "-C", path.join(root, "apps/cable-web/dist"), "index.html", "assets"]);
+  await run("tar", ["--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-czf", archive, "-C", path.join(root, "apps/cable-web/dist"), "index.html", "assets"]);
   const archiveDigest = createHash("sha256").update(await readFile(archive)).digest("hex").slice(0, 12);
   const asset = await upload(archive, `Seed Cable TV shell ${archiveDigest}.tar.gz`, "application/gzip");
   const builds = await list("/cable/shell-builds");
@@ -166,15 +166,18 @@ async function seed() {
     }));
   }
 
-  const window = { startsAt: blockStart.toISOString(), endsAt: new Date(blockStart.getTime() + 4 * 60 * 60 * 1000).toISOString() };
+  const window = {
+    startsAt: new Date(Math.min(...blocks.map((block) => new Date(block.startsAt).getTime()))).toISOString(),
+    endsAt: new Date(Math.max(...blocks.map((block) => new Date(block.endsAt).getTime()))).toISOString(),
+  };
   const revision = await request(`/cable/deployments/${deployment.id}/publish`, {
-    method: "POST", headers: { "Idempotency-Key": `seed-revision-${blockDate}-${shellBuild.digest.slice(0, 12)}`, "If-Match": `"v${deployment.version}"` },
+    method: "POST", headers: { "Idempotency-Key": `seed-revision-${shellBuild.digest.slice(0, 12)}-${window.startsAt.slice(0, 13)}-${window.endsAt.slice(0, 13)}`, "If-Match": `"v${deployment.version}"` },
     body: { shellBuildId: shellBuild.id, window },
   });
   const cableRelease = await request(`/cable/revisions/${revision.id}/release`, {
     method: "POST", headers: { "Idempotency-Key": `seed-cable-release-${revision.id.slice(0, 16)}` },
   });
-  const profileName = `Cable Dev TV ${blockDate} ${shellBuild.digest.slice(0, 6)}`;
+  const profileName = `Cable Dev TV ${blockDate} ${revision.id.slice(0, 6)}`;
   const profile = await createNamed("/cable/profiles", profileName, {
     name: profileName, description: "Seeded TV guide backed by generated playlists and scheduled blocks.",
     deploymentId: deployment.id, shellBuildId: shellBuild.id, releaseId: cableRelease.id,
