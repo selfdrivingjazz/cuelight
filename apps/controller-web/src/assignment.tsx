@@ -54,7 +54,7 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
   const mutation = useMutation({
     mutationFn: async () => {
       if (!nodeId || !sourceId) throw new Error("Choose both content and a target node.");
-      const node = nodeQuery.data?.items.find((item) => item.id === nodeId);
+      const node = readApiResult(await api.GET("/nodes/{nodeId}", { params: { path: { nodeId } } }));
       let selectedRelease: Release;
       let deliveryMode: "stream" | "cache_then_play";
       if (kind === "media") {
@@ -71,7 +71,7 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
       }
       return readApiResult(await api.PUT("/nodes/{nodeId}/assignment", {
         params: { path: { nodeId }, header: { "If-Match": "*", "Idempotency-Key": crypto.randomUUID() } },
-        body: { releaseId: selectedRelease.id, releaseDigest: selectedRelease.digest, deliveryMode, expectedGeneration: node?.desiredGeneration ?? 0 },
+        body: { releaseId: selectedRelease.id, releaseDigest: selectedRelease.digest, deliveryMode, expectedGeneration: node.desiredGeneration ?? 0 },
       }));
     },
     onSuccess: () => {

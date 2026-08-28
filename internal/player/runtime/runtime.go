@@ -515,7 +515,7 @@ func (r *Reconciler) transition(generation uint64, state, intent, outcome string
 
 func (r *Reconciler) fail(ctx context.Context, generation uint64, operation string, cause error) error {
 	failure := &RuntimeError{Kind: ErrActivationFailed, Generation: generation, Operation: operation, Err: cause}
-	r.condition("PlaybackHealthy", false, "CandidateFailed", operation)
+	r.condition("PlaybackHealthy", false, "CandidateFailed", fmt.Sprintf("%s: %v", operation, cause))
 	r.event("release_failed", generation, map[string]any{"operation": operation})
 	r.snapshot.CandidateDigest = ""
 	if r.rollback(ctx, generation, operation) {
