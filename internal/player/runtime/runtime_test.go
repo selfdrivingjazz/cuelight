@@ -150,6 +150,19 @@ func TestPresentationModeRejectsOtherReleaseKind(t *testing.T) {
 	if h.controller.downloads != 0 || len(h.renderer.commits) != 0 {
 		t.Fatalf("downloads=%d commits=%v", h.controller.downloads, h.renderer.commits)
 	}
+	h.runtime.config.PresentationMode = release.PresentationMedia
+	if err := h.runtime.Reconcile(context.Background(), h.assignment(2, DeliveryStream)); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.runtime.flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	report := h.controller.reports[len(h.controller.reports)-1]
+	if !slices.ContainsFunc(report.Conditions, func(condition playerclient.Condition) bool {
+		return condition.Type == "SafeMode" && !condition.Status && condition.Reason == "HealthyReleaseActive"
+	}) {
+		t.Fatalf("conditions = %#v", report.Conditions)
+	}
 }
 
 func TestCacheRejectsInsufficientCapacityBeforeDownload(t *testing.T) {

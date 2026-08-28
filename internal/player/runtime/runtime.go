@@ -553,6 +553,7 @@ func (r *Reconciler) rollback(ctx context.Context, generation uint64, outcome st
 	r.snapshot.HealthyDigest = r.lkg.ReleaseDigest
 	r.snapshot.LastKnownGoodDigest = r.lkg.ReleaseDigest
 	r.snapshot.Safe = false
+	r.condition("SafeMode", false, "LastKnownGoodRestored", "")
 	r.condition("PlaybackHealthy", true, "RolledBackToLastKnownGood", "")
 	r.event("release_rolled_back", generation, map[string]any{"releaseDigest": r.lkg.ReleaseDigest})
 	return true
@@ -566,6 +567,7 @@ func (r *Reconciler) restoreHealthy(generation uint64, candidate renderer.Candid
 	r.snapshot.HealthyDigest = candidate.ReleaseDigest
 	r.snapshot.LastKnownGoodDigest = candidate.ReleaseDigest
 	r.snapshot.Safe = false
+	r.condition("SafeMode", false, "HealthyReleaseActive", "")
 	r.lkg = candidate
 }
 
