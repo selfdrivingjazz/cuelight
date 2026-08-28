@@ -67,15 +67,15 @@ export class RendererServer {
     if (!this.output) throw new Error("no active output is available");
     if (!this.host || this.host.isDestroyed()) throw new Error("desktop window is unavailable");
     this.attachView();
+    const wasShowing = this.showingOutput;
     this.showingOutput = true;
-    this.host.setFullScreen(this.fullScreen);
+    if (!wasShowing) this.host.setFullScreen(this.fullScreen);
     this.updateBounds();
     this.view?.setVisible(true);
     this.host.show();
     this.host.focus();
     this.view?.webContents.focus();
   }
-
   showControls(): void {
     this.showingOutput = false;
     this.view?.setVisible(false);
