@@ -5,6 +5,9 @@ const controllerProxy = process.env.VITE_CONTROLLER_PROXY;
 
 export default defineConfig({
   plugins: [react()],
-  server: controllerProxy ? { proxy: { "/api/v1": { target: controllerProxy, secure: false }, "/health": { target: controllerProxy, secure: false } } } : undefined,
+  server: {
+    allowedHosts: ["cuelight.example.ts.net"],
+    ...(controllerProxy ? { proxy: { "/api/v1": { target: controllerProxy, secure: false }, "/health": { target: controllerProxy, secure: false } } } : {}),
+  },
   test: { include: ["src/**/*.test.{ts,tsx}"] },
 });
