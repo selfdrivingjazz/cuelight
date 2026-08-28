@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -75,6 +76,9 @@ func TestChromiumMediaCandidateUsesBrowserLauncherAndSignalsReady(t *testing.T) 
 	case target = <-launcher.target:
 	case <-time.After(time.Second):
 		t.Fatal("browser target was not launched")
+	}
+	if parsed, err := url.Parse(target); err != nil || parsed.Path != "/" {
+		t.Fatalf("browser target = %q, want bridge root", target)
 	}
 	response, err := http.Get(target)
 	if err != nil {

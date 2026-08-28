@@ -252,7 +252,7 @@ func (c *Chromium) Start(ctx context.Context, candidate Candidate) error {
 	c.mu.Unlock()
 	go func() { _ = server.Serve(listener) }()
 	base := "http://" + listener.Addr().String()
-	entryURL := base + "/" + strings.TrimPrefix(filepath.ToSlash(state.entrypoint), "/")
+	entryURL := base + "/"
 	session, err := c.launcher.Launch(ctx, entryURL, state.profile)
 	if err != nil {
 		_ = server.Shutdown(context.Background())
