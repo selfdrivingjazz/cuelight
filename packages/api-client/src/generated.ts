@@ -462,6 +462,92 @@ export interface paths {
         patch: operations["updateCableProgram"];
         trace?: never;
     };
+    "/cable/playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCablePlaylists"];
+        put?: never;
+        post: operations["createCablePlaylist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/playlists/{playlistId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlistId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCablePlaylist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/channels/{channelId}/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        get: operations["listCableBlocks"];
+        put?: never;
+        post: operations["createCableBlock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCableProfiles"];
+        put?: never;
+        post: operations["createCableProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable/profiles/{profileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCableProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cable/shell-builds": {
         parameters: {
             query?: never;
@@ -884,6 +970,83 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        CablePlaylistItemInput: {
+            assetId: components["schemas"]["Id"];
+            position: number;
+            durationSeconds: number;
+            title?: string;
+            subtitle?: string;
+        };
+        CablePlaylistInput: {
+            name: string;
+            description?: string;
+            items: components["schemas"]["CablePlaylistItemInput"][];
+        };
+        CablePlaylistItem: {
+            id: components["schemas"]["Id"];
+            playlistId: components["schemas"]["Id"];
+            assetId: components["schemas"]["Id"];
+            position: number;
+            durationSeconds: number;
+            title: string;
+            subtitle: string;
+        };
+        CablePlaylist: {
+            id: components["schemas"]["Id"];
+            name: string;
+            description: string;
+            items: components["schemas"]["CablePlaylistItem"][];
+            /** Format: int64 */
+            version: number;
+            createdBy: components["schemas"]["Id"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CableBlockInput: {
+            playlistId: components["schemas"]["Id"];
+            /** Format: date-time */
+            startsAt: string;
+            title?: string;
+        };
+        CableBlock: {
+            id: components["schemas"]["Id"];
+            channelId: components["schemas"]["Id"];
+            playlistId: components["schemas"]["Id"];
+            title: string;
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+            /** Format: int64 */
+            version: number;
+            createdBy: components["schemas"]["Id"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CableProfileInput: {
+            name: string;
+            description?: string;
+            deploymentId: components["schemas"]["Id"];
+            shellBuildId: components["schemas"]["Id"];
+            releaseId?: components["schemas"]["Id"];
+        };
+        CableProfile: {
+            id: components["schemas"]["Id"];
+            name: string;
+            description: string;
+            deploymentId: components["schemas"]["Id"];
+            shellBuildId: components["schemas"]["Id"];
+            releaseId?: components["schemas"]["Id"];
+            /** Format: int64 */
+            version: number;
+            createdBy: components["schemas"]["Id"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         CableShellBuildInput: {
             digest: string;
             entrypoint: string;
@@ -1001,6 +1164,18 @@ export interface components {
         };
         CableProgramPage: {
             items: components["schemas"]["CableProgram"][];
+            page: components["schemas"]["PageInfo"];
+        };
+        CablePlaylistPage: {
+            items: components["schemas"]["CablePlaylist"][];
+            page: components["schemas"]["PageInfo"];
+        };
+        CableBlockPage: {
+            items: components["schemas"]["CableBlock"][];
+            page: components["schemas"]["PageInfo"];
+        };
+        CableProfilePage: {
+            items: components["schemas"]["CableProfile"][];
             page: components["schemas"]["PageInfo"];
         };
         CableShellBuildPage: {
@@ -2354,6 +2529,217 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CableProgram"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCablePlaylists: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reusable Cable media playlists. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CablePlaylistPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createCablePlaylist: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CablePlaylistInput"];
+            };
+        };
+        responses: {
+            /** @description Cable playlist created. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CablePlaylist"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCablePlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlistId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cable playlist. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CablePlaylist"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCableBlocks: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scheduled playlist blocks for the channel. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableBlockPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createCableBlock: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                channelId: components["parameters"]["CableChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableBlockInput"];
+            };
+        };
+        responses: {
+            /** @description Cable block created and materialized into the channel schedule. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableBlock"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCableProfiles: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assignable Cable television profiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableProfilePage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createCableProfile: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Assignable Cable television profile created. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableProfile"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assignable Cable television profile. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableProfile"];
                 };
             };
             default: components["responses"]["Problem"];

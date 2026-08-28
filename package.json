@@ -2,9 +2,12 @@
   "name": "cable-web-workspace",
   "private": true,
   "packageManager": "pnpm@10.14.0",
-  "engines": { "node": ">=20.0.0" },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "bootstrap": "pnpm install --frozen-lockfile",
+    "seed:dev": "node scripts/seed-dev.mjs",
     "generate": "pnpm --filter @cable/api-client generate",
     "check": "pnpm generate && pnpm -r typecheck && pnpm --filter @cable/api-client check-generated",
     "build": "pnpm -r build",
@@ -13,6 +16,7 @@
     "e2e": "pnpm --filter @cable/controller-web e2e && pnpm --filter @cable/cable-web e2e"
   },
   "devDependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@playwright/test": "1.55.0",
     "@types/node": "24.3.0",
     "typescript": "5.9.2"

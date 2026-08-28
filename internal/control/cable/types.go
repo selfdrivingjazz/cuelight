@@ -69,6 +69,18 @@ type ShellBuildPage struct {
 	Items []ShellBuild
 	Page  Page
 }
+type PlaylistPage struct {
+	Items []Playlist
+	Page  Page
+}
+type BlockPage struct {
+	Items []Block
+	Page  Page
+}
+type ProfilePage struct {
+	Items []Profile
+	Page  Page
+}
 
 type CableDeployment struct {
 	ID                  string            `json:"id"`
@@ -123,6 +135,48 @@ type ProgramEntry struct {
 	Version            int64     `json:"version"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
+}
+type Playlist struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Items       []PlaylistItem `json:"items"`
+	Version     int64          `json:"version"`
+	CreatedBy   string         `json:"createdBy"`
+	CreatedAt   time.Time      `json:"createdAt"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+}
+type PlaylistItem struct {
+	ID              string `json:"id"`
+	PlaylistID      string `json:"playlistId"`
+	AssetID         string `json:"assetId"`
+	Position        int    `json:"position"`
+	DurationSeconds int    `json:"durationSeconds"`
+	Title           string `json:"title"`
+	Subtitle        string `json:"subtitle"`
+}
+type Block struct {
+	ID         string    `json:"id"`
+	ChannelID  string    `json:"channelId"`
+	PlaylistID string    `json:"playlistId"`
+	Title      string    `json:"title"`
+	StartsAt   time.Time `json:"startsAt"`
+	EndsAt     time.Time `json:"endsAt"`
+	Version    int64     `json:"version"`
+	CreatedBy  string    `json:"createdBy"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+type Profile struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	DeploymentID string    `json:"deploymentId"`
+	ShellBuildID string    `json:"shellBuildId"`
+	ReleaseID    string    `json:"releaseId,omitempty"`
+	Version      int64     `json:"version"`
+	CreatedBy    string    `json:"createdBy"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type Artifact struct {
@@ -229,6 +283,22 @@ type ShellBuildInput struct {
 	VersionMetadata    map[string]string
 	BridgeProtocol     string
 }
+type PlaylistInput struct {
+	Name, Description string
+	Items             []PlaylistItemInput
+}
+type PlaylistItemInput struct {
+	AssetID, Title, Subtitle string
+	Position                 int
+	DurationSeconds          int
+}
+type BlockInput struct {
+	ChannelID, PlaylistID, Title string
+	StartsAt                     time.Time
+}
+type ProfileInput struct {
+	Name, Description, DeploymentID, ShellBuildID, ReleaseID string
+}
 
 type Authorizer interface {
 	Authorize(context.Context, string, string, string, string) error
@@ -261,6 +331,16 @@ type Repository interface {
 	CreateRevision(context.Context, CableRevision) error
 	Revision(context.Context, string) (CableRevision, error)
 	ListRevisions(context.Context, string, string, int) (RevisionPage, error)
+}
+type ProgrammingRepository interface {
+	CreatePlaylist(context.Context, Mutation, PlaylistInput) (Playlist, error)
+	Playlist(context.Context, string) (Playlist, error)
+	ListPlaylists(context.Context, string, int) (PlaylistPage, error)
+	CreateBlock(context.Context, Mutation, BlockInput) (Block, error)
+	ListBlocks(context.Context, string, string, int) (BlockPage, error)
+	CreateProfile(context.Context, Mutation, ProfileInput) (Profile, error)
+	Profile(context.Context, string) (Profile, error)
+	ListProfiles(context.Context, string, int) (ProfilePage, error)
 }
 
 type ArtifactRepository interface {
@@ -397,8 +477,9 @@ func ValidateProgram(p ProgramInput) error {
 }
 
 type Service struct {
-	Repository Repository
-	Authorizer Authorizer
+	Repository  Repository
+	Authorizer  Authorizer
+	Programming ProgrammingRepository
 }
 
 func (s Service) allow(ctx context.Context, m Mutation, action, resource, id string) error {
@@ -472,4 +553,41 @@ func (s Service) RegisterShellBuild(ctx context.Context, m Mutation, in ShellBui
 		return ShellBuild{}, e
 	}
 	return s.Repository.RegisterShellBuild(ctx, m, in)
+}
+
+func (s Service) programming() (ProgrammingRepository, error) {
+	if s.Programming == nil {
+		return nil, errors.New("Cable programming repository is required")
+	}
+	return s.Programming, nil
+}
+func (s Service) CreatePlaylist(ctx context.Context, m Mutation, in PlaylistInput) (Playlist, error) {
+	if e := s.allow(ctx, m, "cable.playlist.create", "playlist", ""); e != nil {
+		return Playlist{}, e
+	}
+	repository, err := s.programming()
+	if err != nil {
+		return Playlist{}, err
+	}
+	return repository.CreatePlaylist(ctx, m, in)
+}
+func (s Service) CreateBlock(ctx context.Context, m Mutation, in BlockInput) (Block, error) {
+	if e := s.allow(ctx, m, "cable.block.create", "channel", in.ChannelID); e != nil {
+		return Block{}, e
+	}
+	repository, err := s.programming()
+	if err != nil {
+		return Block{}, err
+	}
+	return repository.CreateBlock(ctx, m, in)
+}
+func (s Service) CreateProfile(ctx context.Context, m Mutation, in ProfileInput) (Profile, error) {
+	if e := s.allow(ctx, m, "cable.profile.create", "profile", ""); e != nil {
+		return Profile{}, e
+	}
+	repository, err := s.programming()
+	if err != nil {
+		return Profile{}, err
+	}
+	return repository.CreateProfile(ctx, m, in)
 }

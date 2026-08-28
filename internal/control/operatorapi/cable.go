@@ -61,6 +61,14 @@ func (h *Handler) cableRepository() cable.Repository {
 	}
 	return nil
 }
+func (h *Handler) cableProgrammingRepository() cable.ProgrammingRepository {
+	if h.deps.Cable != nil && h.deps.Cable.Programming != nil {
+		return h.deps.Cable.Programming
+	}
+	repository, _ := h.cableRepository().(cable.ProgrammingRepository)
+	return repository
+}
+
 func cableActor(r *http.Request) auth.Actor {
 	actor, _ := auth.ActorFromContext(r.Context())
 	return actor
@@ -579,4 +587,167 @@ func (h *Handler) publishCableRelease(w http.ResponseWriter, r *http.Request) {
 	}
 	setCableDigestETag(w, result.Envelope.Digest)
 	writeJSON(w, status, result.Envelope)
+}
+
+func (h *Handler) listCablePlaylists(w http.ResponseWriter, r *http.Request) {
+	repository := h.cableProgrammingRepository()
+	if repository == nil {
+		writeError(w, errors.New("Cable programming repository is not configured"))
+		return
+	}
+	request, err := cablePageRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	result, err := repository.ListPlaylists(r.Context(), request.Cursor, request.Limit)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	next, previous := cablePageCursor(result.Page)
+	writeJSON(w, http.StatusOK, page.NewResponse(result.Items, next, previous, result.Page.HasMore))
+}
+
+func (h *Handler) createCablePlaylist(w http.ResponseWriter, r *http.Request) {
+	key, err := idempotencyKey(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if h.deps.Cable == nil {
+		writeError(w, errors.New("Cable service is not configured"))
+		return
+	}
+	var input cable.PlaylistInput
+	if err := decodeJSON(w, r, h.jsonLimit(), &input); err != nil {
+		writeError(w, err)
+		return
+	}
+	result, err := h.deps.Cable.CreatePlaylist(r.Context(), cableMutation(r, key, 0), input)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *Handler) getCablePlaylist(w http.ResponseWriter, r *http.Request) {
+	repository := h.cableProgrammingRepository()
+	if repository == nil {
+		writeError(w, errors.New("Cable programming repository is not configured"))
+		return
+	}
+	result, err := repository.Playlist(r.Context(), r.PathValue("playlistId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) listCableBlocks(w http.ResponseWriter, r *http.Request) {
+	repository := h.cableProgrammingRepository()
+	if repository == nil {
+		writeError(w, errors.New("Cable programming repository is not configured"))
+		return
+	}
+	request, err := cablePageRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	result, err := repository.ListBlocks(r.Context(), r.PathValue("channelId"), request.Cursor, request.Limit)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	next, previous := cablePageCursor(result.Page)
+	writeJSON(w, http.StatusOK, page.NewResponse(result.Items, next, previous, result.Page.HasMore))
+}
+
+func (h *Handler) createCableBlock(w http.ResponseWriter, r *http.Request) {
+	key, err := idempotencyKey(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if h.deps.Cable == nil {
+		writeError(w, errors.New("Cable service is not configured"))
+		return
+	}
+	var input cable.BlockInput
+	if err := decodeJSON(w, r, h.jsonLimit(), &input); err != nil {
+		writeError(w, err)
+		return
+	}
+	input.ChannelID = r.PathValue("channelId")
+	result, err := h.deps.Cable.CreateBlock(r.Context(), cableMutation(r, key, 0), input)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *Handler) listCableProfiles(w http.ResponseWriter, r *http.Request) {
+	repository := h.cableProgrammingRepository()
+	if repository == nil {
+		writeError(w, errors.New("Cable programming repository is not configured"))
+		return
+	}
+	request, err := cablePageRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	result, err := repository.ListProfiles(r.Context(), request.Cursor, request.Limit)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	next, previous := cablePageCursor(result.Page)
+	writeJSON(w, http.StatusOK, page.NewResponse(result.Items, next, previous, result.Page.HasMore))
+}
+
+func (h *Handler) createCableProfile(w http.ResponseWriter, r *http.Request) {
+	key, err := idempotencyKey(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if h.deps.Cable == nil {
+		writeError(w, errors.New("Cable service is not configured"))
+		return
+	}
+	var input cable.ProfileInput
+	if err := decodeJSON(w, r, h.jsonLimit(), &input); err != nil {
+		writeError(w, err)
+		return
+	}
+	result, err := h.deps.Cable.CreateProfile(r.Context(), cableMutation(r, key, 0), input)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *Handler) getCableProfile(w http.ResponseWriter, r *http.Request) {
+	repository := h.cableProgrammingRepository()
+	if repository == nil {
+		writeError(w, errors.New("Cable programming repository is not configured"))
+		return
+	}
+	result, err := repository.Profile(r.Context(), r.PathValue("profileId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusOK, result)
 }

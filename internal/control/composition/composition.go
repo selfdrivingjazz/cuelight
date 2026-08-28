@@ -103,7 +103,7 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		return nil, err
 	}
 	releaseService := releaseAdapter{service: controlrelease.Service{Releases: repository, Artifacts: repository, Profiles: staticProfile{minimum: config.ProtocolVersion}, Signer: signer}, repository: repository}
-	cableService := &controlcable.Service{Repository: repository}
+	cableService := &controlcable.Service{Repository: repository, Programming: repository}
 	revisionArtifacts := revisionArtifactAdapter{cas: cas, repository: repository}
 	cableCompiler := &controlcable.Compiler{Repository: repository, Artifacts: repository, Builds: repository, RevisionArtifacts: revisionArtifacts}
 	cablePublisher := &controlrelease.CablePublisher{

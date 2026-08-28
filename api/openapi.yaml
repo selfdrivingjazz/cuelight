@@ -701,6 +701,150 @@ paths:
       responses:
         "204": {description: Cable program entry deleted.}
         default: {$ref: "#/components/responses/Problem"}
+  /cable/playlists:
+    get:
+      tags: [operator]
+      operationId: listCablePlaylists
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Reusable Cable media playlists.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CablePlaylistPage"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator]
+      operationId: createCablePlaylist
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CablePlaylistInput"}
+      responses:
+        "201":
+          description: Cable playlist created.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CablePlaylist"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/playlists/{playlistId}:
+    parameters:
+      - name: playlistId
+        in: path
+        required: true
+        schema: {$ref: "#/components/schemas/Id"}
+    get:
+      tags: [operator]
+      operationId: getCablePlaylist
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Cable playlist.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CablePlaylist"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/channels/{channelId}/blocks:
+    parameters: [{$ref: "#/components/parameters/CableChannelId"}]
+    get:
+      tags: [operator]
+      operationId: listCableBlocks
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Scheduled playlist blocks for the channel.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableBlockPage"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator]
+      operationId: createCableBlock
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableBlockInput"}
+      responses:
+        "201":
+          description: Cable block created and materialized into the channel schedule.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableBlock"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/profiles:
+    get:
+      tags: [operator]
+      operationId: listCableProfiles
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Assignable Cable television profiles.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableProfilePage"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator]
+      operationId: createCableProfile
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableProfileInput"}
+      responses:
+        "201":
+          description: Assignable Cable television profile created.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableProfile"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/profiles/{profileId}:
+    parameters:
+      - name: profileId
+        in: path
+        required: true
+        schema: {$ref: "#/components/schemas/Id"}
+    get:
+      tags: [operator]
+      operationId: getCableProfile
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Assignable Cable television profile.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableProfile"}
+        default: {$ref: "#/components/responses/Problem"}
   /cable/shell-builds:
     get:
       tags: [operator]
@@ -1244,6 +1388,99 @@ components:
         version: {type: integer, format: int64, minimum: 1}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    CablePlaylistItemInput:
+      type: object
+      additionalProperties: false
+      required: [assetId, position, durationSeconds]
+      properties:
+        assetId: {$ref: "#/components/schemas/Id"}
+        position: {type: integer, minimum: 1}
+        durationSeconds: {type: integer, minimum: 1}
+        title: {type: string}
+        subtitle: {type: string}
+    CablePlaylistInput:
+      type: object
+      additionalProperties: false
+      required: [name, items]
+      properties:
+        name: {type: string, minLength: 1}
+        description: {type: string}
+        items:
+          type: array
+          minItems: 1
+          items: {$ref: "#/components/schemas/CablePlaylistItemInput"}
+    CablePlaylistItem:
+      type: object
+      additionalProperties: false
+      required: [id, playlistId, assetId, position, durationSeconds, title, subtitle]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        playlistId: {$ref: "#/components/schemas/Id"}
+        assetId: {$ref: "#/components/schemas/Id"}
+        position: {type: integer, minimum: 1}
+        durationSeconds: {type: integer, minimum: 1}
+        title: {type: string}
+        subtitle: {type: string}
+    CablePlaylist:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, items, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        name: {type: string}
+        description: {type: string}
+        items: {type: array, items: {$ref: "#/components/schemas/CablePlaylistItem"}}
+        version: {type: integer, format: int64, minimum: 1}
+        createdBy: {$ref: "#/components/schemas/Id"}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CableBlockInput:
+      type: object
+      additionalProperties: false
+      required: [playlistId, startsAt]
+      properties:
+        playlistId: {$ref: "#/components/schemas/Id"}
+        startsAt: {type: string, format: date-time}
+        title: {type: string}
+    CableBlock:
+      type: object
+      additionalProperties: false
+      required: [id, channelId, playlistId, title, startsAt, endsAt, version, createdBy, createdAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        channelId: {$ref: "#/components/schemas/Id"}
+        playlistId: {$ref: "#/components/schemas/Id"}
+        title: {type: string}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        version: {type: integer, format: int64, minimum: 1}
+        createdBy: {$ref: "#/components/schemas/Id"}
+        createdAt: {type: string, format: date-time}
+    CableProfileInput:
+      type: object
+      additionalProperties: false
+      required: [name, deploymentId, shellBuildId]
+      properties:
+        name: {type: string, minLength: 1}
+        description: {type: string}
+        deploymentId: {$ref: "#/components/schemas/Id"}
+        shellBuildId: {$ref: "#/components/schemas/Id"}
+        releaseId: {$ref: "#/components/schemas/Id"}
+    CableProfile:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, deploymentId, shellBuildId, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        name: {type: string}
+        description: {type: string}
+        deploymentId: {$ref: "#/components/schemas/Id"}
+        shellBuildId: {$ref: "#/components/schemas/Id"}
+        releaseId: {$ref: "#/components/schemas/Id"}
+        version: {type: integer, format: int64, minimum: 1}
+        createdBy: {$ref: "#/components/schemas/Id"}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
     CableShellBuildInput:
       type: object
       additionalProperties: false
@@ -1396,6 +1633,27 @@ components:
       required: [items, page]
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/CableProgram"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    CablePlaylistPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CablePlaylist"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    CableBlockPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CableBlock"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    CableProfilePage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CableProfile"}}
         page: {$ref: "#/components/schemas/PageInfo"}
     CableShellBuildPage:
       type: object
