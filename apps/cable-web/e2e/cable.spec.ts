@@ -46,8 +46,10 @@ test("viewer sees the legacy splash, browses the guide, and opens a programme", 
   await expect(page.locator(".time-slot")).toHaveCount(6);
   await page.getByRole("button", { name: /Night block/ }).dblclick();
   await expect(page).toHaveURL(/player/);
-  await expect(page.getByRole("heading", { name: "Night archive" })).toBeVisible();
-  await expect(page.locator("#cable-volume")).toHaveValue("100");
+  await expect(page.getByRole("img", { name: "Night archive" })).toBeVisible();
+  await expect(page.locator(".player-toolbar, .player-title, .player-controls")).toHaveCount(0);
+  await expect(page.locator(".player-viewport")).toHaveCSS("width", "1280px");
+  await expect(page.locator(".player-viewport")).toHaveCSS("height", "720px");
 });
 
 test("viewer can tune channels with the legacy grid controls", async ({ page }) => {
@@ -59,7 +61,7 @@ test("viewer can tune channels with the legacy grid controls", async ({ page }) 
   await gallery.click();
   await page.locator(".guide-shell").focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Night archive" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Night archive" })).toBeVisible();
 });
 
 test("rapid remote route changes are processed once and in order", async ({ page }) => {
@@ -85,7 +87,7 @@ test("rapid remote route changes are processed once and in order", async ({ page
   });
   await page.goto("/");
   await expect(page).toHaveURL(/player/, { timeout: 6_000 });
-  await expect(page.getByRole("heading", { name: "Signal / Sea" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Signal / Sea" })).toBeVisible();
 });
 
 test("viewer can retry a failed bridge load", async ({ page }) => {

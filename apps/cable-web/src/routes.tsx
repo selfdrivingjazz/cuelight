@@ -312,27 +312,32 @@ function PlayerPage() {
   if (state.kind === "boot" || state.kind === "revision-loading") return <SyncState />;
   if (state.kind === "error") return <ErrorState onRetry={() => dispatch({ type: "RETRY_REVISION" })} />;
   if (state.kind === "warming") return <PlayerState title="Tuning channel" detail="Please wait while the programme begins." busy />;
-  if (state.kind === "player-opening") return <PlayerSurface occurrence={state.occurrence} presentation={state.presentation} opening onReady={() => dispatch({ type: "PLAYER_READY" })} onFailure={() => dispatch({ type: "PLAYER_FAILED", message: "The programme could not be played." })} onBack={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }} onChannel={tuneAdjacent} />;
+  if (state.kind === "player-opening") return <PlayerSurface occurrence={state.occurrence} onReady={() => dispatch({ type: "PLAYER_READY" })} onFailure={() => dispatch({ type: "PLAYER_FAILED", message: "The programme could not be played." })} onBack={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }} onChannel={tuneAdjacent} />;
   if (state.kind === "player-failure") return <PlayerState title="Playback unavailable" detail={state.message}><button className="button" type="button" onClick={() => dispatch({ type: "RETRY_PLAYER" })}>Try again</button><button className="button secondary" type="button" onClick={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }}>Guide</button></PlayerState>;
   if (state.kind !== "player-ready") return <PlayerState title="No programme selected" detail="Return to the guide to choose a channel."><Link className="button" to="/">Guide</Link></PlayerState>;
-  return <PlayerSurface occurrence={state.occurrence} presentation={state.presentation} onFailure={() => dispatch({ type: "PLAYER_FAILED", message: "The programme stopped unexpectedly." })} onBack={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }} onChannel={tuneAdjacent} />;
+  return <PlayerSurface occurrence={state.occurrence} onFailure={() => dispatch({ type: "PLAYER_FAILED", message: "The programme stopped unexpectedly." })} onBack={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }} onChannel={tuneAdjacent} />;
 }
 
 function PlayerState({ title, detail, busy = false, children }: { title: string; detail: string; busy?: boolean; children?: React.ReactNode }) {
   return <section className="player-surface player-state" aria-live="polite"><div className="player-state-content"><h1>{title}</h1><p>{detail}</p>{busy && <div className="meter" role="progressbar" aria-label="Tuning channel"><span /></div>}<div className="state-actions">{children}</div></div></section>;
 }
 
-function PlayerSurface({ occurrence, presentation, opening = false, onReady, onFailure, onBack, onChannel }: { occurrence: Occurrence; presentation: Presentation; opening?: boolean; onReady?: () => void; onFailure: () => void; onBack: () => void; onChannel: (delta: number) => void }) {
+function PlayerSurface({ occurrence, onReady, onFailure, onBack, onChannel }: { occurrence: Occurrence; onReady?: () => void; onFailure: () => void; onBack: () => void; onChannel: (delta: number) => void }) {
   const [volume, setVolume] = React.useState(() => Math.round(occurrence.volume ?? 100));
   const [muted, setMuted] = React.useState(occurrence.muted ?? false);
   const video = React.useRef<HTMLVideoElement>(null);
-  const channel = presentation.channels.find((candidate) => candidate.id === occurrence.channelId);
-  const volumeValue = muted ? 0 : volume;
   React.useEffect(() => {
     if (!video.current) return;
     video.current.volume = volume / 100;
     video.current.muted = muted;
   }, [muted, volume]);
+  React.useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onBack();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onBack]);
   const handleRemote = React.useCallback((event: RemoteEvent) => {
     if (event.type !== "key") return;
     if (event.key === "Escape" || event.key === "Backspace" || event.key === "Guide") onBack();
@@ -351,16 +356,7 @@ function PlayerSurface({ occurrence, presentation, opening = false, onReady, onF
     ? <video ref={video} className="player-content-media" src={occurrence.media.reference} autoPlay playsInline loop={occurrence.loop ?? false} muted={muted} onCanPlay={onReady} onError={onFailure} />
     : <img className="player-content-media" src={occurrence.media.reference} alt={occurrence.title} onLoad={onReady} onError={onFailure} />;
   return <section className="player-surface" aria-label="Cable player">
-    <div className="player-toolbar"><button className="text-button" type="button" onClick={onBack}><span aria-hidden="true">←</span> Guide</button><span>{channel ? `${String(channel.number).padStart(2, "0")} ${channel.callsign}` : "CABLE"}</span></div>
-    <div className="player-viewport" data-fit={occurrence.fit ?? "fit"}>
-      {media}
-      <div className="player-title"><p className="eyebrow">{formatInstant(occurrence.startsAt, presentation.revision.timezone, { dateStyle: "medium", timeStyle: undefined })}</p><h1>{occurrence.title}</h1><p>{occurrence.subtitle ?? "Cable Television"}</p></div>
-      {opening && <div className="player-opening-overlay" role="status">Tuning</div>}
-    </div>
-    <div className="player-controls">
-      <div className="player-control-copy"><strong>{occurrence.title}</strong><span>{formatInstant(occurrence.startsAt, presentation.revision.timezone, { dateStyle: undefined, timeStyle: "short" })} — {formatInstant(occurrence.endsAt, presentation.revision.timezone, { dateStyle: undefined, timeStyle: "short" })}</span></div>
-      <div className="volume-control"><button className="icon-button" type="button" aria-label={muted ? "Unmute" : "Mute"} onClick={() => setMuted((value) => !value)}>{muted ? "×" : "⌁"}</button><label htmlFor="cable-volume">Volume <output htmlFor="cable-volume">{volumeValue}</output></label><input id="cable-volume" type="range" min="0" max="100" value={volumeValue} onChange={(event) => { setVolume(Number(event.currentTarget.value)); setMuted(false); }} /></div>
-    </div>
+    <div className="player-viewport" data-fit={occurrence.fit ?? "fit"}>{media}</div>
   </section>;
 }
 
