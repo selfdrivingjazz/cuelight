@@ -914,7 +914,11 @@ export interface components {
              * @default 86400
              */
             guideHorizonSeconds: number;
-            guideDensity?: string;
+            /**
+             * @default half-hour
+             * @enum {string}
+             */
+            guideDensity: "quarter-hour" | "half-hour" | "hour";
             placardDefaults?: {
                 [key: string]: string;
             };
@@ -930,7 +934,8 @@ export interface components {
             theme: "nebula" | "gallery" | "noir";
             /** Format: int64 */
             guideHorizonSeconds: number;
-            guideDensity: string;
+            /** @enum {string} */
+            guideDensity: "quarter-hour" | "half-hour" | "hour";
             placardDefaults?: {
                 [key: string]: string;
             };
@@ -1191,6 +1196,8 @@ export interface components {
             deploymentVersion: number;
             /** @enum {string} */
             theme: "nebula" | "gallery" | "noir";
+            /** @enum {string} */
+            guideDensity: "quarter-hour" | "half-hour" | "hour";
             /** Format: date-time */
             generatedAt: string;
             shellBuildId: components["schemas"]["Id"];
@@ -1209,6 +1216,8 @@ export interface components {
             deploymentVersion: number;
             /** @enum {string} */
             theme: "nebula" | "gallery" | "noir";
+            /** @enum {string} */
+            guideDensity: "quarter-hour" | "half-hour" | "hour";
             /** Format: date-time */
             generatedAt: string;
             shellBuildId: components["schemas"]["Id"];

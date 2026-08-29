@@ -65,6 +65,10 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 	if err != nil {
 		return CableRevision{}, err
 	}
+	d.GuideDensity, err = NormalizeGuideDensity(d.GuideDensity)
+	if err != nil {
+		return CableRevision{}, err
+	}
 	if shellBuildID == "" {
 		return CableRevision{}, &ValidationError{"shellBuildId", "is required"}
 	}
@@ -125,7 +129,7 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 		return CableRevision{}, err
 	}
 	now := c.now()
-	result := CableRevision{DeploymentID: d.ID, DeploymentVersion: d.Version, ShellBuildID: b.ID, ShellBuildDigest: b.Digest, Entrypoint: b.Entrypoint, BridgeProtocol: b.BridgeProtocol, Timezone: d.Timezone, Theme: d.Theme, Window: window, CreatedBy: actor, CreatedAt: now, GeneratedAt: now}
+	result := CableRevision{DeploymentID: d.ID, DeploymentVersion: d.Version, ShellBuildID: b.ID, ShellBuildDigest: b.Digest, Entrypoint: b.Entrypoint, BridgeProtocol: b.BridgeProtocol, Timezone: d.Timezone, Theme: d.Theme, GuideDensity: d.GuideDensity, Window: window, CreatedBy: actor, CreatedAt: now, GeneratedAt: now}
 	closure := make(map[string]struct{})
 	closure[b.Digest] = struct{}{}
 	for _, digest := range b.ArtifactDigests {
@@ -207,7 +211,7 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 		result.ArtifactDigests = append(result.ArtifactDigests, digest)
 	}
 	sort.Strings(result.ArtifactDigests)
-	payload := revisionPayload{Schema: "cable.revision.v1", DeploymentID: result.DeploymentID, DeploymentVersion: result.DeploymentVersion, Theme: result.Theme, GeneratedAt: result.GeneratedAt, ShellBuildID: result.ShellBuildID, ShellBuildDigest: result.ShellBuildDigest, Entrypoint: result.Entrypoint, BridgeProtocol: result.BridgeProtocol, Timezone: result.Timezone, Window: result.Window, Channels: result.Channels, ArtifactDigests: result.ArtifactDigests}
+	payload := revisionPayload{Schema: "cable.revision.v1", DeploymentID: result.DeploymentID, DeploymentVersion: result.DeploymentVersion, Theme: result.Theme, GuideDensity: result.GuideDensity, GeneratedAt: result.GeneratedAt, ShellBuildID: result.ShellBuildID, ShellBuildDigest: result.ShellBuildDigest, Entrypoint: result.Entrypoint, BridgeProtocol: result.BridgeProtocol, Timezone: result.Timezone, Window: result.Window, Channels: result.Channels, ArtifactDigests: result.ArtifactDigests}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return CableRevision{}, fmt.Errorf("marshal cable revision: %w", err)
@@ -226,6 +230,7 @@ type revisionPayload struct {
 	DeploymentVersion int64             `json:"deploymentVersion"`
 	Theme             string            `json:"theme"`
 	GeneratedAt       time.Time         `json:"generatedAt"`
+	GuideDensity      string            `json:"guideDensity"`
 	ShellBuildID      string            `json:"shellBuildId"`
 	ShellBuildDigest  string            `json:"shellBuildDigest"`
 	Entrypoint        string            `json:"entrypoint"`
@@ -235,6 +240,7 @@ type revisionPayload struct {
 	Channels          []RevisionChannel `json:"channels"`
 	ArtifactDigests   []string          `json:"artifactDigests"`
 }
+
 func (c Compiler) compileBlock(ctx context.Context, programming ProgrammingRepository, block Block, window RevisionWindow, closure *map[string]struct{}) (RevisionBlock, error) {
 	if block.ID == "" || block.StartsAt.IsZero() || block.EndsAt.IsZero() || !block.EndsAt.After(block.StartsAt) {
 		return RevisionBlock{}, &ValidationError{"block.time", "endsAt must be after startsAt"}
@@ -353,7 +359,6 @@ func (c Compiler) allBlocks(ctx context.Context, programming ProgrammingReposito
 		cursor = p.Page.NextCursor
 	}
 }
-
 
 func (c Compiler) allChannels(ctx context.Context, id string) ([]Channel, error) {
 	var out []Channel

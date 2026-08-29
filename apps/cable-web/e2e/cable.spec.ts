@@ -1,9 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 import { presentationFixture } from "../src/presentation";
 function livePresentation() {
-  const startsAt = new Date(Date.now() - 60_000).toISOString();
-  const endsAt = new Date(Date.now() + 10 * 60_000).toISOString();
-  return { ...presentationFixture, occurrences: presentationFixture.occurrences.map((occurrence) => ({ ...occurrence, startsAt, endsAt })) };
+  const now = Date.now();
+  const startsAt = new Date(now - 60_000).toISOString();
+  const endsAt = new Date(now + 10 * 60_000).toISOString();
+  return {
+    ...presentationFixture,
+    revision: { ...presentationFixture.revision, guideDensity: "half-hour" },
+    blocks: [
+      { id: "block-main", channelId: "channel-1", startsAt: new Date(now - 30 * 60_000).toISOString(), endsAt: new Date(now + 90 * 60_000).toISOString(), title: "Signal rotation", source: "playlist" as const },
+      { id: "block-gallery", channelId: "channel-2", startsAt: new Date(now - 10 * 60_000).toISOString(), endsAt: new Date(now + 50 * 60_000).toISOString(), title: "Night block", source: "asset" as const },
+    ],
+    occurrences: presentationFixture.occurrences.map((occurrence, index) => ({ ...occurrence, blockId: index === 0 ? "block-main" : "block-gallery", startsAt, endsAt })),
+  };
 }
 
 
@@ -33,7 +42,9 @@ test("viewer sees the legacy splash, browses the guide, and opens a programme", 
   await expect(page.getByText("Chiba Cable Television", { exact: true })).toBeHidden({ timeout: 6_000 });
   await expect(page.locator(".header-title")).toHaveText("Signal / Sea");
   await expect.poll(readinessCount).toBe(1);
-  await page.getByRole("button", { name: /Night archive/ }).click();
+  await expect(page.locator(".program-card")).toHaveCount(2);
+  await expect(page.locator(".time-slot")).toHaveCount(6);
+  await page.getByRole("button", { name: /Night block/ }).dblclick();
   await expect(page).toHaveURL(/player/);
   await expect(page.getByRole("heading", { name: "Night archive" })).toBeVisible();
   await expect(page.locator("#cable-volume")).toHaveValue("100");
@@ -45,8 +56,9 @@ test("viewer can tune channels with the legacy grid controls", async ({ page }) 
   await expect(page.locator(".splash-screen")).toBeHidden({ timeout: 6_000 });
   await expect.poll(readinessCount).toBe(1);
   const gallery = page.getByRole("button", { name: /02 Gallery GALL/ });
-  await gallery.press("Enter");
-  await expect(page).toHaveURL(/player/);
+  await gallery.click();
+  await page.locator(".guide-shell").focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Night archive" })).toBeVisible();
 });
 

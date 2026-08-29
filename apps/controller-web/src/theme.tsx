@@ -72,7 +72,8 @@ export function ControllerThemeProvider({ children }: { children: React.ReactNod
   }, []);
 
   const value = React.useMemo(() => ({ preference, setPreference }), [preference]);
-  return <ControllerThemeContext.Provider value={value}>{children}<ThemeControl /></ControllerThemeContext.Provider>;
+  const showControl = typeof window === "undefined" || !window.location.pathname.startsWith("/remote/");
+  return <ControllerThemeContext.Provider value={value}>{children}{showControl && <ThemeControl />}</ControllerThemeContext.Provider>;
 }
 
 export function useControllerTheme(): ControllerThemeContextValue {

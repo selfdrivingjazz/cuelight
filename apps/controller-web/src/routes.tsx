@@ -211,26 +211,59 @@ function AssignPage() { return <PageFrame breadcrumbs={[{ label: "Overview", hre
 function RemoteControlPage() {
   const { sessionId = "" } = useParams({ strict: false });
   const token = React.useMemo(() => new URLSearchParams(window.location.hash.slice(1)).get("token") ?? "", []);
-  const sequence = React.useRef(0);
-  const [status, setStatus] = React.useState<"ready" | "sending" | "error">(token ? "ready" : "error");
-  const send = async (key: string) => {
+  const sequence = React.useRef(Date.now() * 1_000);
+  const queue = React.useRef<Promise<void>>(Promise.resolve());
+  const dialTimer = React.useRef<number | undefined>(undefined);
+  const [dial, setDial] = React.useState("");
+  const [status, setStatus] = React.useState<"ready" | "error">(token ? "ready" : "error");
+  const send = React.useCallback((key: string) => {
     if (!token || !sessionId) return;
-    setStatus("sending");
-    const response = await fetch(`/api/v1/remote/sessions/${encodeURIComponent(sessionId)}/events`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ sequence: ++sequence.current, type: "key", key }),
-      credentials: "omit",
-      cache: "no-store",
-    });
-    setStatus(response.ok ? "ready" : "error");
+    sequence.current = Math.max(sequence.current + 1, Date.now() * 1_000);
+    const body = JSON.stringify({ sequence: sequence.current, type: "key", key });
+    queue.current = queue.current.catch(() => undefined).then(async () => {
+      const response = await fetch(`/api/v1/remote/sessions/${encodeURIComponent(sessionId)}/events`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body,
+        credentials: "omit",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("Remote event rejected");
+      setStatus("ready");
+    }).catch(() => setStatus("error"));
+  }, [sessionId, token]);
+  React.useEffect(() => () => { if (dialTimer.current) window.clearTimeout(dialTimer.current); }, []);
+  const pushDigit = (digit: number) => {
+    if (dialTimer.current) window.clearTimeout(dialTimer.current);
+    const next = `${dial}${digit}`.slice(-3);
+    setDial(next);
+    dialTimer.current = window.setTimeout(() => {
+      send(`ChannelNumber:${next}`);
+      setDial("");
+    }, 900);
   };
-  const button = (label: string, key: string, className = "") => <button className={`flex min-h-16 items-center justify-center rounded-xl border border-border bg-card text-lg font-semibold text-card-foreground shadow-sm active:bg-accent ${className}`} type="button" onClick={() => void send(key)}>{label}</button>;
-  return <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-5 bg-background p-5 text-foreground">
-    <div className="text-center"><p className="text-xs uppercase tracking-[.24em] text-muted-foreground">Cable remote</p><h1 className="mt-2 text-2xl font-semibold">Channel controls</h1><p className="mt-1 text-sm text-muted-foreground">{status === "error" ? "Remote session unavailable" : status === "sending" ? "Sending…" : "Connected"}</p></div>
-    <div className="grid grid-cols-3 gap-3"><span />{button("↑", "ArrowUp")}<span />{button("←", "ArrowLeft")}{button("OK", "Enter")}{button("→", "ArrowRight")}<span />{button("↓", "ArrowDown")}<span /></div>
-    <div className="grid grid-cols-3 gap-3">{button("Back", "Escape")}{button("−", "VolumeDown")}{button("+", "VolumeUp")}</div>
-    {button("Mute", "Mute")}
+  const button = (label: React.ReactNode, key: string, className = "") => <button className={`remote-button ${className}`} type="button" onClick={() => send(key)}>{label}</button>;
+  return <main className="remote-shell">
+    <section className="remote-body">
+      <header className="remote-top"><div><p>Cable</p><h1>Remote</h1></div><span className={`remote-status ${status}`}>{status === "ready" ? "Connected" : "Connection error"}</span></header>
+      <div className="remote-rockers">
+        <div className="remote-rocker">{button("CH UP", "ChannelUp")}<span>CH</span>{button("CH DOWN", "ChannelDown")}</div>
+        <div className="remote-rocker">{button("VOL UP", "VolumeUp")}<span>VOL</span>{button("VOL DOWN", "VolumeDown")}</div>
+      </div>
+      <div className="remote-dpad">
+        {button("▲", "ArrowUp", "up")}
+        {button("◀", "ArrowLeft", "left")}
+        {button("OK", "Enter", "ok")}
+        {button("▶", "ArrowRight", "right")}
+        {button("▼", "ArrowDown", "down")}
+      </div>
+      <div className="remote-actions">{button("Guide", "Guide")}{button("Info", "Info")}{button("Mute", "Mute")}</div>
+      <div className="remote-numpad">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => <button className="remote-button" key={digit} type="button" onClick={() => pushDigit(digit)}>{digit}</button>)}
+        <button className="remote-button zero" type="button" onClick={() => pushDigit(0)}>0</button>
+      </div>
+      {dial && <div className="remote-dial" aria-live="polite">{dial}</div>}
+    </section>
   </main>;
 }
 

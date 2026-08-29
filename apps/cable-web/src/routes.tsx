@@ -142,6 +142,7 @@ function GuidePage() {
   const navigate = useNavigate();
   const presentation = "presentation" in state ? state.presentation : undefined;
   const selectedId = state.kind === "ready" || state.kind === "stale-offline" ? state.selectedId : null;
+  const selectChannel = React.useCallback((channelId: string) => dispatch({ type: "SELECT_CHANNEL", channelId }), [dispatch]);
   const tuneChannel = React.useCallback((channelId: string) => {
     if (!presentation) return;
     dispatch({ type: "SELECT_CHANNEL", channelId });
@@ -156,18 +157,28 @@ function GuidePage() {
     const channels = presentation.channels.filter((channel) => channel.enabled);
     if (channels.length === 0) return;
     const index = Math.max(0, channels.findIndex((channel) => channel.id === selectedId));
-    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    if (event.key === "ArrowUp") {
+      const channel = channels[(index - 1 + channels.length) % channels.length];
+      if (channel) selectChannel(channel.id);
+    } else if (event.key === "ArrowDown") {
+      const channel = channels[(index + 1) % channels.length];
+      if (channel) selectChannel(channel.id);
+    } else if (event.key === "ChannelUp") {
       const channel = channels[(index - 1 + channels.length) % channels.length];
       if (channel) tuneChannel(channel.id);
-    } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    } else if (event.key === "ChannelDown") {
       const channel = channels[(index + 1) % channels.length];
       if (channel) tuneChannel(channel.id);
     } else if (event.key === "Enter") {
       const channel = channels[index];
       if (channel) tuneChannel(channel.id);
+    } else if (event.key?.startsWith("ChannelNumber:")) {
+      const number = Number(event.key.slice("ChannelNumber:".length));
+      const channel = channels.find((candidate) => candidate.number === number);
+      if (channel) tuneChannel(channel.id);
     }
-  }, [presentation, selectedId, tuneChannel]);
-  useRemoteInput(Boolean(presentation?.remote), remoteEvent);
+  }, [presentation, selectChannel, selectedId, tuneChannel]);
+  useRemoteInput(presentation?.remote?.url, remoteEvent);
   if (state.kind === "boot" || state.kind === "revision-loading") return <SyncState />;
   if (state.kind === "error") return <ErrorState onRetry={() => dispatch({ type: "RETRY_REVISION" })} />;
   if (state.kind === "empty-lineup") return <EmptyState />;
@@ -179,7 +190,7 @@ function GuidePage() {
     offline={state.kind === "stale-offline" || presentation.revision.stale}
     remoteURL={presentation.remote?.url}
     showQR={presentation.remote?.showQr}
-    onSelectChannel={(channel) => tuneChannel(channel.id)}
+    onSelectChannel={(channel) => selectChannel(channel.id)}
     onTune={(occurrence) => {
       dispatch({ type: "TUNE_LIVE", occurrence });
       void navigate({ to: "/player" });
@@ -190,6 +201,17 @@ function GuidePage() {
 function PlayerPage() {
   const { state, dispatch } = useRuntime();
   const navigate = useNavigate();
+  const tuneAdjacent = React.useCallback((delta: number) => {
+    if (state.kind !== "player-opening" && state.kind !== "player-ready") return;
+    const channels = state.presentation.channels.filter((channel) => channel.enabled);
+    const index = channels.findIndex((channel) => channel.id === state.occurrence.channelId);
+    if (index < 0 || channels.length === 0) return;
+    const channel = channels[(index + delta + channels.length) % channels.length];
+    if (!channel) return;
+    const now = Date.now();
+    const occurrence = state.presentation.occurrences.find((candidate) => candidate.channelId === channel.id && new Date(candidate.startsAt).getTime() <= now && now < new Date(candidate.endsAt).getTime());
+    if (occurrence) dispatch({ type: "TUNE_LIVE", occurrence });
+  }, [dispatch, state]);
   React.useEffect(() => {
     if (state.kind !== "warming") return;
     const timer = window.setTimeout(() => dispatch({ type: "ARTIFACT_READY" }), 320);
@@ -218,17 +240,17 @@ function PlayerPage() {
   if (state.kind === "boot" || state.kind === "revision-loading") return <SyncState />;
   if (state.kind === "error") return <ErrorState onRetry={() => dispatch({ type: "RETRY_REVISION" })} />;
   if (state.kind === "warming") return <PlayerState title="Tuning channel" detail="Please wait while the programme begins." busy />;
-  if (state.kind === "player-opening") return <PlayerSurface occurrence={state.occurrence} presentation={state.presentation} opening onReady={() => dispatch({ type: "PLAYER_READY" })} onFailure={() => dispatch({ type: "PLAYER_FAILED", message: "The programme could not be played." })} onBack={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }} />;
+  if (state.kind === "player-opening") return <PlayerSurface occurrence={state.occurrence} presentation={state.presentation} opening onReady={() => dispatch({ type: "PLAYER_READY" })} onFailure={() => dispatch({ type: "PLAYER_FAILED", message: "The programme could not be played." })} onBack={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }} onChannel={tuneAdjacent} />;
   if (state.kind === "player-failure") return <PlayerState title="Playback unavailable" detail={state.message}><button className="button" type="button" onClick={() => dispatch({ type: "RETRY_PLAYER" })}>Try again</button><button className="button secondary" type="button" onClick={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }}>Guide</button></PlayerState>;
   if (state.kind !== "player-ready") return <PlayerState title="No programme selected" detail="Return to the guide to choose a channel."><Link className="button" to="/">Guide</Link></PlayerState>;
-  return <PlayerSurface occurrence={state.occurrence} presentation={state.presentation} onFailure={() => dispatch({ type: "PLAYER_FAILED", message: "The programme stopped unexpectedly." })} onBack={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }} />;
+  return <PlayerSurface occurrence={state.occurrence} presentation={state.presentation} onFailure={() => dispatch({ type: "PLAYER_FAILED", message: "The programme stopped unexpectedly." })} onBack={() => { dispatch({ type: "BACK_TO_GUIDE" }); void navigate({ to: "/" }); }} onChannel={tuneAdjacent} />;
 }
 
 function PlayerState({ title, detail, busy = false, children }: { title: string; detail: string; busy?: boolean; children?: React.ReactNode }) {
   return <section className="player-surface player-state" aria-live="polite"><div className="player-state-content"><h1>{title}</h1><p>{detail}</p>{busy && <div className="meter" role="progressbar" aria-label="Tuning channel"><span /></div>}<div className="state-actions">{children}</div></div></section>;
 }
 
-function PlayerSurface({ occurrence, presentation, opening = false, onReady, onFailure, onBack }: { occurrence: Occurrence; presentation: Presentation; opening?: boolean; onReady?: () => void; onFailure: () => void; onBack: () => void }) {
+function PlayerSurface({ occurrence, presentation, opening = false, onReady, onFailure, onBack, onChannel }: { occurrence: Occurrence; presentation: Presentation; opening?: boolean; onReady?: () => void; onFailure: () => void; onBack: () => void; onChannel: (delta: number) => void }) {
   const [volume, setVolume] = React.useState(() => Math.round(occurrence.volume ?? 100));
   const [muted, setMuted] = React.useState(occurrence.muted ?? false);
   const video = React.useRef<HTMLVideoElement>(null);
@@ -241,16 +263,18 @@ function PlayerSurface({ occurrence, presentation, opening = false, onReady, onF
   }, [muted, volume]);
   const handleRemote = React.useCallback((event: RemoteEvent) => {
     if (event.type !== "key") return;
-    if (event.key === "Escape" || event.key === "Backspace") onBack();
+    if (event.key === "Escape" || event.key === "Backspace" || event.key === "Guide") onBack();
     else if (event.key === "VolumeUp") { setMuted(false); setVolume((value) => Math.min(100, value + 5)); }
     else if (event.key === "VolumeDown") { setMuted(false); setVolume((value) => Math.max(0, value - 5)); }
     else if (event.key === "Mute") setMuted((value) => !value);
+    else if (event.key === "ChannelUp") onChannel(-1);
+    else if (event.key === "ChannelDown") onChannel(1);
     else if (event.key === "Enter" && video.current) {
       if (video.current.paused) void video.current.play();
       else video.current.pause();
     }
-  }, [onBack]);
-  useRemoteInput(Boolean(presentation.remote), handleRemote);
+  }, [onBack, onChannel]);
+  useRemoteInput(presentation.remote?.url, handleRemote);
   const media = occurrence.media.kind === "video"
     ? <video ref={video} className="player-content-media" src={occurrence.media.reference} autoPlay playsInline loop={occurrence.loop ?? false} muted={muted} onCanPlay={onReady} onError={onFailure} />
     : <img className="player-content-media" src={occurrence.media.reference} alt={occurrence.title} onLoad={onReady} onError={onFailure} />;

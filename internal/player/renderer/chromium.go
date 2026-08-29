@@ -605,6 +605,7 @@ type revisionDocument struct {
 	BridgeProtocol    string    `json:"bridgeProtocol"`
 	GeneratedAt       time.Time `json:"generatedAt"`
 	Theme             string    `json:"theme"`
+	GuideDensity      string    `json:"guideDensity"`
 	Timezone          string    `json:"timezone"`
 	Window            struct {
 		StartsAt time.Time `json:"startsAt"`
@@ -621,7 +622,16 @@ type revisionChannel struct {
 	Accent   string            `json:"accent"`
 	Enabled  bool              `json:"enabled"`
 	Standby  bool              `json:"standby"`
+	Blocks   []revisionBlock   `json:"blocks"`
 	Programs []revisionProgram `json:"programs"`
+}
+type revisionBlock struct {
+	ID         string    `json:"id"`
+	StartsAt   time.Time `json:"startsAt"`
+	EndsAt     time.Time `json:"endsAt"`
+	PlaylistID string    `json:"playlistId"`
+	AssetID    string    `json:"assetId"`
+	Title      string    `json:"title"`
 }
 type revisionProgram struct {
 	ID             string    `json:"id"`
@@ -665,11 +675,12 @@ func transformRevision(data []byte, candidate Candidate) ([]byte, error) {
 		digest = candidate.RevisionArtifactDigest
 	}
 	type revisionMeta struct {
-		ID          string    `json:"id"`
-		Digest      string    `json:"digest"`
-		GeneratedAt time.Time `json:"generatedAt"`
-		Timezone    string    `json:"timezone"`
-		Stale       bool      `json:"stale"`
+		ID           string    `json:"id"`
+		Digest       string    `json:"digest"`
+		GeneratedAt  time.Time `json:"generatedAt"`
+		Timezone     string    `json:"timezone"`
+		Stale        bool      `json:"stale"`
+		GuideDensity string    `json:"guideDensity"`
 	}
 	type outChannel struct {
 		ID             string `json:"id"`
@@ -703,6 +714,14 @@ func transformRevision(data []byte, candidate Candidate) ([]byte, error) {
 		Muted        bool      `json:"muted"`
 		Volume       float64   `json:"volume"`
 	}
+	type block struct {
+		ID        string    `json:"id"`
+		ChannelID string    `json:"channelId"`
+		StartsAt  time.Time `json:"startsAt"`
+		EndsAt    time.Time `json:"endsAt"`
+		Title     string    `json:"title"`
+		Source    string    `json:"source"`
+	}
 	type bridge struct {
 		ProtocolVersion string `json:"protocolVersion"`
 		State           string `json:"state"`
@@ -715,12 +734,13 @@ func transformRevision(data []byte, candidate Candidate) ([]byte, error) {
 	type output struct {
 		Revision    revisionMeta      `json:"revision"`
 		Channels    []outChannel      `json:"channels"`
+		Blocks      []block           `json:"blocks"`
 		Occurrences []occurrence      `json:"occurrences"`
 		Bridge      bridge            `json:"bridge"`
 		Theme       string            `json:"theme"`
 		Remote      *remoteDescriptor `json:"remote,omitempty"`
 	}
-	result := output{Revision: revisionMeta{ID: id, Digest: digest, GeneratedAt: doc.GeneratedAt, Timezone: doc.Timezone}, Channels: []outChannel{}, Occurrences: []occurrence{}, Theme: doc.Theme, Bridge: bridge{ProtocolVersion: candidate.BridgeProtocol, State: "online"}}
+	result := output{Revision: revisionMeta{ID: id, Digest: digest, GeneratedAt: doc.GeneratedAt, Timezone: doc.Timezone, GuideDensity: doc.GuideDensity}, Channels: []outChannel{}, Blocks: []block{}, Occurrences: []occurrence{}, Theme: doc.Theme, Bridge: bridge{ProtocolVersion: candidate.BridgeProtocol, State: "online"}}
 	if candidate.Remote != nil {
 		result.Remote = &remoteDescriptor{URL: candidate.Remote.URL, ShowQR: candidate.Remote.ShowQR, ExpiresAt: candidate.Remote.ExpiresAt}
 	}
@@ -730,6 +750,13 @@ func transformRevision(data []byte, candidate Candidate) ([]byte, error) {
 			oc.StandbyMessage = "Standby"
 		}
 		result.Channels = append(result.Channels, oc)
+		for _, scheduled := range ch.Blocks {
+			source := "playlist"
+			if scheduled.AssetID != "" {
+				source = "asset"
+			}
+			result.Blocks = append(result.Blocks, block{ID: scheduled.ID, ChannelID: ch.ID, StartsAt: scheduled.StartsAt, EndsAt: scheduled.EndsAt, Title: scheduled.Title, Source: source})
+		}
 		for _, p := range ch.Programs {
 			if !contains(candidate.ArtifactClosure, p.ArtifactDigest) {
 				return nil, fmt.Errorf("revision references artifact outside closure: %s", p.ArtifactDigest)

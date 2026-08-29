@@ -2,11 +2,13 @@ import { z } from "zod";
 
 const mediaSchema = z.discriminatedUnion("kind", [z.object({ kind: z.literal("video"), reference: z.string().min(1), mime: z.literal("video/mp4") }), z.object({ kind: z.literal("image"), reference: z.string().min(1), mime: z.enum(["image/jpeg", "image/png", "image/webp"]) })]);
 const occurrenceSchema = z.object({ id: z.string(), blockId: z.string().optional(), itemId: z.string().optional(), itemPosition: z.number().int().positive().optional(), occurrence: z.number().int().positive().optional(), channelId: z.string(), startsAt: z.string().datetime(), endsAt: z.string().datetime(), title: z.string(), subtitle: z.string().optional(), media: mediaSchema, placard: z.enum(["always", "start", "never"]), fit: z.enum(["fit", "fill"]).optional(), loop: z.boolean().optional(), muted: z.boolean().optional(), volume: z.number().min(0).max(100).optional() });
+const blockSchema = z.object({ id: z.string(), channelId: z.string(), startsAt: z.string().datetime(), endsAt: z.string().datetime(), title: z.string(), source: z.enum(["playlist", "asset"]) });
 const channelSchema = z.object({ id: z.string(), number: z.number().int().positive(), name: z.string(), callsign: z.string(), accent: z.string(), enabled: z.boolean(), standbyMessage: z.string().optional() });
 const remoteSchema = z.object({ url: z.string().url(), showQr: z.boolean(), expiresAt: z.string().datetime() });
-export const presentationSchema = z.object({ revision: z.object({ id: z.string(), digest: z.string(), generatedAt: z.string().datetime(), timezone: z.string(), stale: z.boolean() }), channels: z.array(channelSchema), occurrences: z.array(occurrenceSchema), bridge: z.object({ protocolVersion: z.string(), state: z.enum(["online", "offline", "stale"]) }), theme: z.enum(["nebula", "gallery", "noir"]), remote: remoteSchema.optional() });
+export const presentationSchema = z.object({ revision: z.object({ id: z.string(), digest: z.string(), generatedAt: z.string().datetime(), timezone: z.string(), stale: z.boolean(), guideDensity: z.string().optional() }), channels: z.array(channelSchema), blocks: z.array(blockSchema).optional(), occurrences: z.array(occurrenceSchema), bridge: z.object({ protocolVersion: z.string(), state: z.enum(["online", "offline", "stale"]) }), theme: z.enum(["nebula", "gallery", "noir"]), remote: remoteSchema.optional() });
 export type Presentation = z.infer<typeof presentationSchema>;
 export type Channel = Presentation["channels"][number];
+export type Block = NonNullable<Presentation["blocks"]>[number];
 export type Occurrence = Presentation["occurrences"][number];
 
 export interface PresentationSource {

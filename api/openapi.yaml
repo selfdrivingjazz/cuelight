@@ -1351,7 +1351,7 @@ components:
         timezone: {type: string, minLength: 1}
         theme: {type: string, enum: [nebula, gallery, noir]}
         guideHorizonSeconds: {type: integer, format: int64, minimum: 3600, maximum: 2678400, default: 86400}
-        guideDensity: {type: string}
+        guideDensity: {type: string, enum: [quarter-hour, half-hour, hour], default: half-hour}
         placardDefaults:
           type: object
           additionalProperties: {type: string}
@@ -1368,7 +1368,7 @@ components:
         timezone: {type: string}
         theme: {type: string, enum: [nebula, gallery, noir]}
         guideHorizonSeconds: {type: integer, format: int64, minimum: 3600, maximum: 2678400}
-        guideDensity: {type: string}
+        guideDensity: {type: string, enum: [quarter-hour, half-hour, hour]}
         placardDefaults:
           type: object
           additionalProperties: {type: string}
@@ -1666,12 +1666,13 @@ components:
     CableRevisionDocument:
       type: object
       additionalProperties: false
-      required: [schema, deploymentId, deploymentVersion, theme, generatedAt, shellBuildId, shellBuildDigest, entrypoint, bridgeProtocol, timezone, window, channels, artifactDigests]
+      required: [schema, deploymentId, deploymentVersion, theme, guideDensity, generatedAt, shellBuildId, shellBuildDigest, entrypoint, bridgeProtocol, timezone, window, channels, artifactDigests]
       properties:
         schema: {type: string, const: cable.revision.v1}
         deploymentId: {$ref: "#/components/schemas/Id"}
         deploymentVersion: {type: integer, format: int64, minimum: 1}
         theme: {type: string, enum: [nebula, gallery, noir]}
+        guideDensity: {type: string, enum: [quarter-hour, half-hour, hour]}
         generatedAt: {type: string, format: date-time}
         shellBuildId: {$ref: "#/components/schemas/Id"}
         shellBuildDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
@@ -1689,12 +1690,13 @@ components:
     CableRevision:
       type: object
       additionalProperties: false
-      required: [id, deploymentId, deploymentVersion, theme, generatedAt, shellBuildId, digest, shellBuildDigest, entrypoint, bridgeProtocol, timezone, window, channels, artifactDigests, createdBy, createdAt]
+      required: [id, deploymentId, deploymentVersion, theme, guideDensity, generatedAt, shellBuildId, digest, shellBuildDigest, entrypoint, bridgeProtocol, timezone, window, channels, artifactDigests, createdBy, createdAt]
       properties:
         id: {$ref: "#/components/schemas/Id"}
         deploymentId: {$ref: "#/components/schemas/Id"}
         deploymentVersion: {type: integer, format: int64, minimum: 1}
         theme: {type: string, enum: [nebula, gallery, noir]}
+        guideDensity: {type: string, enum: [quarter-hour, half-hour, hour]}
         generatedAt: {type: string, format: date-time}
         shellBuildId: {$ref: "#/components/schemas/Id"}
         digest: {type: string, pattern: "^[a-f0-9]{64}$"}

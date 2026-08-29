@@ -50,3 +50,28 @@ test("operator browses Cable deployment hierarchy", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Revisions" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Publish" })).toBeVisible();
 });
+
+test("phone remote preserves legacy controls and orders rapid input", async ({ page }) => {
+  await installControllerApi(page);
+  const events: Array<{ sequence: number; key: string }> = [];
+  await page.route("**/api/v1/remote/sessions/session/events", async (route) => {
+    events.push(route.request().postDataJSON() as { sequence: number; key: string });
+    await route.fulfill({ status: 202, body: "" });
+  });
+  await page.goto("/remote/session#token=remote-token");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "CH UP" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Guide" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "7", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Controller color theme")).toHaveCount(0);
+  await page.evaluate(() => {
+    for (const label of ["CH UP", "VOL UP", "Guide"]) {
+      const button = [...document.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
+      button?.click();
+    }
+  });
+  await expect.poll(() => events.length).toBe(3);
+  expect(events.map((event) => event.key)).toEqual(["ChannelUp", "VolumeUp", "Guide"]);
+  expect(events[0]!.sequence).toBeLessThan(events[1]!.sequence);
+  expect(events[1]!.sequence).toBeLessThan(events[2]!.sequence);
+});

@@ -123,8 +123,8 @@ async function seed() {
   }
   const shellBuild = await buildShell();
   const deployment = await createNamed("/cable/deployments", "Cable Dev Lineup", {
-    name: "Cable Dev Lineup", timezone: "UTC", theme: "nebula", guideHorizonSeconds: 86400,
-    guideDensity: "comfortable", placardDefaults: {}, fallbackMetadata: {},
+    name: "Cable Dev Lineup", timezone: "America/New_York", theme: "nebula", guideHorizonSeconds: 86400,
+    guideDensity: "half-hour", placardDefaults: {}, fallbackMetadata: {},
   }, "seed-cable-deployment");
 
   const playlistSpecs = [

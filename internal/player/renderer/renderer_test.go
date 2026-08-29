@@ -190,7 +190,7 @@ func TestMPVAdapterUsesJSONIPC(t *testing.T) {
 }
 func TestTransformRevisionToPresentationContract(t *testing.T) {
 	candidate := Candidate{Kind: release.PresentationCable, RevisionArtifactDigest: strings.Repeat("a", 64), ShellBuildDigest: strings.Repeat("b", 64), Entrypoint: "index.html", BridgeProtocol: "1.0", ArtifactClosure: []string{strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)}, Remote: &RemoteDescriptor{SessionID: "session", URL: "https://control.example/remote/session#token=secret", ShowQR: true, ExpiresAt: time.Unix(1_000, 0).UTC()}}
-	raw := []byte(`{"schema":"cable.revision.v1","shellBuildDigest":"` + candidate.ShellBuildDigest + `","entrypoint":"index.html","bridgeProtocol":"1.0","generatedAt":"2026-08-27T00:00:00Z","timezone":"UTC","channels":[{"id":"ch","number":1,"name":"Main","callsign":"MAIN","accent":"#fff","enabled":true,"programs":[{"id":"p","startsAt":"2026-08-27T00:00:00Z","endsAt":"2026-08-27T01:00:00Z","artifactDigest":"` + strings.Repeat("c", 64) + `","mediaType":"video/mp4","title":"Show","placardPolicy":"start","fit":"fill","loop":true,"mute":true,"volume":0.64}] }]}`)
+	raw := []byte(`{"schema":"cable.revision.v1","shellBuildDigest":"` + candidate.ShellBuildDigest + `","entrypoint":"index.html","bridgeProtocol":"1.0","generatedAt":"2026-08-27T00:00:00Z","timezone":"UTC","guideDensity":"half-hour","channels":[{"id":"ch","number":1,"name":"Main","callsign":"MAIN","accent":"#fff","enabled":true,"blocks":[{"id":"block","startsAt":"2026-08-27T00:00:00Z","endsAt":"2026-08-27T01:00:00Z","playlistId":"playlist","title":"Main block"}],"programs":[{"id":"p","blockId":"block","startsAt":"2026-08-27T00:00:00Z","endsAt":"2026-08-27T01:00:00Z","artifactDigest":"` + strings.Repeat("c", 64) + `","mediaType":"video/mp4","title":"Show","placardPolicy":"start","fit":"fill","loop":true,"mute":true,"volume":0.64}] }]}`)
 	presentation, err := transformRevision(raw, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +202,15 @@ func TestTransformRevisionToPresentationContract(t *testing.T) {
 	occurrences, ok := value["occurrences"].([]any)
 	if !ok || len(occurrences) != 1 || value["bridge"] == nil || value["remote"] == nil {
 		t.Fatalf("presentation contract = %s", presentation)
+	}
+	blocks, blocksOK := value["blocks"].([]any)
+	revision, revisionOK := value["revision"].(map[string]any)
+	if !blocksOK || len(blocks) != 1 || !revisionOK || revision["guideDensity"] != "half-hour" {
+		t.Fatalf("guide block contract = %s", presentation)
+	}
+	scheduled, scheduledOK := blocks[0].(map[string]any)
+	if !scheduledOK || scheduled["id"] != "block" || scheduled["channelId"] != "ch" || scheduled["title"] != "Main block" || scheduled["source"] != "playlist" {
+		t.Fatalf("guide block = %#v", blocks[0])
 	}
 	program, ok := occurrences[0].(map[string]any)
 	if !ok || program["fit"] != "fill" || program["loop"] != true || program["muted"] != true || program["volume"] != float64(64) {

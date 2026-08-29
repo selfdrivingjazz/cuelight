@@ -72,6 +72,7 @@ a { text-decoration: none; }
 .time-now { font-family: var(--font-tech); font-size: 1rem; letter-spacing: .12em; }
 .time-label-text { color: var(--text-soft); font-size: .6rem; letter-spacing: .24em; text-transform: uppercase; }
 .time-slots, .program-grid { display: grid; grid-template-columns: repeat(var(--slots), minmax(0, 1fr)); gap: 8px; }
+.program-grid { position: relative; display: block; min-width: 0; }
 .time-slot { padding: 8px 6px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--panel-time); color: var(--text-soft); font-family: var(--font-tech); font-size: .75rem; letter-spacing: .1em; text-align: center; }
 .time-slot.is-active { border-color: var(--panel-border-strong); color: #e9f5ff; box-shadow: 0 0 16px rgba(126,215,255,.4); }
 .channel-viewport { position: relative; min-height: 0; flex: 1; overflow: auto; padding: 8px; border: 1px solid var(--panel-border); border-radius: 14px; background: var(--panel-viewport); scrollbar-color: rgba(126,215,255,.5) transparent; }
@@ -82,10 +83,10 @@ a { text-decoration: none; }
 .channel-number { font-family: var(--font-tech); font-size: 1.3rem; letter-spacing: .12em; }
 .channel-name { overflow: hidden; font-size: .9rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .channel-call { color: var(--text-soft); font-size: .6rem; letter-spacing: .3em; text-transform: uppercase; }
-.program-card { display: flex; min-width: 0; min-height: calc(var(--row-height) - 2px); flex-direction: column; justify-content: center; gap: 4px; padding: 8px 10px; overflow: hidden; border: 1px solid var(--panel-border); border-radius: 10px; background: var(--panel-card); color: inherit; text-align: left; }
+.program-card { position: absolute; top: 0; bottom: 0; display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 4px; padding: 8px 10px; overflow: hidden; border: 1px solid var(--panel-border); border-radius: 10px; background: var(--panel-card); color: inherit; text-align: left; }
 .program-card:hover, .program-card:focus-visible { border-color: rgba(196,236,255,.6); }
 .program-card.is-active { z-index: 2; border-color: var(--panel-border-strong); background: var(--panel-card-active); box-shadow: var(--panel-card-glow); transform: scale(1.015); }
-.program-card.standby { grid-column: 1 / -1; }
+.program-card.standby { right: 0; left: 0; }
 .program-tag { overflow: hidden; color: var(--text-soft); font-size: .55rem; letter-spacing: .22em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .program-title { overflow: hidden; font-size: .9rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .qr-card { position: absolute; right: 16px; bottom: 12px; z-index: 4; width: 145px; padding: 9px; border: 1px solid var(--panel-border-strong); border-radius: 12px; background: rgba(10,18,34,.92); box-shadow: 0 12px 32px rgba(0,0,0,.4); }

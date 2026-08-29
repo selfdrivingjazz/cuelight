@@ -258,6 +258,7 @@ type CableRevision struct {
 	BridgeProtocol    string            `json:"bridgeProtocol"`
 	Timezone          string            `json:"timezone"`
 	Theme             string            `json:"theme"`
+	GuideDensity      string            `json:"guideDensity"`
 	Window            RevisionWindow    `json:"window"`
 	Channels          []RevisionChannel `json:"channels"`
 	ArtifactDigests   []string          `json:"artifactDigests"`
@@ -383,6 +384,18 @@ func NormalizeTheme(theme string) (string, error) {
 		return theme, nil
 	default:
 		return "", &ValidationError{"theme", "must be one of nebula, gallery, or noir"}
+	}
+}
+func NormalizeGuideDensity(density string) (string, error) {
+	density = strings.ToLower(strings.TrimSpace(density))
+	if density == "" {
+		return "half-hour", nil
+	}
+	switch density {
+	case "quarter-hour", "half-hour", "hour":
+		return density, nil
+	default:
+		return "", &ValidationError{"guideDensity", "must be one of quarter-hour, half-hour, or hour"}
 	}
 }
 

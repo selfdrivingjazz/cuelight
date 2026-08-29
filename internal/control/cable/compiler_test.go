@@ -124,6 +124,7 @@ func TestCompilerRejectsOverlapAndPublishRequiresVersion(t *testing.T) {
 		t.Fatalf("publish error=%v", e)
 	}
 }
+
 type blockCableRepo struct {
 	*fakeCableRepo
 	blocks    map[string][]Block
@@ -166,8 +167,8 @@ func TestCompilerMaterializesPlaylistWrapAndNextBlock(t *testing.T) {
 		{ID: "i2", PlaylistID: "pl", AssetID: "b", Position: 2, DurationSeconds: 180, Title: "B"},
 	}}}}
 	artifacts := fakeCableArtifacts{
-		"a": {{AssetID: "a", Digest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", MediaType: "video/mp4", State: "ready"}},
-		"b": {{AssetID: "b", Digest: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", MediaType: "video/mp4", State: "ready"}},
+		"a":      {{AssetID: "a", Digest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", MediaType: "video/mp4", State: "ready"}},
+		"b":      {{AssetID: "b", Digest: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", MediaType: "video/mp4", State: "ready"}},
 		"direct": {{AssetID: "direct", Digest: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", MediaType: "video/mp4", State: "ready"}},
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {{Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MediaType: "application/x-tar", State: "ready"}},
 	}
@@ -185,7 +186,7 @@ func TestCompilerMaterializesPlaylistWrapAndNextBlock(t *testing.T) {
 	if got, want := channel.Blocks[0].Items[2].EndsAt, now.Add(10*time.Minute); !got.Equal(want) {
 		t.Fatalf("playlist boundary ends at %s, want %s", got, want)
 	}
-	if got := channel.Programs[3].StartsAt; !got.Equal(now.Add(10*time.Minute)) {
+	if got := channel.Programs[3].StartsAt; !got.Equal(now.Add(10 * time.Minute)) {
 		t.Fatalf("next block starts at %s", got)
 	}
 	if !channel.Programs[3].Loop || !channel.Blocks[0].Loop {
@@ -218,5 +219,17 @@ func TestValidateBlockOrderUsesHalfOpenIntervals(t *testing.T) {
 	adjacent[1].StartsAt = at.Add(30 * time.Minute)
 	if err := validateBlockOrder(adjacent); !errors.Is(err, ErrOverlap) {
 		t.Fatalf("overlap error=%v", err)
+	}
+}
+
+func TestNormalizeGuideDensityDefaultsToHalfHour(t *testing.T) {
+	for input, want := range map[string]string{"": "half-hour", "quarter-hour": "quarter-hour", "half-hour": "half-hour", "hour": "hour"} {
+		got, err := NormalizeGuideDensity(input)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeGuideDensity(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := NormalizeGuideDensity("comfortable"); err == nil {
+		t.Fatal("legacy non-time density accepted")
 	}
 }
