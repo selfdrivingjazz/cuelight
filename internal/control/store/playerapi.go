@@ -48,7 +48,7 @@ func (s *Store) CurrentAssignment(ctx context.Context, nodeID string) (assignmen
 	}
 	return s.playerAssignment(ctx, s.q(ctx), `
 		SELECT id::text, node_id::text, release_id::text, release_digest, delivery_mode,
-		       desired_generation - 1, desired_generation, created_by::text
+		       desired_generation - 1, desired_generation, remote_input, show_qr, created_by::text
 		FROM assignments
 		WHERE node_id = $1
 		ORDER BY desired_generation DESC LIMIT 1`, nodeID)
@@ -107,7 +107,7 @@ func (s *Store) AssignedRelease(ctx context.Context, nodeID, releaseID string) (
 	}
 	return s.playerAssignment(ctx, s.q(ctx), `
 		SELECT id::text, node_id::text, release_id::text, release_digest, delivery_mode,
-		       desired_generation - 1, desired_generation, created_by::text
+		       desired_generation - 1, desired_generation, remote_input, show_qr, created_by::text
 		FROM assignments
 		WHERE node_id = $1 AND release_id = $2
 		ORDER BY desired_generation DESC LIMIT 1`, nodeID, releaseID)
@@ -126,7 +126,7 @@ func (s *Store) playerAssignment(ctx context.Context, q queryer, query string, a
 	var value assignment.Assignment
 	err := q.QueryRowContext(ctx, query, arguments...).Scan(
 		&value.ID, &value.NodeID, &value.ReleaseID, &value.ReleaseDigest,
-		&value.DeliveryMode, &value.ExpectedGeneration, &value.DesiredGeneration, &value.CreatedBy)
+		&value.DeliveryMode, &value.ExpectedGeneration, &value.DesiredGeneration, &value.RemoteInput, &value.ShowQR, &value.CreatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return assignment.Assignment{}, false, nil
 	}
