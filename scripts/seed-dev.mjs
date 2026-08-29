@@ -144,22 +144,22 @@ async function seed() {
     {
       number: 7, name: "Signal One", callsign: "SIG1", accent: "#5eead4",
       blocks: [
-        { source: { playlist: playlists[0] }, offsetMinutes: 0, durationMinutes: 90, title: "Signal One rotation" },
-        { source: { asset: assets[0] }, offsetMinutes: 90, durationMinutes: 30, title: "Signal One direct media" },
+        { source: { playlist: playlists[0] }, offsetMinutes: 0, durationMinutes: 180, title: "Signal One rotation" },
+        { source: { asset: assets[0] }, offsetMinutes: 180, durationMinutes: 120, title: "Signal One direct media" },
       ],
     },
     {
       number: 12, name: "Night Gallery", callsign: "NGHT", accent: "#c084fc",
       blocks: [
-        { source: { asset: assets[1] }, offsetMinutes: 0, durationMinutes: 45, title: "Night Gallery direct media" },
-        { source: { playlist: playlists[1] }, offsetMinutes: 45, durationMinutes: 75, title: "Night Gallery rotation" },
+        { source: { asset: assets[1] }, offsetMinutes: 0, durationMinutes: 90, title: "Night Gallery direct media" },
+        { source: { playlist: playlists[1] }, offsetMinutes: 90, durationMinutes: 210, title: "Night Gallery rotation" },
       ],
     },
     {
       number: 24, name: "Test Pattern", callsign: "TEST", accent: "#fbbf24",
       blocks: [
-        { source: { playlist: playlists[0] }, offsetMinutes: 0, durationMinutes: 120, title: "Test Pattern long rotation" },
-        { source: { asset: assets[2] }, offsetMinutes: 120, durationMinutes: 30, title: "Test Pattern direct media" },
+        { source: { playlist: playlists[0] }, offsetMinutes: 0, durationMinutes: 240, title: "Test Pattern long rotation" },
+        { source: { asset: assets[2] }, offsetMinutes: 240, durationMinutes: 120, title: "Test Pattern direct media" },
       ],
     },
   ];
