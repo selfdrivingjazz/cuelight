@@ -12,6 +12,27 @@ interface RuntimeContextValue {
 }
 
 const RuntimeContext = React.createContext<RuntimeContextValue | null>(null);
+interface RemoteEventBus {
+  handler?: (event: RemoteEvent) => void;
+  pending: RemoteEvent[];
+  delivering: boolean;
+  timer?: number;
+  drain(): void;
+}
+const RemoteEventContext = React.createContext<React.MutableRefObject<RemoteEventBus> | null>(null);
+
+function useRemoteEvents(handler: (event: RemoteEvent) => void) {
+  const bus = React.useContext(RemoteEventContext);
+  React.useLayoutEffect(() => {
+    if (!bus) return;
+    bus.current.handler = handler;
+    bus.current.drain();
+    return () => {
+      if (bus.current.handler === handler) bus.current.handler = undefined;
+    };
+  }, [bus, handler]);
+}
+
 
 export function useRuntime(): RuntimeContextValue {
   const context = React.useContext(RuntimeContext);
@@ -98,14 +119,65 @@ function occurrenceForState(state: RuntimeState): Occurrence | undefined {
 }
 
 function Shell() {
-  const { state } = useRuntime();
+  const { state, dispatch } = useRuntime();
+  const navigate = useNavigate();
   const presentation = presentationOf(state);
   const [showSplash, setShowSplash] = React.useState(true);
+  const remoteBus = React.useRef<RemoteEventBus>({ pending: [], delivering: false, drain: () => undefined });
+  const drainRemoteEvents = React.useCallback(() => {
+    const bus = remoteBus.current;
+    if (bus.delivering || !bus.handler) return;
+    const event = bus.pending.shift();
+    if (!event) return;
+    bus.delivering = true;
+    bus.handler(event);
+    bus.timer = window.setTimeout(() => {
+      bus.delivering = false;
+      bus.drain();
+    }, 75);
+  }, []);
+  remoteBus.current.drain = drainRemoteEvents;
+  const relayRemoteEvent = React.useCallback((event: RemoteEvent) => {
+    if (event.type === "key" && presentation) {
+      if (event.key === "Guide") {
+        dispatch({ type: "BACK_TO_GUIDE" });
+        void navigate({ to: "/" });
+        return;
+      }
+      const channels = presentation.channels.filter((channel) => channel.enabled);
+      let target = event.key?.startsWith("ChannelNumber:")
+        ? channels.find((channel) => channel.number === Number(event.key?.slice("ChannelNumber:".length)))
+        : undefined;
+      if (!target && (event.key === "ChannelUp" || event.key === "ChannelDown") && channels.length > 0) {
+        const current = occurrenceForState(state);
+        const selectedId = state.kind === "ready" || state.kind === "stale-offline" ? state.selectedId : null;
+        const currentId = current?.channelId ?? selectedId ?? channels[0]?.id;
+        const index = Math.max(0, channels.findIndex((channel) => channel.id === currentId));
+        const delta = event.key === "ChannelUp" ? -1 : 1;
+        target = channels[(index + delta + channels.length) % channels.length];
+      }
+      if (target) {
+        const now = Date.now();
+        const occurrence = presentation.occurrences.find((candidate) => candidate.channelId === target.id && new Date(candidate.startsAt).getTime() <= now && now < new Date(candidate.endsAt).getTime());
+        if (occurrence) {
+          dispatch({ type: "TUNE_LIVE", occurrence });
+          void navigate({ to: "/player" });
+        }
+        return;
+      }
+    }
+    remoteBus.current.pending.push(event);
+    remoteBus.current.drain();
+  }, [dispatch, navigate, presentation, state]);
+  useRemoteInput(presentation?.remote?.url, relayRemoteEvent);
   React.useEffect(() => {
     const timer = window.setTimeout(() => setShowSplash(false), 4_700);
     return () => window.clearTimeout(timer);
   }, []);
-  return <div className={`legacy-root theme-${presentation?.theme ?? "nebula"}`} data-runtime-state={state.kind}><Outlet /><SplashScreen active={showSplash} /></div>;
+  React.useEffect(() => () => {
+    if (remoteBus.current.timer) window.clearTimeout(remoteBus.current.timer);
+  }, []);
+  return <RemoteEventContext.Provider value={remoteBus}><div className={`legacy-root theme-${presentation?.theme ?? "nebula"}`} data-runtime-state={state.kind}><Outlet /><SplashScreen active={showSplash} /></div></RemoteEventContext.Provider>;
 }
 
 function SyncState() {
@@ -178,7 +250,7 @@ function GuidePage() {
       if (channel) tuneChannel(channel.id);
     }
   }, [presentation, selectChannel, selectedId, tuneChannel]);
-  useRemoteInput(presentation?.remote?.url, remoteEvent);
+  useRemoteEvents(remoteEvent);
   if (state.kind === "boot" || state.kind === "revision-loading") return <SyncState />;
   if (state.kind === "error") return <ErrorState onRetry={() => dispatch({ type: "RETRY_REVISION" })} />;
   if (state.kind === "empty-lineup") return <EmptyState />;
@@ -274,7 +346,7 @@ function PlayerSurface({ occurrence, presentation, opening = false, onReady, onF
       else video.current.pause();
     }
   }, [onBack, onChannel]);
-  useRemoteInput(presentation.remote?.url, handleRemote);
+  useRemoteEvents(handleRemote);
   const media = occurrence.media.kind === "video"
     ? <video ref={video} className="player-content-media" src={occurrence.media.reference} autoPlay playsInline loop={occurrence.loop ?? false} muted={muted} onCanPlay={onReady} onError={onFailure} />
     : <img className="player-content-media" src={occurrence.media.reference} alt={occurrence.title} onLoad={onReady} onError={onFailure} />;

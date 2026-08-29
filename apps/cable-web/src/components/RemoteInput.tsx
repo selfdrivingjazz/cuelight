@@ -53,7 +53,7 @@ export function useRemoteInput(remoteURL: string | undefined, onEvent: (event: R
           }
           for (const event of page.events ?? []) {
             handler.current(event);
-            await delay(32);
+            await delay(75);
           }
         } catch {
           if (!controller.signal.aborted) await delay(1_000);

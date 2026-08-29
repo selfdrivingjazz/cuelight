@@ -62,6 +62,32 @@ test("viewer can tune channels with the legacy grid controls", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Night archive" })).toBeVisible();
 });
 
+test("rapid remote route changes are processed once and in order", async ({ page }) => {
+  const live = livePresentation();
+  const presentation = {
+    ...live,
+    occurrences: live.occurrences.map((occurrence) => occurrence.channelId === "channel-1" ? { ...occurrence, media: { kind: "image" as const, reference: occurrence.media.reference, mime: "image/png" as const } } : occurrence),
+    remote: { url: "https://control.example/remote/session#token=secret", showQr: false, expiresAt: new Date(Date.now() + 60_000).toISOString() },
+  };
+  let polls = 0;
+  await page.route("**/bridge/v1/presentation", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(presentation) }));
+  await page.route("**/bridge/v1/ready", (route) => route.fulfill({ status: 204 }));
+  await page.route("**/bridge/v1/media/**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwH4QZGBgYGMAAAAD//wMAHikE/QAAAABJRU5ErkJggg==", "base64") }));
+  await page.route("**/bridge/v1/remote/events**", async (route) => {
+    polls += 1;
+    if (polls === 1) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [], nextSequence: 0 }) });
+    if (polls === 2) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [
+      { sequence: 1, type: "key", key: "ChannelDown" },
+      { sequence: 2, type: "key", key: "Guide" },
+      { sequence: 3, type: "key", key: "ChannelNumber:1" },
+    ], nextSequence: 3 }) });
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [], nextSequence: 3 }) });
+  });
+  await page.goto("/");
+  await expect(page).toHaveURL(/player/, { timeout: 6_000 });
+  await expect(page.getByRole("heading", { name: "Signal / Sea" })).toBeVisible();
+});
+
 test("viewer can retry a failed bridge load", async ({ page }) => {
   let attempts = 0;
   let readyCalls = 0;
