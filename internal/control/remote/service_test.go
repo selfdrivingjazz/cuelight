@@ -54,4 +54,14 @@ func TestSessionRequiresEnabledPolicyAndBoundedEvents(t *testing.T) {
 			t.Fatalf("accepted %#v", event)
 		}
 	}
+	for _, key := range []string{"ChannelUp", "ChannelDown", "Guide", "Info", "ChannelNumber:24"} {
+		if err := validateEvent(Event{Sequence: 1, Type: "key", Key: key}); err != nil {
+			t.Fatalf("rejected remote key %q: %v", key, err)
+		}
+	}
+	for _, key := range []string{"ChannelNumber:", "ChannelNumber:0", "ChannelNumber:1000"} {
+		if err := validateEvent(Event{Sequence: 1, Type: "key", Key: key}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("accepted invalid remote key %q", key)
+		}
+	}
 }

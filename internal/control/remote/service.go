@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -235,9 +236,13 @@ func validateEvent(event Event) error {
 	switch event.Type {
 	case "key":
 		switch event.Key {
-		case "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Backspace", "Tab", "VolumeUp", "VolumeDown", "Mute":
+		case "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Backspace", "Tab", "VolumeUp", "VolumeDown", "Mute", "ChannelUp", "ChannelDown", "Guide", "Info":
 		default:
-			return fmt.Errorf("%w: unsupported key", ErrInvalid)
+			const channelPrefix = "ChannelNumber:"
+			number, err := strconv.Atoi(strings.TrimPrefix(event.Key, channelPrefix))
+			if !strings.HasPrefix(event.Key, channelPrefix) || err != nil || number < 1 || number > 999 {
+				return fmt.Errorf("%w: unsupported key", ErrInvalid)
+			}
 		}
 	case "text":
 		if event.Text == "" || len([]rune(event.Text)) > 4096 {
