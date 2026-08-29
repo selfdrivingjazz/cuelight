@@ -44,6 +44,8 @@ type PutInput struct {
 	ReleaseDigest      string
 	DeliveryMode       string
 	ExpectedGeneration int64
+	RemoteInput        bool
+	ShowQR             bool
 }
 
 type Assignment struct {
@@ -54,6 +56,8 @@ type Assignment struct {
 	DeliveryMode       string
 	ExpectedGeneration int64
 	DesiredGeneration  int64
+	RemoteInput        bool
+	ShowQR             bool
 	CreatedBy          string
 }
 
@@ -180,6 +184,8 @@ func (s Service) Put(ctx context.Context, nodeID string, mutation Mutation, inpu
 			DeliveryMode:       input.DeliveryMode,
 			ExpectedGeneration: input.ExpectedGeneration,
 			DesiredGeneration:  currentGeneration + 1,
+			RemoteInput:        input.RemoteInput,
+			ShowQR:             input.ShowQR,
 			CreatedBy:          mutation.ActorID,
 		}
 		if err := tx.InsertAssignment(created); err != nil {
@@ -257,6 +263,9 @@ func validateInput(nodeID string, input PutInput) error {
 	}
 	if input.DeliveryMode != DeliveryStream && input.DeliveryMode != DeliveryCacheThenPlay {
 		return fmt.Errorf("%w: %q", ErrDeliveryMode, input.DeliveryMode)
+	}
+	if input.ShowQR && !input.RemoteInput {
+		return fmt.Errorf("%w: QR requires remote input", ErrInvalidAssignment)
 	}
 	return nil
 }

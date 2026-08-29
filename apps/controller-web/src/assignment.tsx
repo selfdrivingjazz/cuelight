@@ -45,6 +45,8 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
   const [nodeId, setNodeId] = React.useState(fixedNodeId ?? "");
   const [kind, setKind] = React.useState<SourceKind>(fixedAsset ? "media" : fixedReleaseId ? "release" : "media");
   const [sourceId, setSourceId] = React.useState(fixedAsset?.id ?? fixedReleaseId ?? "");
+  const [remoteInput, setRemoteInput] = React.useState(false);
+  const [showQR, setShowQR] = React.useState(false);
   React.useEffect(() => { if (fixedNodeId) setNodeId(fixedNodeId); }, [fixedNodeId]);
   React.useEffect(() => {
     if (fixedAsset) { setKind("media"); setSourceId(fixedAsset.id); }
@@ -71,7 +73,7 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
       }
       return readApiResult(await api.PUT("/nodes/{nodeId}/assignment", {
         params: { path: { nodeId }, header: { "If-Match": "*", "Idempotency-Key": crypto.randomUUID() } },
-        body: { releaseId: selectedRelease.id, releaseDigest: selectedRelease.digest, deliveryMode, expectedGeneration: node.desiredGeneration ?? 0 },
+        body: { releaseId: selectedRelease.id, releaseDigest: selectedRelease.digest, deliveryMode, expectedGeneration: node.desiredGeneration ?? 0, remoteInput, showQr: remoteInput && showQR },
       }));
     },
     onSuccess: () => {
@@ -91,6 +93,10 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
     {!fixedAsset && !fixedReleaseId && <label className="block text-sm font-medium">{kind === "media" ? "Media" : "Cable TV profile"}<select aria-label={kind === "media" ? "Media" : "Cable TV profile"} className={selectClass} value={sourceId} onChange={(event) => setSourceId(event.currentTarget.value)} disabled={pending}><option value="">Choose {kind === "media" ? "media" : "a Cable profile"}</option>{options.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
     {fixedAsset && <p className="text-sm text-muted-foreground">Media: <strong className="text-foreground">{fixedAsset.name}</strong></p>}
     {fixedReleaseId && <p className="break-all text-sm text-muted-foreground">Release: <strong className="font-mono text-foreground">{fixedReleaseId}</strong></p>}
+    <div className="grid gap-2 rounded-md border border-border p-3">
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={remoteInput} onChange={(event) => { setRemoteInput(event.currentTarget.checked); if (!event.currentTarget.checked) setShowQR(false); }} />Allow remote input for this node assignment</label>
+      <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={showQR} disabled={!remoteInput} onChange={(event) => setShowQR(event.currentTarget.checked)} />Show remote QR on Cable</label>
+    </div>
     {mutation.error instanceof Error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
     {mutation.isSuccess && <p role="status" className="text-sm text-status-success">Assignment advanced to generation {mutation.data.desiredGeneration}.</p>}
     <Button onClick={() => mutation.mutate()} disabled={pending || mutation.isPending || !nodeId || !sourceId}>{mutation.isPending ? "Assigning…" : "Assign to node"}</Button>

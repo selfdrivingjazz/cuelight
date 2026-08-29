@@ -29,6 +29,7 @@ import (
 	"github.com/jmill/cable/internal/control/pki"
 	"github.com/jmill/cable/internal/control/playerapi"
 	controlrelease "github.com/jmill/cable/internal/control/release"
+	"github.com/jmill/cable/internal/control/remote"
 	"github.com/jmill/cable/internal/control/store"
 	"github.com/jmill/cable/internal/media/localcas"
 	playerclient "github.com/jmill/cable/internal/player/client"
@@ -112,6 +113,7 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	}
 	playerService, err := playerapi.NewService(repository, repository, store.NewLocalCASReader(cas), playerapi.Limits{MaxBodyBytes: config.MaxBodyBytes, MaxEvents: config.MaxEvents, MaxWait: config.MaxWait})
 
+	remoteService := &remote.Service{Policies: repository, PublicURL: config.PublicURL, TTL: 12 * time.Hour}
 	operatorRepository := store.NewOperatorAdapter(repository)
 	operator := operatorapi.NewHandler(operatorapi.Dependencies{
 		Auth:            authService,
@@ -139,6 +141,10 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	api.Handle("/player/recover", pkiHandler)
 	api.Handle("/player/credentials:rotate", pkiHandler)
 	api.Handle("/player/credentials/rotate", pkiHandler)
+	remoteHandler := remote.NewHandler(remoteService)
+	api.Handle("/player/remote-sessions", remoteHandler)
+	api.Handle("/player/remote-sessions/", remoteHandler)
+	api.Handle("/remote/", remoteHandler)
 	playerHandler := playerapi.NewHandler(playerService)
 	api.Handle("/player/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerHandler.ServeHTTP(w, r)

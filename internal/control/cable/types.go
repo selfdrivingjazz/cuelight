@@ -15,7 +15,7 @@ var (
 	ErrNotFound            = errors.New("cable resource not found")
 	ErrConflict            = errors.New("cable resource version conflict")
 	ErrInvalidArgument     = errors.New("invalid cable argument")
-	ErrOverlap             = errors.New("program entries overlap")
+	ErrOverlap             = errors.New("scheduled blocks overlap")
 	ErrArtifactUnavailable = errors.New("cable artifact unavailable")
 	ErrArtifactMissing     = ErrArtifactUnavailable
 	ErrArtifactQuarantined = ErrArtifactUnavailable
@@ -114,6 +114,8 @@ type Channel struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
+// ProgramEntry is retained as an internal materialized projection for older
+// repository implementations. Authored schedules are represented by blocks.
 type ProgramEntry struct {
 	ID                 string    `json:"id"`
 	ChannelID          string    `json:"channelId"`
@@ -158,7 +160,8 @@ type PlaylistItem struct {
 type Block struct {
 	ID         string    `json:"id"`
 	ChannelID  string    `json:"channelId"`
-	PlaylistID string    `json:"playlistId"`
+	PlaylistID string    `json:"playlistId,omitempty"`
+	AssetID    string    `json:"assetId,omitempty"`
 	Title      string    `json:"title"`
 	StartsAt   time.Time `json:"startsAt"`
 	EndsAt     time.Time `json:"endsAt"`
@@ -207,10 +210,25 @@ type RevisionChannel struct {
 	ArtworkDigest string            `json:"artworkDigest,omitempty"`
 	Enabled       bool              `json:"enabled"`
 	Standby       bool              `json:"standby"`
+	Blocks        []RevisionBlock   `json:"blocks"`
 	Programs      []RevisionProgram `json:"programs"`
+}
+type RevisionBlock struct {
+	ID         string            `json:"id"`
+	StartsAt   time.Time         `json:"startsAt"`
+	EndsAt     time.Time         `json:"endsAt"`
+	PlaylistID string            `json:"playlistId,omitempty"`
+	AssetID    string            `json:"assetId,omitempty"`
+	Title      string            `json:"title,omitempty"`
+	Loop       bool              `json:"loop"`
+	Items      []RevisionProgram `json:"items"`
 }
 type RevisionProgram struct {
 	ID                 string    `json:"id"`
+	BlockID            string    `json:"blockId,omitempty"`
+	ItemID             string    `json:"itemId,omitempty"`
+	ItemPosition       int       `json:"itemPosition,omitempty"`
+	Occurrence         int       `json:"occurrence,omitempty"`
 	StartsAt           time.Time `json:"startsAt"`
 	EndsAt             time.Time `json:"endsAt"`
 	AssetID            string    `json:"assetId"`
@@ -256,7 +274,6 @@ type CableRevision struct {
 type RevisionArtifactStore interface {
 	PutRevisionArtifact(context.Context, string, []byte) error
 }
-
 type DeploymentInput struct {
 	Name, Timezone, Theme             string
 	GuideHorizonSeconds               int64
@@ -293,8 +310,8 @@ type PlaylistItemInput struct {
 	DurationSeconds          int
 }
 type BlockInput struct {
-	ChannelID, PlaylistID, Title string
-	StartsAt                     time.Time
+	ChannelID, PlaylistID, AssetID, Title string
+	StartsAt, EndsAt                      time.Time
 }
 type ProfileInput struct {
 	Name, Description, DeploymentID, ShellBuildID, ReleaseID string
@@ -472,6 +489,19 @@ func ValidateProgram(p ProgramInput) error {
 	}
 	if _, err := NormalizeAvailabilityPolicy(p.AvailabilityPolicy); err != nil {
 		return err
+	}
+	return nil
+}
+
+func ValidateBlock(b BlockInput) error {
+	if b.ChannelID == "" {
+		return &ValidationError{"channelId", "is required"}
+	}
+	if (strings.TrimSpace(b.PlaylistID) == "") == (strings.TrimSpace(b.AssetID) == "") {
+		return &ValidationError{"source", "must contain exactly one playlist or asset"}
+	}
+	if b.StartsAt.IsZero() || b.EndsAt.IsZero() || !b.EndsAt.After(b.StartsAt) {
+		return &ValidationError{"time", "endsAt must be after startsAt"}
 	}
 	return nil
 }

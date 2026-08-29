@@ -267,6 +267,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, assignment playerclient.Assi
 	if err != nil {
 		return r.fail(ctx, generation, "materialize release", err)
 	}
+	if assignment.RemoteInput && candidate.Kind == release.PresentationCable {
+		remoteController, ok := r.deps.Controller.(RemoteController)
+		if !ok {
+			return r.fail(ctx, generation, "create remote session", errors.New("controller does not support remote input"))
+		}
+		session, sessionErr := remoteController.CreateRemoteSession(ctx, assignment.DesiredGeneration)
+		if sessionErr != nil {
+			return r.fail(ctx, generation, "create remote session", sessionErr)
+		}
+		candidate.Remote = &renderer.RemoteDescriptor{SessionID: session.ID, URL: session.RemoteURL, ShowQR: session.ShowQR, ExpiresAt: session.ExpiresAt}
+	}
 	keepSource := false
 	defer func() {
 		if !keepSource && revoke != nil {

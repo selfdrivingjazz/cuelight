@@ -9,7 +9,9 @@ const apiProxy: ProxyOptions | undefined = controllerProxy ? {
   secure: false,
   configure(proxy) {
     if (!controllerToken) return;
-    proxy.on("proxyReq", (request) => request.setHeader("Authorization", `Bearer ${controllerToken}`));
+    proxy.on("proxyReq", (request) => {
+      if (!request.path.startsWith("/api/v1/remote/")) request.setHeader("Authorization", `Bearer ${controllerToken}`);
+    });
   },
 } : undefined;
 export default defineConfig({

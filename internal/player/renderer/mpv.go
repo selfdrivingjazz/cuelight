@@ -13,6 +13,13 @@ import (
 	"github.com/jmill/cable/internal/release"
 )
 
+type RemoteDescriptor struct {
+	SessionID string
+	URL       string
+	ShowQR    bool
+	ExpiresAt time.Time
+}
+
 type Candidate struct {
 	Kind                release.PresentationKind
 	ReleaseDigest       string
@@ -36,6 +43,7 @@ type Candidate struct {
 	ShellPath              string
 	RevisionPath           string
 	ArtifactPaths          map[string]string
+	Remote                 *RemoteDescriptor
 }
 
 func sameCandidate(a, b Candidate) bool { return reflect.DeepEqual(a, b) }

@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type Compiler struct {
 	Repository        Repository
+	Programming       ProgrammingRepository
 	Artifacts         ArtifactRepository
 	Builds            ShellBuildRepository
 	Authorizer        Authorizer
@@ -132,21 +134,12 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 		}
 		closure[digest] = struct{}{}
 	}
+	programming := c.Programming
+	if programming == nil {
+		programming, _ = c.Repository.(ProgrammingRepository)
+	}
 	for _, ch := range channels {
-		entries, e := c.allPrograms(ctx, ch.ID)
-		if e != nil {
-			return CableRevision{}, e
-		}
-		sort.Slice(entries, func(i, j int) bool {
-			if entries[i].StartsAt.Equal(entries[j].StartsAt) {
-				return entries[i].ID < entries[j].ID
-			}
-			return entries[i].StartsAt.Before(entries[j].StartsAt)
-		})
-		if err := validateNoOverlap(entries); err != nil {
-			return CableRevision{}, fmt.Errorf("channel %s: %w", ch.ID, err)
-		}
-		rc := RevisionChannel{ID: ch.ID, Number: ch.Number, Name: ch.Name, Callsign: ch.Callsign, Description: ch.Description, Accent: ch.Accent, Enabled: ch.Enabled, Standby: ch.Standby, Programs: make([]RevisionProgram, 0, len(entries))}
+		rc := RevisionChannel{ID: ch.ID, Number: ch.Number, Name: ch.Name, Callsign: ch.Callsign, Description: ch.Description, Accent: ch.Accent, Enabled: ch.Enabled, Standby: ch.Standby, Blocks: []RevisionBlock{}, Programs: []RevisionProgram{}}
 		if ch.ArtworkAssetID != "" {
 			a, e := c.artifact(ctx, ch.ArtworkAssetID)
 			if e != nil {
@@ -155,45 +148,57 @@ func (c Compiler) Compile(ctx context.Context, actor, deploymentID, shellBuildID
 			rc.ArtworkDigest = a.Digest
 			closure[a.Digest] = struct{}{}
 		}
-		for _, p := range entries {
-			fit := p.Fit
-			if fit == "" {
-				fit = "fit"
-			}
-			placard := p.PlacardPolicy
-			if placard == "" {
-				placard = "default"
-			}
-			placard, e = NormalizePlacardPolicy(placard)
-			if e != nil {
-				return CableRevision{}, fmt.Errorf("program %s: %w", p.ID, e)
-			}
-			availability := p.AvailabilityPolicy
-			if availability == "" {
-				availability = "fail"
-			}
-			availability, e = NormalizeAvailabilityPolicy(availability)
-			if e != nil {
-				return CableRevision{}, fmt.Errorf("program %s: %w", p.ID, e)
-			}
-			if p.EndsAt.Before(window.StartsAt) || p.StartsAt.After(window.EndsAt) {
-				continue
-			}
-			a, e := c.artifact(ctx, p.AssetID)
+		// Program entries are only a compatibility projection for repositories
+		// that predate canonical blocks; Store implements ProgrammingRepository.
+		if programming == nil {
+			entries, e := c.allPrograms(ctx, ch.ID)
 			if e != nil {
 				return CableRevision{}, e
 			}
-			closure[a.Digest] = struct{}{}
-			rp := RevisionProgram{ID: p.ID, StartsAt: p.StartsAt.UTC(), EndsAt: p.EndsAt.UTC(), AssetID: p.AssetID, ArtifactDigest: a.Digest, MediaType: a.MediaType, Title: p.Title, Subtitle: p.Subtitle, Tag: p.Tag, Artist: p.Artist, Description: p.Description, Fit: fit, PlacardPolicy: placard, AvailabilityPolicy: availability, Loop: p.Loop, Mute: p.Mute, Volume: p.Volume}
-			if p.ArtworkAssetID != "" {
-				art, e := c.artifact(ctx, p.ArtworkAssetID)
+			sort.Slice(entries, func(i, j int) bool {
+				if entries[i].StartsAt.Equal(entries[j].StartsAt) {
+					return entries[i].ID < entries[j].ID
+				}
+				return entries[i].StartsAt.Before(entries[j].StartsAt)
+			})
+			if err := validateNoOverlap(entries); err != nil {
+				return CableRevision{}, fmt.Errorf("channel %s: %w", ch.ID, err)
+			}
+			for _, p := range entries {
+				if p.EndsAt.Before(window.StartsAt) || p.StartsAt.After(window.EndsAt) {
+					continue
+				}
+				rp, e := c.compileProgram(ctx, p, p.ID, "", 0, false, &closure)
 				if e != nil {
 					return CableRevision{}, e
 				}
-				rp.ArtworkDigest = art.Digest
-				closure[art.Digest] = struct{}{}
+				rc.Programs = append(rc.Programs, rp)
 			}
-			rc.Programs = append(rc.Programs, rp)
+		} else {
+			blocks, e := c.allBlocks(ctx, programming, ch.ID)
+			if e != nil {
+				return CableRevision{}, e
+			}
+			sort.Slice(blocks, func(i, j int) bool {
+				if blocks[i].StartsAt.Equal(blocks[j].StartsAt) {
+					return blocks[i].ID < blocks[j].ID
+				}
+				return blocks[i].StartsAt.Before(blocks[j].StartsAt)
+			})
+			if err := validateBlockOrder(blocks); err != nil {
+				return CableRevision{}, fmt.Errorf("channel %s: %w", ch.ID, err)
+			}
+			for _, block := range blocks {
+				if !block.EndsAt.After(window.StartsAt) || !block.StartsAt.Before(window.EndsAt) {
+					continue
+				}
+				rb, e := c.compileBlock(ctx, programming, block, window, &closure)
+				if e != nil {
+					return CableRevision{}, e
+				}
+				rc.Blocks = append(rc.Blocks, rb)
+				rc.Programs = append(rc.Programs, rb.Items...)
+			}
 		}
 		result.Channels = append(result.Channels, rc)
 	}
@@ -230,6 +235,125 @@ type revisionPayload struct {
 	Channels          []RevisionChannel `json:"channels"`
 	ArtifactDigests   []string          `json:"artifactDigests"`
 }
+func (c Compiler) compileBlock(ctx context.Context, programming ProgrammingRepository, block Block, window RevisionWindow, closure *map[string]struct{}) (RevisionBlock, error) {
+	if block.ID == "" || block.StartsAt.IsZero() || block.EndsAt.IsZero() || !block.EndsAt.After(block.StartsAt) {
+		return RevisionBlock{}, &ValidationError{"block.time", "endsAt must be after startsAt"}
+	}
+	if (block.PlaylistID == "") == (block.AssetID == "") {
+		return RevisionBlock{}, &ValidationError{"block.source", "must contain exactly one playlist or asset"}
+	}
+	result := RevisionBlock{ID: block.ID, StartsAt: block.StartsAt.UTC(), EndsAt: block.EndsAt.UTC(), PlaylistID: block.PlaylistID, AssetID: block.AssetID, Title: block.Title, Loop: true, Items: []RevisionProgram{}}
+	if block.AssetID != "" {
+		p := ProgramEntry{ID: block.ID, ChannelID: block.ChannelID, AssetID: block.AssetID, StartsAt: block.StartsAt, EndsAt: block.EndsAt, Title: block.Title, Fit: "fill", PlacardPolicy: "start", AvailabilityPolicy: "fail", Loop: true, Volume: 1}
+		rp, err := c.compileProgram(ctx, p, block.ID, block.ID, 0, true, closure)
+		if err != nil {
+			return RevisionBlock{}, err
+		}
+		result.Items = append(result.Items, rp)
+		return result, nil
+	}
+	playlist, err := programming.Playlist(ctx, block.PlaylistID)
+	if err != nil {
+		return RevisionBlock{}, err
+	}
+	if len(playlist.Items) == 0 {
+		return RevisionBlock{}, &ValidationError{"block.playlistId", "playlist must contain at least one item"}
+	}
+	items := append([]PlaylistItem(nil), playlist.Items...)
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position != items[j].Position {
+			return items[i].Position < items[j].Position
+		}
+		return items[i].ID < items[j].ID
+	})
+	for i, item := range items {
+		if item.ID == "" || item.AssetID == "" || item.Position <= 0 || item.DurationSeconds <= 0 || (i > 0 && item.Position == items[i-1].Position) {
+			return RevisionBlock{}, &ValidationError{"playlist.items", "items must have unique positive positions, assets, and durations"}
+		}
+	}
+	cursor := block.StartsAt.UTC()
+	occurrence := 0
+	for cursor.Before(block.EndsAt.UTC()) {
+		item := items[occurrence%len(items)]
+		itemEnd := cursor.Add(time.Duration(item.DurationSeconds) * time.Second)
+		if itemEnd.After(block.EndsAt.UTC()) {
+			itemEnd = block.EndsAt.UTC()
+		}
+		occurrence++
+		if itemEnd.After(window.StartsAt) && cursor.Before(window.EndsAt) {
+			p := ProgramEntry{ID: item.ID, ChannelID: block.ChannelID, AssetID: item.AssetID, StartsAt: cursor, EndsAt: itemEnd, Title: item.Title, Subtitle: item.Subtitle, Fit: "fill", PlacardPolicy: "start", AvailabilityPolicy: "fail", Loop: true, Volume: 1}
+			id := block.ID + ":" + strconv.Itoa(occurrence)
+			rp, e := c.compileProgram(ctx, p, id, block.ID, item.Position, true, closure)
+			if e != nil {
+				return RevisionBlock{}, e
+			}
+			rp.ItemID = item.ID
+			rp.Occurrence = occurrence
+			result.Items = append(result.Items, rp)
+		}
+		cursor = itemEnd
+	}
+	return result, nil
+}
+
+func (c Compiler) compileProgram(ctx context.Context, p ProgramEntry, id, blockID string, itemPosition int, loop bool, closure *map[string]struct{}) (RevisionProgram, error) {
+	fit := p.Fit
+	if fit == "" {
+		fit = "fit"
+	}
+	placard := p.PlacardPolicy
+	if placard == "" {
+		placard = "default"
+	}
+	var err error
+	placard, err = NormalizePlacardPolicy(placard)
+	if err != nil {
+		return RevisionProgram{}, fmt.Errorf("program %s: %w", p.ID, err)
+	}
+	availability := p.AvailabilityPolicy
+	if availability == "" {
+		availability = "fail"
+	}
+	availability, err = NormalizeAvailabilityPolicy(availability)
+	if err != nil {
+		return RevisionProgram{}, fmt.Errorf("program %s: %w", p.ID, err)
+	}
+	a, err := c.artifact(ctx, p.AssetID)
+	if err != nil {
+		return RevisionProgram{}, err
+	}
+	(*closure)[a.Digest] = struct{}{}
+	rp := RevisionProgram{ID: id, BlockID: blockID, ItemPosition: itemPosition, StartsAt: p.StartsAt.UTC(), EndsAt: p.EndsAt.UTC(), AssetID: p.AssetID, ArtifactDigest: a.Digest, MediaType: a.MediaType, Title: p.Title, Subtitle: p.Subtitle, Tag: p.Tag, Artist: p.Artist, Description: p.Description, Fit: fit, PlacardPolicy: placard, AvailabilityPolicy: availability, Loop: loop || p.Loop, Mute: p.Mute, Volume: p.Volume}
+	if p.ArtworkAssetID != "" {
+		art, e := c.artifact(ctx, p.ArtworkAssetID)
+		if e != nil {
+			return RevisionProgram{}, e
+		}
+		rp.ArtworkDigest = art.Digest
+		(*closure)[art.Digest] = struct{}{}
+	}
+	return rp, nil
+}
+
+func (c Compiler) allBlocks(ctx context.Context, programming ProgrammingRepository, id string) ([]Block, error) {
+	var out []Block
+	cursor := ""
+	for {
+		p, e := programming.ListBlocks(ctx, id, cursor, 100)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, p.Items...)
+		if !p.Page.HasMore {
+			return out, nil
+		}
+		if p.Page.NextCursor == "" {
+			return nil, errors.New("cable block pagination cursor missing")
+		}
+		cursor = p.Page.NextCursor
+	}
+}
+
 
 func (c Compiler) allChannels(ctx context.Context, id string) ([]Channel, error) {
 	var out []Channel
@@ -330,6 +454,23 @@ func validateNoOverlap(ps []ProgramEntry) error {
 			continue
 		}
 		return fmt.Errorf("%w: %s overlaps %s", ErrOverlap, ps[i-1].ID, ps[i].ID)
+	}
+	return nil
+}
+func validateBlockOrder(blocks []Block) error {
+	for i, block := range blocks {
+		if block.ID == "" {
+			return &ValidationError{"block.id", "is required"}
+		}
+		if block.StartsAt.IsZero() || block.EndsAt.IsZero() || !block.EndsAt.After(block.StartsAt) {
+			return &ValidationError{"block.time", "endsAt must be after startsAt"}
+		}
+		if (block.PlaylistID == "") == (block.AssetID == "") {
+			return &ValidationError{"block.source", "must contain exactly one playlist or asset"}
+		}
+		if i > 0 && block.StartsAt.Before(blocks[i-1].EndsAt) {
+			return fmt.Errorf("%w: %s overlaps %s", ErrOverlap, blocks[i-1].ID, block.ID)
+		}
 	}
 	return nil
 }

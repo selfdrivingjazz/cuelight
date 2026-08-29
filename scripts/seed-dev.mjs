@@ -141,9 +141,27 @@ async function seed() {
   }
 
   const channelSpecs = [
-    { number: 7, name: "Signal One", callsign: "SIG1", accent: "#5eead4", playlist: playlists[0] },
-    { number: 12, name: "Night Gallery", callsign: "NGHT", accent: "#c084fc", playlist: playlists[1] },
-    { number: 24, name: "Test Pattern", callsign: "TEST", accent: "#fbbf24", playlist: playlists[0] },
+    {
+      number: 7, name: "Signal One", callsign: "SIG1", accent: "#5eead4",
+      blocks: [
+        { source: { playlist: playlists[0] }, offsetMinutes: 0, durationMinutes: 90, title: "Signal One rotation" },
+        { source: { asset: assets[0] }, offsetMinutes: 90, durationMinutes: 30, title: "Signal One direct media" },
+      ],
+    },
+    {
+      number: 12, name: "Night Gallery", callsign: "NGHT", accent: "#c084fc",
+      blocks: [
+        { source: { asset: assets[1] }, offsetMinutes: 0, durationMinutes: 45, title: "Night Gallery direct media" },
+        { source: { playlist: playlists[1] }, offsetMinutes: 45, durationMinutes: 75, title: "Night Gallery rotation" },
+      ],
+    },
+    {
+      number: 24, name: "Test Pattern", callsign: "TEST", accent: "#fbbf24",
+      blocks: [
+        { source: { playlist: playlists[0] }, offsetMinutes: 0, durationMinutes: 120, title: "Test Pattern long rotation" },
+        { source: { asset: assets[2] }, offsetMinutes: 120, durationMinutes: 30, title: "Test Pattern direct media" },
+      ],
+    },
   ];
   const channelPage = await list(`/cable/deployments/${deployment.id}/channels`);
   const blockStart = new Date();
@@ -159,11 +177,19 @@ async function seed() {
     });
     channels.push(channel);
     const existingBlocks = await list(`/cable/channels/${channel.id}/blocks`);
-    const title = `${spec.name} ${blockDate}`;
-    blocks.push(existingBlocks.items.find((item) => item.title === title) ?? await request(`/cable/channels/${channel.id}/blocks`, {
-      method: "POST", headers: { "Idempotency-Key": `seed-block-${spec.number}-${blockDate}` },
-      body: { playlistId: spec.playlist.id, startsAt: blockStart.toISOString(), title },
-    }));
+    for (const blockSpec of spec.blocks) {
+      const startsAt = new Date(blockStart.getTime() + blockSpec.offsetMinutes * 60_000);
+      const endsAt = new Date(startsAt.getTime() + blockSpec.durationMinutes * 60_000);
+      const title = `${blockSpec.title} ${blockDate}`;
+      const body = {
+        startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), title,
+        playlistId: blockSpec.source.playlist?.id, assetId: blockSpec.source.asset?.id,
+      };
+      blocks.push(existingBlocks.items.find((item) => item.title === title) ?? await request(`/cable/channels/${channel.id}/blocks`, {
+        method: "POST", headers: { "Idempotency-Key": `seed-block-${spec.number}-${blockSpec.offsetMinutes}-${blockDate}` },
+        body,
+      }));
+    }
   }
 
   const window = {

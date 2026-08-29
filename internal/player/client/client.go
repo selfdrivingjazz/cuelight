@@ -182,6 +182,38 @@ func (c *Client) GetAssignment(ctx context.Context, etag string, wait time.Durat
 	}
 	return AssignmentResult{Assignment: assignment, ETag: responseETag}, nil
 }
+func (c *Client) CreateRemoteSession(ctx context.Context, desiredGeneration int64) (RemoteSession, error) {
+	if desiredGeneration <= 0 {
+		return RemoteSession{}, errors.New("desired generation is required")
+	}
+	var session RemoteSession
+	err := c.jsonOperation(ctx, http.MethodPost, "/player/remote-sessions", nil, map[string]int64{"desiredGeneration": desiredGeneration}, "", []int{http.StatusCreated}, &session, 0)
+	return session, err
+}
+
+func (c *Client) PollRemoteEvents(ctx context.Context, sessionID string, after int64, wait time.Duration) (RemoteEventPage, error) {
+	if sessionID == "" || after < 0 || wait < 0 || wait > 30*time.Second || wait%time.Second != 0 {
+		return RemoteEventPage{}, errors.New("invalid remote event poll")
+	}
+	query := make(url.Values)
+	query.Set("after", strconv.FormatInt(after, 10))
+	query.Set("waitSeconds", strconv.Itoa(int(wait/time.Second)))
+	path := "/player/remote-sessions/" + url.PathEscape(sessionID) + "/events"
+	response, cancel, err := c.do(ctx, http.MethodGet, path, query, nil, nil, "", wait)
+	if err != nil {
+		return RemoteEventPage{}, err
+	}
+	defer cancel()
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return RemoteEventPage{}, responseError(response, http.MethodGet, path)
+	}
+	var page RemoteEventPage
+	if err := decodeJSON(response.Body, &page); err != nil {
+		return RemoteEventPage{}, err
+	}
+	return page, nil
+}
 
 func (c *Client) FetchRelease(ctx context.Context, releaseID string) (ReleaseEnvelope, error) {
 	if releaseID == "" {

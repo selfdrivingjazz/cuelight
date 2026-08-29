@@ -1178,6 +1178,74 @@ paths:
           headers:
             Content-Range: {schema: {type: string}}
         default: {$ref: "#/components/responses/Problem"}
+  /remote/sessions/{sessionId}/events:
+    parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema: {type: string, minLength: 20, maxLength: 64}
+    post:
+      tags: [remote]
+      operationId: postRemoteEvent
+      security: []
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          schema: {type: string, pattern: "^Bearer .+$"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RemoteEvent"}
+      responses:
+        "202": {description: Remote input accepted.}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/remote-sessions:
+    post:
+      tags: [player]
+      operationId: createPlayerRemoteSession
+      security: [{nodeMTLS: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [desiredGeneration]
+              properties:
+                desiredGeneration: {type: integer, format: int64, minimum: 1}
+      responses:
+        "201":
+          description: Short-lived remote session for the assigned node.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RemoteSession"}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/remote-sessions/{sessionId}/events:
+    parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema: {type: string, minLength: 20, maxLength: 64}
+    get:
+      tags: [player]
+      operationId: pollPlayerRemoteEvents
+      security: [{nodeMTLS: []}]
+      parameters:
+        - name: after
+          in: query
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+        - name: waitSeconds
+          in: query
+          schema: {type: integer, minimum: 0, maximum: 30, default: 0}
+      responses:
+        "200":
+          description: Ordered remote events newer than the supplied sequence.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RemoteEventPage"}
+        default: {$ref: "#/components/responses/Problem"}
 components:
   securitySchemes:
     operatorToken:
@@ -1437,19 +1505,28 @@ components:
     CableBlockInput:
       type: object
       additionalProperties: false
-      required: [playlistId, startsAt]
+      required: [startsAt, endsAt]
+      oneOf:
+        - required: [playlistId]
+        - required: [assetId]
       properties:
         playlistId: {$ref: "#/components/schemas/Id"}
+        assetId: {$ref: "#/components/schemas/Id"}
         startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
         title: {type: string}
     CableBlock:
       type: object
       additionalProperties: false
-      required: [id, channelId, playlistId, title, startsAt, endsAt, version, createdBy, createdAt]
+      required: [id, channelId, title, startsAt, endsAt, version, createdBy, createdAt]
+      oneOf:
+        - required: [playlistId]
+        - required: [assetId]
       properties:
         id: {$ref: "#/components/schemas/Id"}
         channelId: {$ref: "#/components/schemas/Id"}
         playlistId: {$ref: "#/components/schemas/Id"}
+        assetId: {$ref: "#/components/schemas/Id"}
         title: {type: string}
         startsAt: {type: string, format: date-time}
         endsAt: {type: string, format: date-time}
@@ -1527,6 +1604,10 @@ components:
       required: [id, startsAt, endsAt, assetId, artifactDigest, mediaType, loop, mute, volume]
       properties:
         id: {$ref: "#/components/schemas/Id"}
+        blockId: {$ref: "#/components/schemas/Id"}
+        itemId: {$ref: "#/components/schemas/Id"}
+        itemPosition: {type: integer, minimum: 1}
+        occurrence: {type: integer, minimum: 1}
         startsAt: {type: string, format: date-time}
         endsAt: {type: string, format: date-time}
         assetId: {$ref: "#/components/schemas/Id"}
@@ -1544,10 +1625,28 @@ components:
         loop: {type: boolean}
         mute: {type: boolean}
         volume: {type: number, format: double, minimum: 0, maximum: 1}
+    CableRevisionBlock:
+      type: object
+      additionalProperties: false
+      required: [id, startsAt, endsAt, loop, items]
+      oneOf:
+        - required: [playlistId]
+        - required: [assetId]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        playlistId: {$ref: "#/components/schemas/Id"}
+        assetId: {$ref: "#/components/schemas/Id"}
+        title: {type: string}
+        loop: {type: boolean}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/CableRevisionProgram"}
     CableRevisionChannel:
       type: object
       additionalProperties: false
-      required: [id, number, name, enabled, standby, programs]
+      required: [id, number, name, enabled, standby, blocks, programs]
       properties:
         id: {$ref: "#/components/schemas/Id"}
         number: {type: integer, minimum: 1}
@@ -1558,6 +1657,9 @@ components:
         artworkDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
         enabled: {type: boolean}
         standby: {type: boolean}
+        blocks:
+          type: array
+          items: {$ref: "#/components/schemas/CableRevisionBlock"}
         programs:
           type: array
           items: {$ref: "#/components/schemas/CableRevisionProgram"}
@@ -1859,6 +1961,8 @@ components:
         releaseDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
         deliveryMode: {type: string, enum: [stream, cache_then_play]}
         expectedGeneration: {type: integer, format: int64, minimum: 0}
+        remoteInput: {type: boolean, default: false}
+        showQr: {type: boolean, default: false}
     Assignment:
       allOf:
         - $ref: "#/components/schemas/AssignmentInput"
@@ -1869,6 +1973,40 @@ components:
             nodeId: {$ref: "#/components/schemas/Id"}
             desiredGeneration: {type: integer, format: int64, minimum: 1}
             presentationKind: {type: string, enum: [media, cable]}
+    RemoteEvent:
+      type: object
+      additionalProperties: false
+      required: [sequence, type]
+      properties:
+        sequence: {type: integer, format: int64, minimum: 1}
+        type: {type: string, enum: [key, text, pointer, wheel]}
+        key: {type: string, enum: [ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Enter, Escape, Backspace, Tab, VolumeUp, VolumeDown, Mute]}
+        text: {type: string, minLength: 1, maxLength: 4096}
+        x: {type: number, minimum: 0, maximum: 1}
+        y: {type: number, minimum: 0, maximum: 1}
+        deltaX: {type: number, minimum: -10, maximum: 10}
+        deltaY: {type: number, minimum: -10, maximum: 10}
+        button: {type: string, enum: [left, right, middle]}
+        state: {type: string, enum: [move, down, up, click]}
+    RemoteSession:
+      type: object
+      additionalProperties: false
+      required: [sessionId, token, remoteUrl, showQr, expiresAt]
+      properties:
+        sessionId: {type: string}
+        token: {type: string, writeOnly: true}
+        remoteUrl: {type: string, format: uri}
+        showQr: {type: boolean}
+        expiresAt: {type: string, format: date-time}
+    RemoteEventPage:
+      type: object
+      additionalProperties: false
+      required: [events, nextSequence]
+      properties:
+        events:
+          type: array
+          items: {$ref: "#/components/schemas/RemoteEvent"}
+        nextSequence: {type: integer, format: int64, minimum: 0}
     EnrollPlayerInput:
       type: object
       required: [token, publicKey]

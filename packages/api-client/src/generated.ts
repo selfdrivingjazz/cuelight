@@ -818,6 +818,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/remote/sessions/{sessionId}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["postRemoteEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/remote-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createPlayerRemoteSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/remote-sessions/{sessionId}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        get: operations["pollPlayerRemoteEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1005,15 +1057,19 @@ export interface components {
             updatedAt: string;
         };
         CableBlockInput: {
-            playlistId: components["schemas"]["Id"];
+            playlistId?: components["schemas"]["Id"];
+            assetId?: components["schemas"]["Id"];
             /** Format: date-time */
             startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
             title?: string;
-        };
+        } & (unknown | unknown);
         CableBlock: {
             id: components["schemas"]["Id"];
             channelId: components["schemas"]["Id"];
-            playlistId: components["schemas"]["Id"];
+            playlistId?: components["schemas"]["Id"];
+            assetId?: components["schemas"]["Id"];
             title: string;
             /** Format: date-time */
             startsAt: string;
@@ -1024,7 +1080,7 @@ export interface components {
             createdBy: components["schemas"]["Id"];
             /** Format: date-time */
             createdAt: string;
-        };
+        } & (unknown | unknown);
         CableProfileInput: {
             name: string;
             description?: string;
@@ -1077,6 +1133,10 @@ export interface components {
         };
         CableRevisionProgram: {
             id: components["schemas"]["Id"];
+            blockId?: components["schemas"]["Id"];
+            itemId?: components["schemas"]["Id"];
+            itemPosition?: number;
+            occurrence?: number;
             /** Format: date-time */
             startsAt: string;
             /** Format: date-time */
@@ -1098,6 +1158,18 @@ export interface components {
             /** Format: double */
             volume: number;
         };
+        CableRevisionBlock: {
+            id: components["schemas"]["Id"];
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+            playlistId?: components["schemas"]["Id"];
+            assetId?: components["schemas"]["Id"];
+            title?: string;
+            loop: boolean;
+            items: components["schemas"]["CableRevisionProgram"][];
+        } & (unknown | unknown);
         CableRevisionChannel: {
             id: components["schemas"]["Id"];
             number: number;
@@ -1108,6 +1180,7 @@ export interface components {
             artworkDigest?: string;
             enabled: boolean;
             standby: boolean;
+            blocks: components["schemas"]["CableRevisionBlock"][];
             programs: components["schemas"]["CableRevisionProgram"][];
         };
         CableRevisionDocument: {
@@ -1330,6 +1403,10 @@ export interface components {
             deliveryMode: "stream" | "cache_then_play";
             /** Format: int64 */
             expectedGeneration: number;
+            /** @default false */
+            remoteInput: boolean;
+            /** @default false */
+            showQr: boolean;
         };
         Assignment: components["schemas"]["AssignmentInput"] & {
             id: components["schemas"]["Id"];
@@ -1338,6 +1415,37 @@ export interface components {
             desiredGeneration: number;
             /** @enum {string} */
             presentationKind?: "media" | "cable";
+        };
+        RemoteEvent: {
+            /** Format: int64 */
+            sequence: number;
+            /** @enum {string} */
+            type: "key" | "text" | "pointer" | "wheel";
+            /** @enum {string} */
+            key?: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Enter" | "Escape" | "Backspace" | "Tab" | "VolumeUp" | "VolumeDown" | "Mute";
+            text?: string;
+            x?: number;
+            y?: number;
+            deltaX?: number;
+            deltaY?: number;
+            /** @enum {string} */
+            button?: "left" | "right" | "middle";
+            /** @enum {string} */
+            state?: "move" | "down" | "up" | "click";
+        };
+        RemoteSession: {
+            sessionId: string;
+            token: string;
+            /** Format: uri */
+            remoteUrl: string;
+            showQr: boolean;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        RemoteEventPage: {
+            events: components["schemas"]["RemoteEvent"][];
+            /** Format: int64 */
+            nextSequence: number;
         };
         EnrollPlayerInput: {
             token: string;
@@ -3249,6 +3357,87 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    postRemoteEvent: {
+        parameters: {
+            query?: never;
+            header: {
+                Authorization: string;
+            };
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoteEvent"];
+            };
+        };
+        responses: {
+            /** @description Remote input accepted. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createPlayerRemoteSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    desiredGeneration: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Short-lived remote session for the assigned node. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteSession"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    pollPlayerRemoteEvents: {
+        parameters: {
+            query?: {
+                after?: number;
+                waitSeconds?: number;
+            };
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ordered remote events newer than the supplied sequence. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteEventPage"];
+                };
             };
             default: components["responses"]["Problem"];
         };

@@ -122,6 +122,8 @@ func TestCableReleaseMaterializesExactClosureForChromium(t *testing.T) {
 	h.controller.artifacts = map[string][]byte{shellDigest: shell, revisionDigest: revision, mediaDigest: media}
 	assignment := h.assignment(1, DeliveryCacheThenPlay)
 	assignment.PresentationKind = release.PresentationCable
+	assignment.RemoteInput = true
+	assignment.ShowQR = true
 	if err := h.runtime.Reconcile(context.Background(), assignment); err != nil {
 		t.Fatal(err)
 	}
@@ -132,8 +134,11 @@ func TestCableReleaseMaterializesExactClosureForChromium(t *testing.T) {
 		t.Fatalf("cached artifacts = %d, want 3", h.cas.puts)
 	}
 	candidate := h.renderer.commits[0]
-	if candidate.Kind != release.PresentationCable || candidate.ShellBuildDigest != shellDigest || candidate.RevisionArtifactDigest != revisionDigest || len(candidate.ArtifactPaths) != 3 {
+	if candidate.Kind != release.PresentationCable || candidate.ShellBuildDigest != shellDigest || candidate.RevisionArtifactDigest != revisionDigest || len(candidate.ArtifactPaths) != 3 || candidate.Remote == nil || !candidate.Remote.ShowQR {
 		t.Fatalf("Chromium candidate = %#v", candidate)
+	}
+	if h.controller.remoteCreates != 1 {
+		t.Fatalf("remote sessions = %d", h.controller.remoteCreates)
 	}
 	if report := h.controller.reports[len(h.controller.reports)-1]; report.PresentationKind != release.PresentationCable || report.ObservedGeneration != 1 {
 		t.Fatalf("Cable report = %#v", report)
@@ -419,6 +424,15 @@ type fakeController struct {
 	capabilityErr      error
 	reports            []playerclient.NodeReport
 	events             []playerclient.EventBatch
+	remoteCreates      int
+}
+
+func (c *fakeController) CreateRemoteSession(context.Context, int64) (playerclient.RemoteSession, error) {
+	c.remoteCreates++
+	return playerclient.RemoteSession{ID: "remote-session", RemoteURL: "https://control.example/remote/session#token=secret", ShowQR: true, ExpiresAt: time.Now().Add(time.Hour)}, nil
+}
+func (c *fakeController) PollRemoteEvents(context.Context, string, int64, time.Duration) (playerclient.RemoteEventPage, error) {
+	return playerclient.RemoteEventPage{Events: []playerclient.RemoteEvent{}}, nil
 }
 
 func (c *fakeController) PutCapabilities(context.Context, playerclient.CapabilityReport, string) error {

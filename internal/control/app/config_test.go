@@ -38,6 +38,7 @@ func TestLoadConfigRejectsOutOfBoundsValues(t *testing.T) {
 		{"unbounded database wait", "CABLE_CONTROL_DATABASE_TIMEOUT", "31s"},
 		{"short shutdown", "CABLE_CONTROL_SHUTDOWN_TIMEOUT", "500ms"},
 		{"large headers", "CABLE_CONTROL_MAX_HEADER_BYTES", "1048577"},
+		{"insecure public URL", "CABLE_CONTROL_PUBLIC_URL", "http://controller.example"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -72,6 +73,7 @@ func validConfigEnvironment() map[string]string {
 		"CABLE_CONTROL_TLS_KEY_PATH":       "/run/cable/server.key",
 		"CABLE_CONTROL_PUBLISHER_KEY_PATH": "/run/cable/publisher.key",
 		"CABLE_CONTROL_CAS_PATH":           "/var/lib/cable/cas",
+		"CABLE_CONTROL_PUBLIC_URL":         "https://controller.example",
 	}
 }
 

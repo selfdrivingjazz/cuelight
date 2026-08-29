@@ -45,7 +45,7 @@ func (t *assignmentTransaction) CurrentGeneration() (int64, error) {
 func (t *assignmentTransaction) CurrentAssignment() (assignment.Assignment, bool, error) {
 	return t.assignment(`
 		SELECT id::text, node_id::text, release_id::text, release_digest, delivery_mode,
-		       desired_generation - 1, desired_generation, created_by::text
+		       desired_generation - 1, desired_generation, remote_input, show_qr, created_by::text
 		FROM assignments WHERE node_id = $1
 		ORDER BY desired_generation DESC LIMIT 1`, t.nodeID)
 }
@@ -69,7 +69,7 @@ func (t *assignmentTransaction) ReleaseByID(id string) (canonical.EnvelopeV1, bo
 func (t *assignmentTransaction) AssignedRelease(releaseDigest string, atMostGeneration int64) (assignment.Assignment, bool, error) {
 	return t.assignment(`
 		SELECT id::text, node_id::text, release_id::text, release_digest, delivery_mode,
-		       desired_generation - 1, desired_generation, created_by::text
+		       desired_generation - 1, desired_generation, remote_input, show_qr, created_by::text
 		FROM assignments
 		WHERE node_id = $1 AND release_digest = $2 AND desired_generation <= $3
 		ORDER BY desired_generation DESC LIMIT 1`, t.nodeID, releaseDigest, atMostGeneration)
@@ -97,13 +97,14 @@ func (t *assignmentTransaction) Idempotency(actorID, key string) (assignment.Ide
 	err := t.tx.QueryRowContext(t.ctx, `
 		SELECT i.request_digest,
 		       a.id::text, a.node_id::text, a.release_id::text, a.release_digest, a.delivery_mode,
-		       a.desired_generation - 1, a.desired_generation, a.created_by::text
+		       a.desired_generation - 1, a.desired_generation, a.remote_input, a.show_qr, a.created_by::text
 		FROM assignment_idempotency_records i
 		JOIN assignments a ON a.id = i.assignment_id
 		WHERE i.node_id = $1 AND i.actor_id = $2 AND i.key = $3`, t.nodeID, actorID, key).Scan(
 		&record.RequestDigest, &record.Assignment.ID, &record.Assignment.NodeID,
 		&record.Assignment.ReleaseID, &record.Assignment.ReleaseDigest, &record.Assignment.DeliveryMode,
-		&record.Assignment.ExpectedGeneration, &record.Assignment.DesiredGeneration, &record.Assignment.CreatedBy)
+		&record.Assignment.ExpectedGeneration, &record.Assignment.DesiredGeneration, &record.Assignment.RemoteInput,
+		&record.Assignment.ShowQR, &record.Assignment.CreatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return assignment.IdempotencyRecord{}, false, nil
 	}
@@ -120,9 +121,9 @@ func (t *assignmentTransaction) InsertAssignment(value assignment.Assignment) er
 	}
 	_, err := t.tx.ExecContext(t.ctx, `
 		INSERT INTO assignments
-		  (id, node_id, desired_generation, release_id, release_digest, delivery_mode, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, value.ID, value.NodeID, value.DesiredGeneration,
-		value.ReleaseID, value.ReleaseDigest, value.DeliveryMode, value.CreatedBy)
+		  (id, node_id, desired_generation, release_id, release_digest, delivery_mode, remote_input, show_qr, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, value.ID, value.NodeID, value.DesiredGeneration,
+		value.ReleaseID, value.ReleaseDigest, value.DeliveryMode, value.RemoteInput, value.ShowQR, value.CreatedBy)
 	if postgresCode(err) == "23505" {
 		return assignment.ErrGenerationConflict
 	}
@@ -180,7 +181,7 @@ func (t *assignmentTransaction) assignment(query string, arguments ...any) (assi
 	var value assignment.Assignment
 	err := t.tx.QueryRowContext(t.ctx, query, arguments...).Scan(&value.ID, &value.NodeID,
 		&value.ReleaseID, &value.ReleaseDigest, &value.DeliveryMode, &value.ExpectedGeneration,
-		&value.DesiredGeneration, &value.CreatedBy)
+		&value.DesiredGeneration, &value.RemoteInput, &value.ShowQR, &value.CreatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return assignment.Assignment{}, false, nil
 	}
@@ -242,7 +243,7 @@ func (s *Store) recordObservation(ctx context.Context, nodeID string, observatio
 func (s *Store) AssignmentHistory(ctx context.Context, nodeID string) ([]assignment.Assignment, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT id::text, node_id::text, release_id::text, release_digest, delivery_mode,
-		       desired_generation - 1, desired_generation, created_by::text
+		       desired_generation - 1, desired_generation, remote_input, show_qr, created_by::text
 		FROM assignments WHERE node_id = $1 ORDER BY desired_generation`, nodeID)
 	if err != nil {
 		return nil, wrap("list assignment history", err)
@@ -252,7 +253,7 @@ func (s *Store) AssignmentHistory(ctx context.Context, nodeID string) ([]assignm
 	for rows.Next() {
 		var value assignment.Assignment
 		if err := rows.Scan(&value.ID, &value.NodeID, &value.ReleaseID, &value.ReleaseDigest,
-			&value.DeliveryMode, &value.ExpectedGeneration, &value.DesiredGeneration, &value.CreatedBy); err != nil {
+			&value.DeliveryMode, &value.ExpectedGeneration, &value.DesiredGeneration, &value.RemoteInput, &value.ShowQR, &value.CreatedBy); err != nil {
 			return nil, wrap("scan assignment history", err)
 		}
 		result = append(result, value)

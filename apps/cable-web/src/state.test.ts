@@ -11,7 +11,11 @@ describe("Cable runtime state", () => {
     expect(warming.kind).toBe("warming");
     const opening = runtimeReducer(warming, { type: "ARTIFACT_READY" });
     expect(opening.kind).toBe("player-opening");
-    expect(runtimeReducer(opening, { type: "PLAYER_READY" }).kind).toBe("player-ready");
+    const playerReady = runtimeReducer(opening, { type: "PLAYER_READY" });
+    expect(playerReady.kind).toBe("player-ready");
+    const transitioned = runtimeReducer(playerReady, { type: "TUNE_LIVE", occurrence: presentationFixture.occurrences[1]! });
+    expect(transitioned.kind).toBe("player-opening");
+    expect(transitioned.kind === "player-opening" && transitioned.occurrence.id).toBe("program-2");
     const failed = runtimeReducer(opening, { type: "PLAYER_FAILED", message: "Artifact unavailable" });
     expect(failed.kind).toBe("player-failure");
     expect(runtimeReducer(failed, { type: "RETRY_PLAYER" }).kind).toBe("player-opening");

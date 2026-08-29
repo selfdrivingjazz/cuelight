@@ -49,6 +49,10 @@ type Controller interface {
 	HeadArtifact(context.Context, string) (playerclient.ArtifactMetadata, error)
 	GetArtifact(context.Context, string, *playerclient.ByteRange, string) (playerclient.ArtifactContent, error)
 }
+type RemoteController interface {
+	CreateRemoteSession(context.Context, int64) (playerclient.RemoteSession, error)
+	PollRemoteEvents(context.Context, string, int64, time.Duration) (playerclient.RemoteEventPage, error)
+}
 
 // Journal is deliberately the exact durable surface supplied by player/state.Store.
 type Journal interface {

@@ -925,7 +925,7 @@ func setNodeETag(w http.ResponseWriter, n Node) {
 }
 func assignmentETag(generation int64) string { return fmt.Sprintf("\"generation:%d\"", generation) }
 func assignmentJSON(v assignment.Assignment) Assignment {
-	return Assignment{ID: v.ID, NodeID: v.NodeID, ReleaseID: v.ReleaseID, ReleaseDigest: v.ReleaseDigest, DeliveryMode: v.DeliveryMode, ExpectedGeneration: v.ExpectedGeneration, DesiredGeneration: v.DesiredGeneration}
+	return Assignment{ID: v.ID, NodeID: v.NodeID, ReleaseID: v.ReleaseID, ReleaseDigest: v.ReleaseDigest, DeliveryMode: v.DeliveryMode, ExpectedGeneration: v.ExpectedGeneration, DesiredGeneration: v.DesiredGeneration, RemoteInput: v.RemoteInput, ShowQR: v.ShowQR}
 }
 func uploadJSON(v media.Upload) Upload {
 	return Upload{ID: v.ID, Name: v.Name, Length: v.DeclaredLength, Offset: v.ReceivedLength, MediaType: v.MediaType, State: string(v.State), ArtifactDigest: v.ArtifactDigest}

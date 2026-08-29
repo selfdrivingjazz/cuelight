@@ -3,28 +3,111 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
   --background: 210 25% 98%;
   --foreground: 216 32% 12%;
-  --card: 0 0% 100%;
+  --card: 210 30% 99%;
   --card-foreground: 216 32% 12%;
-  --primary: 199 89% 38%;
-  --primary-foreground: 0 0% 100%;
-  --accent: 200 30% 94%;
-  --border: 214 21% 87%;
-  --muted: 210 22% 94%;
-  --muted-foreground: 215 16% 44%;
-  --ring: 199 89% 38%;
-  --status-success: 152 64% 32%;
-  --status-warning: 35 85% 38%;
-  --status-danger: 0 72% 43%;
-  --status-info: 199 89% 38%;
+  --primary: 199 89% 32%;
+  --primary-foreground: 210 25% 98%;
+  --accent: 201 35% 92%;
+  --accent-foreground: 216 32% 15%;
+  --border: 214 20% 84%;
+  --input: 214 20% 78%;
+  --muted: 210 22% 93%;
+  --muted-foreground: 215 16% 40%;
+  --ring: 199 89% 32%;
+  --destructive: 0 72% 40%;
+  --destructive-foreground: 210 25% 98%;
+  --status-success: 152 67% 27%;
+  --status-warning: 35 90% 30%;
+  --status-danger: 0 72% 40%;
+  --status-info: 199 89% 32%;
+  --sidebar: 210 30% 96%;
+  --sidebar-foreground: 216 32% 12%;
+  --sidebar-border: 214 20% 84%;
+  --overlay: 222 45% 4% / 62%;
+  --shadow: 216 32% 12%;
   --sidebar-width: 15rem;
   --content-max-width: 90rem;
   --table-row-height: 3rem;
   --table-header-height: 2.5rem;
-  --focus-ring: 0 0 0 3px hsl(var(--ring) / .22);
+  --focus-ring: 0 0 0 3px hsl(var(--ring) / .24);
 }
 
-* { border-color: hsl(var(--border)); }
-body { background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: 222 29% 9%;
+  --foreground: 210 25% 93%;
+  --card: 221 25% 13%;
+  --card-foreground: 210 25% 93%;
+  --primary: 196 82% 64%;
+  --primary-foreground: 222 45% 10%;
+  --accent: 218 22% 19%;
+  --accent-foreground: 210 25% 93%;
+  --border: 218 18% 27%;
+  --input: 218 18% 32%;
+  --muted: 219 19% 18%;
+  --muted-foreground: 215 14% 68%;
+  --ring: 196 82% 64%;
+  --destructive: 0 86% 70%;
+  --destructive-foreground: 222 45% 10%;
+  --status-success: 151 55% 62%;
+  --status-warning: 39 90% 64%;
+  --status-danger: 0 86% 70%;
+  --status-info: 197 82% 66%;
+  --sidebar: 223 31% 11%;
+  --sidebar-foreground: 210 25% 93%;
+  --sidebar-border: 218 18% 25%;
+  --overlay: 222 45% 4% / 76%;
+  --shadow: 222 45% 4%;
+  --focus-ring: 0 0 0 3px hsl(var(--ring) / .34);
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  background: hsl(var(--background));
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  border-color: hsl(var(--input));
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jmill/cable/internal/control/cable"
 )
@@ -119,19 +118,30 @@ func (s *Store) ListPlaylists(ctx context.Context, cursor string, limit int) (ca
 
 func (s *Store) CreateBlock(ctx context.Context, mutation cable.Mutation, input cable.BlockInput) (cable.Block, error) {
 	input.Title = strings.TrimSpace(input.Title)
-	if mutation.ActorID == "" || input.ChannelID == "" || input.PlaylistID == "" || input.StartsAt.IsZero() {
+	input.PlaylistID = strings.TrimSpace(input.PlaylistID)
+	input.AssetID = strings.TrimSpace(input.AssetID)
+	if mutation.ActorID == "" {
 		return cable.Block{}, cable.ErrInvalidArgument
 	}
-	playlist, err := s.Playlist(ctx, input.PlaylistID)
-	if err != nil {
+	if err := cable.ValidateBlock(input); err != nil {
 		return cable.Block{}, err
 	}
-	if input.Title == "" {
-		input.Title = playlist.Name
+	var playlist cable.Playlist
+	var err error
+	if input.PlaylistID != "" {
+		playlist, err = s.Playlist(ctx, input.PlaylistID)
+		if err != nil {
+			return cable.Block{}, err
+		}
+		if len(playlist.Items) == 0 {
+			return cable.Block{}, &cable.ValidationError{Field: "playlistId", Reason: "playlist must contain at least one item"}
+		}
+		if input.Title == "" {
+			input.Title = playlist.Name
+		}
 	}
-	endsAt := input.StartsAt.UTC()
-	for _, item := range playlist.Items {
-		endsAt = endsAt.Add(time.Duration(item.DurationSeconds) * time.Second)
+	if input.Title == "" {
+		input.Title = "Cable media"
 	}
 	blockID, err := s.newUUID()
 	if err != nil {
@@ -139,23 +149,17 @@ func (s *Store) CreateBlock(ctx context.Context, mutation cable.Mutation, input 
 	}
 	err = s.inTransaction(ctx, func(txCtx context.Context, tx *sql.Tx) error {
 		var overlap bool
-		if queryErr := tx.QueryRowContext(txCtx, `SELECT EXISTS(SELECT 1 FROM cable_blocks WHERE channel_id=$1 AND starts_at<$3 AND ends_at>$2)`, input.ChannelID, input.StartsAt.UTC(), endsAt).Scan(&overlap); queryErr != nil {
+		if queryErr := tx.QueryRowContext(txCtx, `SELECT EXISTS(SELECT 1 FROM cable_blocks WHERE channel_id=$1 AND starts_at<$3 AND ends_at>$2)`, input.ChannelID, input.StartsAt.UTC(), input.EndsAt.UTC()).Scan(&overlap); queryErr != nil {
 			return ce("check Cable block overlap", queryErr)
 		}
 		if overlap {
 			return cable.ErrOverlap
 		}
-		if _, execErr := tx.ExecContext(txCtx, `INSERT INTO cable_blocks(id,channel_id,playlist_id,title,starts_at,ends_at,version,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,1,$7,$8)`, blockID, input.ChannelID, input.PlaylistID, input.Title, input.StartsAt.UTC(), endsAt, mutation.ActorID, ct(mutation)); execErr != nil {
-			return ce("create Cable block", execErr)
-		}
-		cursor := input.StartsAt.UTC()
-		bound := s.transactionStore(tx)
-		for _, item := range playlist.Items {
-			itemEnd := cursor.Add(time.Duration(item.DurationSeconds) * time.Second)
-			if _, createErr := bound.CreateProgramEntry(txCtx, mutation, cable.ProgramInput{ChannelID: input.ChannelID, AssetID: item.AssetID, StartsAt: cursor, EndsAt: itemEnd, Title: item.Title, Subtitle: item.Subtitle, Fit: "fill", PlacardPolicy: "start", AvailabilityPolicy: "fail", Volume: 1}); createErr != nil {
-				return createErr
+		if _, execErr := tx.ExecContext(txCtx, `INSERT INTO cable_blocks(id,channel_id,playlist_id,asset_id,title,starts_at,ends_at,version,created_by,created_at) VALUES($1,$2,NULLIF($3,'')::uuid,NULLIF($4,'')::uuid,$5,$6,$7,1,$8,$9)`, blockID, input.ChannelID, input.PlaylistID, input.AssetID, input.Title, input.StartsAt.UTC(), input.EndsAt.UTC(), mutation.ActorID, ct(mutation)); execErr != nil {
+			if pgConflict(execErr) || postgresCode(execErr) == "23P01" {
+				return cable.ErrOverlap
 			}
-			cursor = itemEnd
+			return ce("create Cable block", execErr)
 		}
 		return nil
 	})
@@ -167,19 +171,19 @@ func (s *Store) CreateBlock(ctx context.Context, mutation cable.Mutation, input 
 
 func (s *Store) block(ctx context.Context, id string) (cable.Block, error) {
 	var value cable.Block
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT id,channel_id,playlist_id,title,starts_at,ends_at,version,created_by,created_at FROM cable_blocks WHERE id=$1`, id).Scan(&value.ID, &value.ChannelID, &value.PlaylistID, &value.Title, &value.StartsAt, &value.EndsAt, &value.Version, &value.CreatedBy, &value.CreatedAt)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT id,channel_id,COALESCE(playlist_id::text,''),COALESCE(asset_id::text,''),title,starts_at,ends_at,version,created_by,created_at FROM cable_blocks WHERE id=$1`, id).Scan(&value.ID, &value.ChannelID, &value.PlaylistID, &value.AssetID, &value.Title, &value.StartsAt, &value.EndsAt, &value.Version, &value.CreatedBy, &value.CreatedAt)
 	return value, ce("get Cable block", err)
 }
 
 func (s *Store) ListBlocks(ctx context.Context, channelID, cursor string, limit int) (cable.BlockPage, error) {
 	limit = cl(limit)
-	query := `SELECT id,channel_id,playlist_id,title,starts_at,ends_at,version,created_by,created_at FROM cable_blocks WHERE channel_id=$1`
+	query := `SELECT id,channel_id,COALESCE(playlist_id::text,''),COALESCE(asset_id::text,''),title,starts_at,ends_at,version,created_by,created_at FROM cable_blocks WHERE channel_id=$1`
 	args := []any{channelID}
 	if cursor != "" {
-		query += ` AND id>$2`
+		query += ` AND (starts_at,id) > (SELECT starts_at,id FROM cable_blocks WHERE id=$2)`
 		args = append(args, cursor)
 	}
-	query += ` ORDER BY id LIMIT $` + strconv.Itoa(len(args)+1)
+	query += ` ORDER BY starts_at,id LIMIT $` + strconv.Itoa(len(args)+1)
 	args = append(args, limit+1)
 	rows, err := s.q(ctx).QueryContext(ctx, query, args...)
 	if err != nil {
@@ -189,7 +193,7 @@ func (s *Store) ListBlocks(ctx context.Context, channelID, cursor string, limit 
 	result := cable.BlockPage{Items: []cable.Block{}}
 	for rows.Next() {
 		var value cable.Block
-		if err := rows.Scan(&value.ID, &value.ChannelID, &value.PlaylistID, &value.Title, &value.StartsAt, &value.EndsAt, &value.Version, &value.CreatedBy, &value.CreatedAt); err != nil {
+		if err := rows.Scan(&value.ID, &value.ChannelID, &value.PlaylistID, &value.AssetID, &value.Title, &value.StartsAt, &value.EndsAt, &value.Version, &value.CreatedBy, &value.CreatedAt); err != nil {
 			return cable.BlockPage{}, err
 		}
 		result.Items = append(result.Items, value)

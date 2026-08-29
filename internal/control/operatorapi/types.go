@@ -73,6 +73,8 @@ type Assignment struct {
 	DeliveryMode       string `json:"deliveryMode"`
 	ExpectedGeneration int64  `json:"expectedGeneration"`
 	DesiredGeneration  int64  `json:"desiredGeneration"`
+	RemoteInput        bool   `json:"remoteInput"`
+	ShowQR             bool   `json:"showQr"`
 }
 
 type Upload struct {

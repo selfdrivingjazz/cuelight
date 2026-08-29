@@ -48,12 +48,37 @@ type Assignment struct {
 	DeliveryMode       string                   `json:"deliveryMode"`
 	ExpectedGeneration int64                    `json:"expectedGeneration"`
 	DesiredGeneration  int64                    `json:"desiredGeneration"`
+	RemoteInput        bool                     `json:"remoteInput"`
+	ShowQR             bool                     `json:"showQr"`
 }
 
 type AssignmentResult struct {
 	Assignment  Assignment
 	ETag        string
 	NotModified bool
+}
+type RemoteSession struct {
+	ID        string    `json:"sessionId"`
+	Token     string    `json:"token,omitempty"`
+	RemoteURL string    `json:"remoteUrl"`
+	ShowQR    bool      `json:"showQr"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+type RemoteEvent struct {
+	Sequence int64   `json:"sequence"`
+	Type     string  `json:"type"`
+	Key      string  `json:"key,omitempty"`
+	Text     string  `json:"text,omitempty"`
+	X        float64 `json:"x,omitempty"`
+	Y        float64 `json:"y,omitempty"`
+	DeltaX   float64 `json:"deltaX,omitempty"`
+	DeltaY   float64 `json:"deltaY,omitempty"`
+	Button   string  `json:"button,omitempty"`
+	State    string  `json:"state,omitempty"`
+}
+type RemoteEventPage struct {
+	Events       []RemoteEvent `json:"events"`
+	NextSequence int64         `json:"nextSequence"`
 }
 
 type ReleaseEnvelope = release.EnvelopeV1

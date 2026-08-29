@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,7 @@ type Config struct {
 	MediaRoots              []string
 	ProtocolVersion         string
 	PlaybackProfile         string
+	PublicURL               string
 	DatabaseTimeout         time.Duration
 	DatabaseMaxConnections  int
 	DatabaseMaxIdle         int
@@ -84,6 +86,7 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		TemporaryRoot:           env(lookup, "CABLE_CONTROL_TEMP_ROOT"),
 		ProtocolVersion:         envOrDefault(lookup, "CABLE_CONTROL_PROTOCOL_VERSION", "1.0"),
 		PlaybackProfile:         envOrDefault(lookup, "CABLE_CONTROL_PLAYBACK_PROFILE", "default"),
+		PublicURL:               env(lookup, "CABLE_CONTROL_PUBLIC_URL"),
 		DatabaseTimeout:         defaultDatabaseTimeout,
 		DatabaseMaxConnections:  defaultDatabaseConnections,
 		DatabaseMaxIdle:         defaultDatabaseIdle,
@@ -217,6 +220,12 @@ func (config Config) Validate() error {
 	}
 	if strings.TrimSpace(config.ProtocolVersion) == "" || strings.TrimSpace(config.PlaybackProfile) == "" {
 		return &ConfigError{Field: "CABLE_CONTROL_PROTOCOL_VERSION", Reason: "protocol version and playback profile are required"}
+	}
+	if config.PublicURL != "" {
+		publicURL, err := url.Parse(config.PublicURL)
+		if err != nil || publicURL.Scheme != "https" || publicURL.Host == "" || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" {
+			return &ConfigError{Field: "CABLE_CONTROL_PUBLIC_URL", Reason: "must be an absolute HTTPS URL without credentials, query, or fragment"}
+		}
 	}
 	return nil
 }

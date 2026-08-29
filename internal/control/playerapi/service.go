@@ -254,7 +254,7 @@ func (s *Service) authorizedArtifact(ctx context.Context, nodeID, digest string)
 func assignmentETag(generation int64) string { return fmt.Sprintf("\"assignment-%d\"", generation) }
 func artifactETag(digest string) string      { return fmt.Sprintf("\"%s\"", digest) }
 func toClientAssignment(value assignment.Assignment) client.Assignment {
-	return client.Assignment{ID: value.ID, NodeID: value.NodeID, ReleaseID: value.ReleaseID, ReleaseDigest: value.ReleaseDigest, DeliveryMode: value.DeliveryMode, ExpectedGeneration: value.ExpectedGeneration, DesiredGeneration: value.DesiredGeneration}
+	return client.Assignment{ID: value.ID, NodeID: value.NodeID, ReleaseID: value.ReleaseID, ReleaseDigest: value.ReleaseDigest, DeliveryMode: value.DeliveryMode, ExpectedGeneration: value.ExpectedGeneration, DesiredGeneration: value.DesiredGeneration, RemoteInput: value.RemoteInput, ShowQR: value.ShowQR}
 }
 
 func sameEvent(a, b client.NodeEvent) bool {

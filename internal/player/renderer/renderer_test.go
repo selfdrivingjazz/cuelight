@@ -189,7 +189,7 @@ func TestMPVAdapterUsesJSONIPC(t *testing.T) {
 	}
 }
 func TestTransformRevisionToPresentationContract(t *testing.T) {
-	candidate := Candidate{Kind: release.PresentationCable, RevisionArtifactDigest: strings.Repeat("a", 64), ShellBuildDigest: strings.Repeat("b", 64), Entrypoint: "index.html", BridgeProtocol: "1.0", ArtifactClosure: []string{strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)}}
+	candidate := Candidate{Kind: release.PresentationCable, RevisionArtifactDigest: strings.Repeat("a", 64), ShellBuildDigest: strings.Repeat("b", 64), Entrypoint: "index.html", BridgeProtocol: "1.0", ArtifactClosure: []string{strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)}, Remote: &RemoteDescriptor{SessionID: "session", URL: "https://control.example/remote/session#token=secret", ShowQR: true, ExpiresAt: time.Unix(1_000, 0).UTC()}}
 	raw := []byte(`{"schema":"cable.revision.v1","shellBuildDigest":"` + candidate.ShellBuildDigest + `","entrypoint":"index.html","bridgeProtocol":"1.0","generatedAt":"2026-08-27T00:00:00Z","timezone":"UTC","channels":[{"id":"ch","number":1,"name":"Main","callsign":"MAIN","accent":"#fff","enabled":true,"programs":[{"id":"p","startsAt":"2026-08-27T00:00:00Z","endsAt":"2026-08-27T01:00:00Z","artifactDigest":"` + strings.Repeat("c", 64) + `","mediaType":"video/mp4","title":"Show","placardPolicy":"start","fit":"fill","loop":true,"mute":true,"volume":0.64}] }]}`)
 	presentation, err := transformRevision(raw, candidate)
 	if err != nil {
@@ -200,7 +200,7 @@ func TestTransformRevisionToPresentationContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	occurrences, ok := value["occurrences"].([]any)
-	if !ok || len(occurrences) != 1 || value["bridge"] == nil {
+	if !ok || len(occurrences) != 1 || value["bridge"] == nil || value["remote"] == nil {
 		t.Fatalf("presentation contract = %s", presentation)
 	}
 	program, ok := occurrences[0].(map[string]any)

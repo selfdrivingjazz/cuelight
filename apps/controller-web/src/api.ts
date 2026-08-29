@@ -13,9 +13,9 @@ export function setApiToken(token: string | undefined): ApiClient {
 
 export function getApiToken(): string | undefined { return currentToken; }
 export async function getControllerHealth(): Promise<components["schemas"]["Health"]> {
-  const response = await fetch("/health", { credentials: "same-origin", headers: { Accept: "application/json" } });
-  if (!response.ok) throw new ApiRequestError(response.status, `Controller health returned HTTP ${response.status}.`);
-  return response.json() as Promise<components["schemas"]["Health"]>;
+  const response = await fetch("/health", { credentials: "omit", cache: "no-store" });
+  if (!response.ok) throw new ApiRequestError(response.status, "Controller health is unavailable.");
+  return await response.json() as components["schemas"]["Health"];
 }
 
 

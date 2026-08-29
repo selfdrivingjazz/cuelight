@@ -124,3 +124,99 @@ func TestCompilerRejectsOverlapAndPublishRequiresVersion(t *testing.T) {
 		t.Fatalf("publish error=%v", e)
 	}
 }
+type blockCableRepo struct {
+	*fakeCableRepo
+	blocks    map[string][]Block
+	playlists map[string]Playlist
+}
+
+func (f *blockCableRepo) CreatePlaylist(context.Context, Mutation, PlaylistInput) (Playlist, error) {
+	return Playlist{}, nil
+}
+func (f *blockCableRepo) Playlist(_ context.Context, id string) (Playlist, error) {
+	return f.playlists[id], nil
+}
+func (f *blockCableRepo) ListPlaylists(context.Context, string, int) (PlaylistPage, error) {
+	return PlaylistPage{}, nil
+}
+func (f *blockCableRepo) CreateBlock(context.Context, Mutation, BlockInput) (Block, error) {
+	return Block{}, nil
+}
+func (f *blockCableRepo) ListBlocks(_ context.Context, channelID, _ string, _ int) (BlockPage, error) {
+	return BlockPage{Items: f.blocks[channelID]}, nil
+}
+func (f *blockCableRepo) CreateProfile(context.Context, Mutation, ProfileInput) (Profile, error) {
+	return Profile{}, nil
+}
+func (f *blockCableRepo) Profile(context.Context, string) (Profile, error) {
+	return Profile{}, nil
+}
+func (f *blockCableRepo) ListProfiles(context.Context, string, int) (ProfilePage, error) {
+	return ProfilePage{}, nil
+}
+
+func TestCompilerMaterializesPlaylistWrapAndNextBlock(t *testing.T) {
+	now := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
+	base := &fakeCableRepo{d: CableDeployment{ID: "d", Version: 1, Timezone: "UTC", Theme: "nebula"}, ch: []Channel{{ID: "c", Number: 1}}, b: ShellBuild{ID: "b", Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Entrypoint: "index", BridgeProtocol: "1", ArtifactDigests: []string{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
+	repo := &blockCableRepo{fakeCableRepo: base, blocks: map[string][]Block{"c": {
+		{ID: "b1", ChannelID: "c", PlaylistID: "pl", StartsAt: now, EndsAt: now.Add(10 * time.Minute)},
+		{ID: "b2", ChannelID: "c", AssetID: "direct", StartsAt: now.Add(10 * time.Minute), EndsAt: now.Add(12 * time.Minute)},
+	}}, playlists: map[string]Playlist{"pl": {ID: "pl", Items: []PlaylistItem{
+		{ID: "i1", PlaylistID: "pl", AssetID: "a", Position: 1, DurationSeconds: 240, Title: "A"},
+		{ID: "i2", PlaylistID: "pl", AssetID: "b", Position: 2, DurationSeconds: 180, Title: "B"},
+	}}}}
+	artifacts := fakeCableArtifacts{
+		"a": {{AssetID: "a", Digest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", MediaType: "video/mp4", State: "ready"}},
+		"b": {{AssetID: "b", Digest: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", MediaType: "video/mp4", State: "ready"}},
+		"direct": {{AssetID: "direct", Digest: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", MediaType: "video/mp4", State: "ready"}},
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {{Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MediaType: "application/x-tar", State: "ready"}},
+	}
+	rev, err := (Compiler{Repository: repo, Artifacts: artifacts, Now: func() time.Time { return now }}).Compile(context.Background(), "actor", "d", "b", RevisionWindow{StartsAt: now, EndsAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := rev.Channels[0]
+	if len(channel.Blocks) != 2 || len(channel.Programs) != 4 {
+		t.Fatalf("blocks=%d programs=%d", len(channel.Blocks), len(channel.Programs))
+	}
+	if got, want := channel.Blocks[0].Items[2].StartsAt, now.Add(7*time.Minute); !got.Equal(want) {
+		t.Fatalf("playlist wrap starts at %s, want %s", got, want)
+	}
+	if got, want := channel.Blocks[0].Items[2].EndsAt, now.Add(10*time.Minute); !got.Equal(want) {
+		t.Fatalf("playlist boundary ends at %s, want %s", got, want)
+	}
+	if got := channel.Programs[3].StartsAt; !got.Equal(now.Add(10*time.Minute)) {
+		t.Fatalf("next block starts at %s", got)
+	}
+	if !channel.Programs[3].Loop || !channel.Blocks[0].Loop {
+		t.Fatal("block and materialized media must loop")
+	}
+}
+
+func TestValidateBlockRequiresExactlyOneSource(t *testing.T) {
+	at := time.Unix(0, 0).UTC()
+	for _, input := range []BlockInput{
+		{ChannelID: "c", StartsAt: at, EndsAt: at.Add(time.Hour)},
+		{ChannelID: "c", PlaylistID: "p", AssetID: "a", StartsAt: at, EndsAt: at.Add(time.Hour)},
+		{ChannelID: "c", AssetID: "a", StartsAt: at, EndsAt: at},
+	} {
+		if err := ValidateBlock(input); err == nil {
+			t.Fatalf("ValidateBlock(%+v) accepted invalid source/timing", input)
+		}
+	}
+}
+
+func TestValidateBlockOrderUsesHalfOpenIntervals(t *testing.T) {
+	at := time.Unix(0, 0).UTC()
+	adjacent := []Block{
+		{ID: "a", PlaylistID: "p", StartsAt: at, EndsAt: at.Add(time.Hour)},
+		{ID: "b", AssetID: "x", StartsAt: at.Add(time.Hour), EndsAt: at.Add(2 * time.Hour)},
+	}
+	if err := validateBlockOrder(adjacent); err != nil {
+		t.Fatalf("adjacent blocks overlap: %v", err)
+	}
+	adjacent[1].StartsAt = at.Add(30 * time.Minute)
+	if err := validateBlockOrder(adjacent); !errors.Is(err, ErrOverlap) {
+		t.Fatalf("overlap error=%v", err)
+	}
+}

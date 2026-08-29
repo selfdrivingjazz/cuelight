@@ -1,12 +1,12 @@
 import * as React from "react";
-import { createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate, useParams, useRouterState, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Asset, type Node, type components } from "@cable/api-client";
 import { Breadcrumbs, Button, Card, CardContent, CardHeader, CardTitle, TanStackDataTable, EmptyState, ErrorState, MobileNav, MobileSidebar, Pagination, Sidebar, Skeleton, StatusBadge, type NavigationLink } from "@cable/controller-ui";
 import "@cable/controller-ui/styles.css";
 import { api, ApiRequestError, getControllerHealth, readApiResult } from "./api";
 import { AccessScreen, useAuth } from "./auth";
-import { CableChannelDetail, CableDeploymentsPage, CableDeploymentDetail, CableReleaseAssignmentPage, RevisionDetailPage, ShellBuildsPage, uploadSelectedFile } from "./cable";
+import { CableChannelDetail, CableDeploymentsPage, CableDeploymentDetail, CableReleaseAssignmentPage, CableProgramDetailPage, RevisionDetailPage, ShellBuildsPage, uploadSelectedFile } from "./cable";
 import { NodeAssignmentComposer } from "./assignment";
 
 export interface PageSearch { cursor?: string; limit?: number; search?: string; sort?: string; order?: "asc" | "desc" }
@@ -53,6 +53,7 @@ async function getRelease(releaseId: string) { return readApiResult(await api.GE
 function Shell() {
   const auth = useAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  if (pathname.startsWith("/remote/")) return <Outlet />;
   if (auth.state === "signedOut" || auth.state === "invalid") return <AccessScreen />;
   if (auth.state === "checking" || !auth.operator) return <RoutePending />;
   return <div className="min-h-screen bg-background text-foreground"><div className="flex min-h-screen"><Sidebar items={navigation} currentPath={pathname} linkComponent={RouterLink} /><div className="min-w-0 flex-1"><header className="flex h-16 items-center justify-between border-b border-border px-4 md:px-8"><MobileNav><MobileSidebar items={navigation} currentPath={pathname} linkComponent={RouterLink} /></MobileNav><span className="text-sm text-muted-foreground">{auth.operator.id}</span>{auth.token && <Button variant="secondary" size="sm" onClick={auth.signOut}>Log out</Button>}</header><Outlet /></div></div></div>;
@@ -207,6 +208,32 @@ function ReleasesPage() { const search = useSearch({ from: "/releases" }); const
 function ReleasesDetailPage() { const { releaseId } = releaseDetailRoute.useParams(); const query = useQuery({ queryKey: queryKeys.release(releaseId), queryFn: () => getRelease(releaseId) }); if (query.isPending) return <RoutePending />; if (query.isError) return <PageFrame breadcrumbs={[{ label: "Releases", href: "/releases" }, { label: releaseId }]}><QueryError error={query.error} retry={() => void query.refetch()} /></PageFrame>; const release = query.data; return <PageFrame breadcrumbs={[{ label: "Releases", href: "/releases" }, { label: release.id }]}><PageHeader title={`Release ${release.id}`} description="Signed, immutable release envelope" /><div className="grid gap-4 lg:grid-cols-2"><Card><CardHeader><CardTitle>Signature</CardTitle></CardHeader><CardContent><dl className="space-y-3 text-sm"><div><dt className="text-muted-foreground">Digest</dt><dd className="break-all font-mono">{release.digest}</dd></div><div><dt className="text-muted-foreground">Key ID</dt><dd className="break-all font-mono">{release.keyId}</dd></div><div><dt className="text-muted-foreground">Signature</dt><dd className="break-all font-mono">{release.signature}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>Payload</CardTitle></CardHeader><CardContent><dl className="space-y-3 text-sm"><div><dt className="text-muted-foreground">Presentation</dt><dd>{release.payload.presentation?.kind ?? "media"}</dd></div><div><dt className="text-muted-foreground">Minimum protocol</dt><dd>{release.payload.minimumProtocolVersion}</dd></div><div><dt className="text-muted-foreground">Required features</dt><dd>{release.payload.requiredFeatures.length ? release.payload.requiredFeatures.join(", ") : "None"}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>Artifact closure</CardTitle></CardHeader><CardContent><TanStackDataTable caption="Release artifacts" rows={release.payload.artifacts} rowKey={(artifact) => artifact.digest} empty={<EmptyState title="No artifacts" description="This release has no artifact references." />} columns={[{ key: "digest", header: "Digest", render: (artifact) => <span className="break-all font-mono text-xs">{artifact.digest}</span> }, { key: "mediaType", header: "Media type", render: (artifact) => artifact.mediaType }, { key: "size", header: "Size", render: (artifact) => `${artifact.size.toLocaleString()} bytes` }]} /></CardContent></Card><NodeAssignmentComposer fixedReleaseId={release.id} title="Assign this release" /></div></PageFrame>; }
 
 function AssignPage() { return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Assign" }]}><PageHeader title="Assign content" description="Choose seeded or uploaded media, or a published Cable TV profile, and send it to any node." /><NodeAssignmentComposer /></PageFrame>; }
+function RemoteControlPage() {
+  const { sessionId = "" } = useParams({ strict: false });
+  const token = React.useMemo(() => new URLSearchParams(window.location.hash.slice(1)).get("token") ?? "", []);
+  const sequence = React.useRef(0);
+  const [status, setStatus] = React.useState<"ready" | "sending" | "error">(token ? "ready" : "error");
+  const send = async (key: string) => {
+    if (!token || !sessionId) return;
+    setStatus("sending");
+    const response = await fetch(`/api/v1/remote/sessions/${encodeURIComponent(sessionId)}/events`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ sequence: ++sequence.current, type: "key", key }),
+      credentials: "omit",
+      cache: "no-store",
+    });
+    setStatus(response.ok ? "ready" : "error");
+  };
+  const button = (label: string, key: string, className = "") => <button className={`flex min-h-16 items-center justify-center rounded-xl border border-border bg-card text-lg font-semibold text-card-foreground shadow-sm active:bg-accent ${className}`} type="button" onClick={() => void send(key)}>{label}</button>;
+  return <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-5 bg-background p-5 text-foreground">
+    <div className="text-center"><p className="text-xs uppercase tracking-[.24em] text-muted-foreground">Cable remote</p><h1 className="mt-2 text-2xl font-semibold">Channel controls</h1><p className="mt-1 text-sm text-muted-foreground">{status === "error" ? "Remote session unavailable" : status === "sending" ? "Sending…" : "Connected"}</p></div>
+    <div className="grid grid-cols-3 gap-3"><span />{button("↑", "ArrowUp")}<span />{button("←", "ArrowLeft")}{button("OK", "Enter")}{button("→", "ArrowRight")}<span />{button("↓", "ArrowDown")}<span /></div>
+    <div className="grid grid-cols-3 gap-3">{button("Back", "Escape")}{button("−", "VolumeDown")}{button("+", "VolumeUp")}</div>
+    {button("Mute", "Mute")}
+  </main>;
+}
+
 function ActivityPage() { const query = useQuery({ queryKey: queryKeys.activity, queryFn: async () => { const nodes = readApiResult(await api.GET("/nodes", { params: { query: { limit: 100 } } })); const eventPages = await Promise.all(nodes.items.map(async (node) => ({ node, page: await listNodeEvents(node.id) }))); return eventPages.flatMap(({ node, page }) => page.items.map((event) => ({ ...event, nodeName: node.name, nodeId: node.id }))).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)); } }); if (query.isPending) return <RoutePending />; return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Operations" }, { label: "Activity" }]}><PageHeader title="Activity" description="Recent node events collected through the controller event stream." />{query.isError ? <QueryError error={query.error} retry={() => void query.refetch()} /> : <Card><CardHeader><CardTitle>Recent events</CardTitle></CardHeader><CardContent><TanStackDataTable caption="Operations activity" rows={query.data} rowKey={(event) => event.id} empty={<EmptyState title="No activity" description="The controller has not reported any node events." />} columns={[{ key: "node", header: "Node", render: (event) => <Link className="text-primary hover:underline" to="/nodes/$nodeId" params={{ nodeId: event.nodeId }}>{event.nodeName}</Link> }, { key: "type", header: "Type", render: (event) => event.type }, { key: "sequence", header: "Sequence", render: (event) => event.sequence }, { key: "occurred", header: "Occurred", render: (event) => <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleString()}</time> }]} /></CardContent></Card>}</PageFrame>; }
 function BoundaryPage({ title, description }: { title: string; description: string }) { return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: title }]}><PageHeader title={title} description={description} /><EmptyState title="Navigation boundary" description="Cable authoring is not part of the controller workspace. Use the Cable application to manage deployments." /></PageFrame>; }
 
@@ -238,12 +265,14 @@ const deploymentRevisionsRoute = createRoute({ getParentRoute: () => rootRoute, 
 const deploymentPublishRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/deployments/$deploymentId/publish", component: () => <CableDeploymentDetail tab="publish" /> });
 const channelDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/channels/$channelId", component: () => <CableChannelDetail /> });
 const channelProgramsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/channels/$channelId/programs", component: () => <CableChannelDetail tab="programs" /> });
+const programDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/programs/$programId", component: CableProgramDetailPage });
 const shellBuildsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/shell-builds", component: ShellBuildsPage });
 const revisionDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/revisions/$revisionId", component: RevisionDetailPage });
 const cableReleaseRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/releases/$releaseId", component: CableReleaseAssignmentPage });
 const activityRoute = createRoute({ getParentRoute: () => rootRoute, path: "/activity", component: ActivityPage });
 const assignRoute = createRoute({ getParentRoute: () => rootRoute, path: "/assign", component: AssignPage });
-const routeTree = rootRoute.addChildren([indexRoute, nodesRoute, nodeDetailRoute, nodeAssignmentRoute, nodePlaybackRoute, nodeCacheRoute, nodeCapabilitiesRoute, nodeEventsRoute, assignRoute, assetsRoute, assetDetailRoute, uploadsRoute, releasesRoute, releaseDetailRoute, deploymentsRoute, deploymentDetailRoute, deploymentChannelsRoute, deploymentScheduleRoute, deploymentRevisionsRoute, deploymentPublishRoute, channelDetailRoute, channelProgramsRoute, shellBuildsRoute, revisionDetailRoute, cableReleaseRoute, activityRoute]);
+const remoteControlRoute = createRoute({ getParentRoute: () => rootRoute, path: "/remote/$sessionId", component: RemoteControlPage });
+const routeTree = rootRoute.addChildren([indexRoute, remoteControlRoute, nodesRoute, nodeDetailRoute, nodeAssignmentRoute, nodePlaybackRoute, nodeCacheRoute, nodeCapabilitiesRoute, nodeEventsRoute, assignRoute, assetsRoute, assetDetailRoute, uploadsRoute, releasesRoute, releaseDetailRoute, deploymentsRoute, deploymentDetailRoute, deploymentChannelsRoute, deploymentScheduleRoute, deploymentRevisionsRoute, deploymentPublishRoute, channelDetailRoute, channelProgramsRoute, programDetailRoute, shellBuildsRoute, revisionDetailRoute, cableReleaseRoute, activityRoute]);
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 declare module "@tanstack/react-router" { interface Register { router: typeof router } }
 export type AppRouter = typeof router;

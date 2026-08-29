@@ -14,12 +14,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	playerclient "github.com/jmill/cable/internal/player/client"
 	"github.com/jmill/cable/internal/release"
 )
+
+type RemoteEventSource interface {
+	PollRemoteEvents(context.Context, string, int64, time.Duration) (playerclient.RemoteEventPage, error)
+}
 
 type ChromiumConfig struct {
 	BinaryPath   string
@@ -29,6 +35,7 @@ type ChromiumConfig struct {
 	ExtraArgs    []string
 	Output       io.Writer
 	Launcher     BrowserLauncher
+	Remote       RemoteEventSource
 }
 
 // Chromium owns the local shell server and the browser process. It never
@@ -40,6 +47,7 @@ type Chromium struct {
 	Timeout      time.Duration
 	Output       io.Writer
 	launcher     BrowserLauncher
+	Remote       RemoteEventSource
 
 	mu       sync.Mutex
 	server   *http.Server
@@ -50,14 +58,15 @@ type Chromium struct {
 }
 
 type chromiumState struct {
-	candidate    Candidate
-	root         string
-	profile      string
-	entrypoint   string
-	healthPath   string
-	presentation []byte
-	media        map[string]string
-	ready        bool
+	candidate       Candidate
+	root            string
+	profile         string
+	entrypoint      string
+	healthPath      string
+	presentation    []byte
+	media           map[string]string
+	remoteSessionID string
+	ready           bool
 }
 
 func NewChromium(config ChromiumConfig) (*Chromium, error) {
@@ -79,7 +88,7 @@ func NewChromium(config ChromiumConfig) (*Chromium, error) {
 	if host, _, err := net.SplitHostPort(config.LoopbackAddr); err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 		return nil, errors.New("Chromium bridge must bind a loopback IP address")
 	}
-	return &Chromium{RuntimeRoot: config.RuntimeRoot, LoopbackAddr: config.LoopbackAddr, Timeout: config.Timeout, Output: config.Output, launcher: config.Launcher}, nil
+	return &Chromium{RuntimeRoot: config.RuntimeRoot, LoopbackAddr: config.LoopbackAddr, Timeout: config.Timeout, Output: config.Output, Remote: config.Remote, launcher: config.Launcher}, nil
 }
 
 func (c *Chromium) Prepare(_ context.Context, candidate Candidate) error {
@@ -146,7 +155,11 @@ func (c *Chromium) Prepare(_ context.Context, candidate Candidate) error {
 	}
 	c.mu.Lock()
 	removeChromiumState(c.pending)
-	c.pending = &chromiumState{candidate: candidate, root: root, profile: profile, entrypoint: candidate.Entrypoint, healthPath: "/bridge/v1/presentation", presentation: presentation, media: media}
+	remoteSessionID := ""
+	if candidate.Remote != nil {
+		remoteSessionID = candidate.Remote.SessionID
+	}
+	c.pending = &chromiumState{candidate: candidate, root: root, profile: profile, entrypoint: candidate.Entrypoint, healthPath: "/bridge/v1/presentation", presentation: presentation, media: media, remoteSessionID: remoteSessionID}
 	c.mu.Unlock()
 	return nil
 }
@@ -234,6 +247,9 @@ func (c *Chromium) Start(ctx context.Context, candidate Candidate) error {
 	mux.HandleFunc("/bridge/v1/presentation", func(w http.ResponseWriter, r *http.Request) { c.servePresentation(w, r, state) })
 	mux.HandleFunc("/bridge/v1/ready", func(w http.ResponseWriter, r *http.Request) { c.serveReady(w, r, state) })
 	mux.HandleFunc("/bridge/v1/media/", func(w http.ResponseWriter, r *http.Request) { c.serveMedia(w, r, state) })
+	if state.remoteSessionID != "" && c.Remote != nil {
+		mux.HandleFunc("/bridge/v1/remote/events", func(w http.ResponseWriter, r *http.Request) { c.serveRemoteEvents(w, r, state) })
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { c.serveStatic(w, r, state) })
 	listener, err := net.Listen("tcp", c.LoopbackAddr)
 	if err != nil {
@@ -383,6 +399,32 @@ func (c *Chromium) servePresentation(w http.ResponseWriter, r *http.Request, sta
 		_, _ = w.Write(state.presentation)
 	}
 }
+func (c *Chromium) serveRemoteEvents(w http.ResponseWriter, r *http.Request, state *chromiumState) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	after, err := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	if err != nil || after < 0 {
+		http.Error(w, "invalid remote event cursor", http.StatusBadRequest)
+		return
+	}
+	waitSeconds, err := strconv.Atoi(r.URL.Query().Get("waitSeconds"))
+	if err != nil || waitSeconds < 0 || waitSeconds > 30 {
+		http.Error(w, "invalid remote event wait", http.StatusBadRequest)
+		return
+	}
+	page, err := c.Remote.PollRemoteEvents(r.Context(), state.remoteSessionID, after, time.Duration(waitSeconds)*time.Second)
+	if err != nil {
+		http.Error(w, "remote input unavailable", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(page)
+}
+
 func (c *Chromium) serveMedia(w http.ResponseWriter, r *http.Request, state *chromiumState) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -583,6 +625,10 @@ type revisionChannel struct {
 }
 type revisionProgram struct {
 	ID             string    `json:"id"`
+	BlockID        string    `json:"blockId"`
+	ItemID         string    `json:"itemId"`
+	ItemPosition   int       `json:"itemPosition"`
+	Occurrence     int       `json:"occurrence"`
 	StartsAt       time.Time `json:"startsAt"`
 	EndsAt         time.Time `json:"endsAt"`
 	ArtifactDigest string    `json:"artifactDigest"`
@@ -640,31 +686,44 @@ func transformRevision(data []byte, candidate Candidate) ([]byte, error) {
 		Mime      string `json:"mime"`
 	}
 	type occurrence struct {
-		ID        string    `json:"id"`
-		ChannelID string    `json:"channelId"`
-		StartsAt  time.Time `json:"startsAt"`
-		EndsAt    time.Time `json:"endsAt"`
-		Title     string    `json:"title"`
-		Subtitle  string    `json:"subtitle,omitempty"`
-		Media     media     `json:"media"`
-		Placard   string    `json:"placard"`
-		Fit       string    `json:"fit"`
-		Loop      bool      `json:"loop"`
-		Muted     bool      `json:"muted"`
-		Volume    float64   `json:"volume"`
+		ID           string    `json:"id"`
+		BlockID      string    `json:"blockId,omitempty"`
+		ItemID       string    `json:"itemId,omitempty"`
+		ItemPosition int       `json:"itemPosition,omitempty"`
+		Occurrence   int       `json:"occurrence,omitempty"`
+		ChannelID    string    `json:"channelId"`
+		StartsAt     time.Time `json:"startsAt"`
+		EndsAt       time.Time `json:"endsAt"`
+		Title        string    `json:"title"`
+		Subtitle     string    `json:"subtitle,omitempty"`
+		Media        media     `json:"media"`
+		Placard      string    `json:"placard"`
+		Fit          string    `json:"fit"`
+		Loop         bool      `json:"loop"`
+		Muted        bool      `json:"muted"`
+		Volume       float64   `json:"volume"`
 	}
 	type bridge struct {
 		ProtocolVersion string `json:"protocolVersion"`
 		State           string `json:"state"`
 	}
+	type remoteDescriptor struct {
+		URL       string    `json:"url"`
+		ShowQR    bool      `json:"showQr"`
+		ExpiresAt time.Time `json:"expiresAt"`
+	}
 	type output struct {
-		Revision    revisionMeta `json:"revision"`
-		Channels    []outChannel `json:"channels"`
-		Occurrences []occurrence `json:"occurrences"`
-		Bridge      bridge       `json:"bridge"`
-		Theme       string       `json:"theme"`
+		Revision    revisionMeta      `json:"revision"`
+		Channels    []outChannel      `json:"channels"`
+		Occurrences []occurrence      `json:"occurrences"`
+		Bridge      bridge            `json:"bridge"`
+		Theme       string            `json:"theme"`
+		Remote      *remoteDescriptor `json:"remote,omitempty"`
 	}
 	result := output{Revision: revisionMeta{ID: id, Digest: digest, GeneratedAt: doc.GeneratedAt, Timezone: doc.Timezone}, Channels: []outChannel{}, Occurrences: []occurrence{}, Theme: doc.Theme, Bridge: bridge{ProtocolVersion: candidate.BridgeProtocol, State: "online"}}
+	if candidate.Remote != nil {
+		result.Remote = &remoteDescriptor{URL: candidate.Remote.URL, ShowQR: candidate.Remote.ShowQR, ExpiresAt: candidate.Remote.ExpiresAt}
+	}
 	for _, ch := range doc.Channels {
 		oc := outChannel{ID: ch.ID, Number: ch.Number, Name: ch.Name, Callsign: ch.Callsign, Accent: ch.Accent, Enabled: ch.Enabled}
 		if ch.Standby {
@@ -689,7 +748,7 @@ func transformRevision(data []byte, candidate Candidate) ([]byte, error) {
 			if placard != "always" && placard != "start" && placard != "never" {
 				return nil, fmt.Errorf("unsupported placard policy %q", placard)
 			}
-			result.Occurrences = append(result.Occurrences, occurrence{ID: p.ID, ChannelID: ch.ID, StartsAt: p.StartsAt, EndsAt: p.EndsAt, Title: p.Title, Subtitle: p.Subtitle, Media: media{Kind: kind, Reference: "/bridge/v1/media/" + p.ArtifactDigest, Mime: mime}, Placard: placard, Fit: p.Fit, Loop: p.Loop, Muted: p.Mute, Volume: p.Volume * 100})
+			result.Occurrences = append(result.Occurrences, occurrence{ID: p.ID, BlockID: p.BlockID, ItemID: p.ItemID, ItemPosition: p.ItemPosition, Occurrence: p.Occurrence, ChannelID: ch.ID, StartsAt: p.StartsAt, EndsAt: p.EndsAt, Title: p.Title, Subtitle: p.Subtitle, Media: media{Kind: kind, Reference: "/bridge/v1/media/" + p.ArtifactDigest, Mime: mime}, Placard: placard, Fit: p.Fit, Loop: p.Loop, Muted: p.Mute, Volume: p.Volume * 100})
 		}
 	}
 	return json.Marshal(result)

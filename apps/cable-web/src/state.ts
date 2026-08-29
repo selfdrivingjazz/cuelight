@@ -51,7 +51,7 @@ export function runtimeReducer(state: RuntimeState, action: RuntimeAction): Runt
       if (state.kind !== "ready" && state.kind !== "stale-offline") return state;
       return { kind: "warming", presentation: state.presentation, occurrence: action.occurrence };
     case "TUNE_LIVE":
-      if (state.kind !== "ready" && state.kind !== "stale-offline") return state;
+      if (!("presentation" in state)) return state;
       return { kind: "player-opening", presentation: state.presentation, occurrence: action.occurrence };
     case "ARTIFACT_READY":
       if (state.kind !== "warming") return state;

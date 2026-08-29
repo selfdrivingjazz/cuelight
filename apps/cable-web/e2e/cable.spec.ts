@@ -1,10 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 import { presentationFixture } from "../src/presentation";
+function livePresentation() {
+  const startsAt = new Date(Date.now() - 60_000).toISOString();
+  const endsAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  return { ...presentationFixture, occurrences: presentationFixture.occurrences.map((occurrence) => ({ ...occurrence, startsAt, endsAt })) };
+}
+
 
 async function interceptBridge(page: Page) {
   let readyCalls = 0;
   await page.route("**/bridge/v1/presentation", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(presentationFixture) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(livePresentation()) });
   });
   await page.route("**/bridge/v1/ready", async (route) => {
     readyCalls += 1;
@@ -40,8 +46,6 @@ test("viewer can tune channels with the legacy grid controls", async ({ page }) 
   await expect.poll(readinessCount).toBe(1);
   const gallery = page.getByRole("button", { name: /02 Gallery GALL/ });
   await gallery.press("Enter");
-  await expect(page.locator(".header-title")).toHaveText("Night archive");
-  await page.getByRole("button", { name: /Night archive/ }).click();
   await expect(page).toHaveURL(/player/);
   await expect(page.getByRole("heading", { name: "Night archive" })).toBeVisible();
 });
@@ -55,7 +59,7 @@ test("viewer can retry a failed bridge load", async ({ page }) => {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "offline" }) });
       return;
     }
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(presentationFixture) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(livePresentation()) });
   });
   await page.route("**/bridge/v1/ready", async (route) => {
     readyCalls += 1;
@@ -63,7 +67,8 @@ test("viewer can retry a failed bridge load", async ({ page }) => {
   });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Unable to load lineup" })).toBeVisible();
-  await page.getByRole("button", { name: "Retry bridge" }).click();
+  await expect(page.locator(".splash-screen")).toBeHidden({ timeout: 6_000 });
+  await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.locator(".header-title")).toHaveText("Signal / Sea");
   await expect.poll(() => readyCalls).toBe(1);
 });
