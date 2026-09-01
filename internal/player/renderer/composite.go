@@ -24,7 +24,7 @@ func NewComposite(media, cable Adapter) (*Composite, error) {
 
 func (c *Composite) adapter(candidate Candidate) (Adapter, error) {
 	switch candidate.Kind {
-	case "", release.PresentationMedia:
+	case "", release.PresentationMedia, release.PresentationMediaSchedule:
 		return c.Media, nil
 	case release.PresentationCable:
 		return c.Cable, nil

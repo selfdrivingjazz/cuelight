@@ -1,0 +1,592 @@
+// Package preview contains controller-side expected Cable preview derivation and
+// the durable screenshot-job state machine. It deliberately does not execute
+// rendering; player execution reports a typed terminal unsupported result until
+// a renderer capability is available.
+package preview
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jmill/cable/internal/control/assignment"
+	"github.com/jmill/cable/internal/control/cable"
+)
+
+var (
+	ErrInvalidArgument     = errors.New("invalid preview argument")
+	ErrUnauthorized        = errors.New("preview authorization required")
+	ErrForbidden           = errors.New("preview access forbidden")
+	ErrNotFound            = errors.New("screenshot job not found")
+	ErrConflict            = errors.New("screenshot job conflict")
+	ErrExpired             = errors.New("screenshot job expired")
+	ErrTerminal            = errors.New("screenshot job is terminal")
+	ErrNotClaimed          = errors.New("screenshot job is not claimed")
+	ErrIdempotencyConflict = errors.New("idempotency key was already used with a different request")
+)
+
+// ExpectedPreview is a deterministic, explicitly expected (not observed)
+// rendering target derived from the node's healthy release and an authoritative
+// immutable Cable revision at EffectiveAt.
+type ExpectedPreview struct {
+	Expected           bool      `json:"expected"`
+	ReleaseDigest      string    `json:"releaseDigest"`
+	RevisionDigest     string    `json:"revisionDigest"`
+	ChannelID          string    `json:"channelId,omitempty"`
+	BlockID            string    `json:"blockId,omitempty"`
+	ItemID             string    `json:"itemId,omitempty"`
+	EffectiveAt        time.Time `json:"effectiveAt"`
+	ChannelWindowStart time.Time `json:"channelWindowStart,omitempty"`
+	ChannelWindowEnd   time.Time `json:"channelWindowEnd,omitempty"`
+	BlockWindowStart   time.Time `json:"blockWindowStart,omitempty"`
+	BlockWindowEnd     time.Time `json:"blockWindowEnd,omitempty"`
+	ItemWindowStart    time.Time `json:"itemWindowStart,omitempty"`
+	ItemWindowEnd      time.Time `json:"itemWindowEnd,omitempty"`
+}
+
+type ExpectedPreviewInput struct {
+	HealthyReleaseDigest string
+	Revision             cable.CableRevision
+	At                   time.Time
+}
+
+// DeriveExpectedPreviewFromObservation makes the healthy-release provenance
+// explicit at controller call sites that already hold the accepted node report.
+func DeriveExpectedPreviewFromObservation(observation assignment.Observation, revision cable.CableRevision, at time.Time) (ExpectedPreview, error) {
+	return DeriveExpectedPreview(ExpectedPreviewInput{HealthyReleaseDigest: observation.HealthyReleaseDigest, Revision: revision, At: at})
+}
+
+// DeriveExpectedPreview selects the lowest-numbered enabled non-standby
+// channel, then the first active block and item. Ties are resolved by ID. The
+// schedule uses half-open intervals [start,end), matching Cable compilation.
+// A revision with no active block or item is still a valid expected preview and
+// leaves that level's ID empty.
+func DeriveExpectedPreview(input ExpectedPreviewInput) (ExpectedPreview, error) {
+	releaseDigest := strings.TrimSpace(input.HealthyReleaseDigest)
+	if releaseDigest == "" {
+		return ExpectedPreview{}, fmt.Errorf("%w: healthy release digest is required", ErrInvalidArgument)
+	}
+	if input.Revision.Digest == "" {
+		return ExpectedPreview{}, fmt.Errorf("%w: revision digest is required", ErrInvalidArgument)
+	}
+	if input.At.IsZero() {
+		return ExpectedPreview{}, fmt.Errorf("%w: effective time is required", ErrInvalidArgument)
+	}
+	at := input.At.UTC()
+	result := ExpectedPreview{Expected: true, ReleaseDigest: releaseDigest, RevisionDigest: input.Revision.Digest, EffectiveAt: at}
+	channel, ok := effectiveChannel(input.Revision.Channels)
+	if !ok {
+		return result, nil
+	}
+	result.ChannelID = channel.ID
+	result.ChannelWindowStart = input.Revision.Window.StartsAt.UTC()
+	result.ChannelWindowEnd = input.Revision.Window.EndsAt.UTC()
+	if (!input.Revision.Window.StartsAt.IsZero() && at.Before(input.Revision.Window.StartsAt)) || (!input.Revision.Window.EndsAt.IsZero() && !at.Before(input.Revision.Window.EndsAt)) {
+		return result, nil
+	}
+	block, ok := activeBlock(channel.Blocks, at)
+	if !ok {
+		// Older revisions may only contain the materialized Programs projection.
+		item, itemOK := activeProgram(channel.Programs, at)
+		if itemOK {
+			result.ItemID = itemID(item)
+			result.ItemWindowStart, result.ItemWindowEnd = item.StartsAt.UTC(), item.EndsAt.UTC()
+		}
+		return result, nil
+	}
+	result.BlockID = block.ID
+	result.BlockWindowStart, result.BlockWindowEnd = block.StartsAt.UTC(), block.EndsAt.UTC()
+	item, ok := activeProgram(block.Items, at)
+	if !ok {
+		return result, nil
+	}
+	result.ItemID = itemID(item)
+	result.ItemWindowStart, result.ItemWindowEnd = item.StartsAt.UTC(), item.EndsAt.UTC()
+	return result, nil
+}
+
+func effectiveChannel(channels []cable.RevisionChannel) (cable.RevisionChannel, bool) {
+	for pass := range 3 {
+		var selected cable.RevisionChannel
+		found := false
+		for _, ch := range channels {
+			switch pass {
+			case 0:
+				if !ch.Enabled || ch.Standby {
+					continue
+				}
+			case 1:
+				if !ch.Enabled {
+					continue
+				}
+			}
+			if !found || ch.Number < selected.Number || (ch.Number == selected.Number && ch.ID < selected.ID) {
+				selected, found = ch, true
+			}
+		}
+		if found {
+			return selected, true
+		}
+	}
+	return cable.RevisionChannel{}, false
+}
+
+func activeBlock(blocks []cable.RevisionBlock, at time.Time) (cable.RevisionBlock, bool) {
+	var selected cable.RevisionBlock
+	found := false
+	for _, block := range blocks {
+		if at.Before(block.StartsAt) || !at.Before(block.EndsAt) {
+			continue
+		}
+		if !found || block.StartsAt.Before(selected.StartsAt) || (block.StartsAt.Equal(selected.StartsAt) && block.ID < selected.ID) {
+			selected, found = block, true
+		}
+	}
+	return selected, found
+}
+
+func activeProgram(items []cable.RevisionProgram, at time.Time) (cable.RevisionProgram, bool) {
+	var selected cable.RevisionProgram
+	found := false
+	for _, item := range items {
+		if at.Before(item.StartsAt) || !at.Before(item.EndsAt) {
+			continue
+		}
+		if !found || item.StartsAt.Before(selected.StartsAt) || (item.StartsAt.Equal(selected.StartsAt) && item.ID < selected.ID) {
+			selected, found = item, true
+		}
+	}
+	return selected, found
+}
+
+func itemID(item cable.RevisionProgram) string {
+	if item.ItemID != "" {
+		return item.ItemID
+	}
+	return item.ID
+}
+
+type Status string
+
+const (
+	StatusQueued      Status = "queued"
+	StatusClaimed     Status = "claimed"
+	StatusCompleted   Status = "completed"
+	StatusFailed      Status = "failed"
+	StatusUnsupported Status = "unsupported"
+	StatusExpired     Status = "expired"
+)
+
+func (s Status) terminal() bool {
+	return s == StatusCompleted || s == StatusFailed || s == StatusUnsupported || s == StatusExpired
+}
+
+type ScreenshotJob struct {
+	ID                     string          `json:"id"`
+	NodeID                 string          `json:"nodeId"`
+	Expected               ExpectedPreview `json:"expected"`
+	RequestedAt            time.Time       `json:"requestedAt"`
+	ExpiresAt              time.Time       `json:"expiresAt"`
+	ClaimedAt              *time.Time      `json:"claimedAt,omitempty"`
+	CompletionAt           *time.Time      `json:"completionAt,omitempty"`
+	Status                 Status          `json:"status"`
+	ResultArtifactDigest   string          `json:"resultArtifactDigest,omitempty"`
+	ResultMediaType        string          `json:"resultMediaType,omitempty"`
+	ErrorReason            string          `json:"errorReason,omitempty"`
+	RetentionPolicy        string          `json:"retentionPolicy"`
+	RetentionUntil         time.Time       `json:"retentionUntil"`
+	ArtifactRetentionUntil time.Time       `json:"artifactRetentionUntil"`
+}
+
+type Mutation struct{ ActorID, IdempotencyKey string }
+type CreateInput struct {
+	NodeID   string          `json:"nodeId"`
+	Expected ExpectedPreview `json:"expected"`
+	TTL      time.Duration   `json:"ttl"`
+}
+type Completion struct {
+	Status         Status `json:"status"`
+	ArtifactDigest string `json:"artifactDigest,omitempty"`
+	MediaType      string `json:"mediaType,omitempty"`
+	ErrorReason    string `json:"errorReason,omitempty"`
+}
+type CreateResult struct {
+	Job      ScreenshotJob
+	Replayed bool
+}
+
+type AuditEvent struct {
+	ID      string    `json:"id"`
+	JobID   string    `json:"jobId"`
+	Action  string    `json:"action"`
+	ActorID string    `json:"actorId,omitempty"`
+	NodeID  string    `json:"nodeId"`
+	At      time.Time `json:"at"`
+	Detail  string    `json:"detail,omitempty"`
+}
+type CreateRequest struct {
+	Job                  ScreenshotJob
+	ActorID              string
+	IdempotencyKey       string
+	RequestDigest        string
+	IdempotencyExpiresAt time.Time
+	Audit                AuditEvent
+}
+
+// Repository is the persistence boundary for screenshot jobs. Create must
+// atomically enforce (ActorID, IdempotencyKey, RequestDigest): a live matching
+// record is replayed without another job or audit event, while a mismatched
+// request returns ErrIdempotencyConflict. Claim and Complete must atomically
+// enforce NodeID binding, expiry, and one-way state transitions, persisting the
+// supplied audit event with each successful transition.
+type Repository interface {
+	Create(context.Context, CreateRequest) (ScreenshotJob, bool, error)
+	Get(context.Context, string) (ScreenshotJob, bool, error)
+	Claim(context.Context, string, string, time.Time, AuditEvent) (ScreenshotJob, error)
+	Complete(context.Context, string, string, time.Time, Completion, AuditEvent) (ScreenshotJob, error)
+	Expire(context.Context, string, time.Time, AuditEvent) (ScreenshotJob, bool, error)
+}
+
+type Authorizer interface {
+	Authorize(context.Context, string, string, string) error
+}
+type Clock interface{ Now() time.Time }
+type IDGenerator interface{ NewID() (string, error) }
+type Config struct{ DefaultTTL, MaxTTL, RetentionTTL, ArtifactRetentionTTL time.Duration }
+type Service struct {
+	Repository Repository
+	Authorizer Authorizer
+	Clock      Clock
+	IDs        IDGenerator
+	Config     Config
+}
+
+func (s Service) now() time.Time {
+	if s.Clock != nil {
+		return s.Clock.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+func (s Service) config() Config {
+	c := s.Config
+	if c.DefaultTTL <= 0 {
+		c.DefaultTTL = 5 * time.Minute
+	}
+	if c.MaxTTL <= 0 {
+		c.MaxTTL = 15 * time.Minute
+	}
+	if c.RetentionTTL <= 0 {
+		c.RetentionTTL = 24 * time.Hour
+	}
+	if c.ArtifactRetentionTTL <= 0 {
+		c.ArtifactRetentionTTL = c.RetentionTTL
+	}
+	return c
+}
+func (s Service) authorize(ctx context.Context, actor, action, resource string) error {
+	if actor == "" {
+		return ErrUnauthorized
+	}
+	if s.Authorizer == nil {
+		return nil
+	}
+	if err := s.Authorizer.Authorize(ctx, actor, action, resource); err != nil {
+		return fmt.Errorf("%w: %v", ErrForbidden, err)
+	}
+	return nil
+}
+
+func (s Service) Create(ctx context.Context, m Mutation, input CreateInput) (CreateResult, error) {
+	if s.Repository == nil {
+		return CreateResult{}, errors.New("preview repository is not configured")
+	}
+	if err := s.authorize(ctx, m.ActorID, "screenshot.create", input.NodeID); err != nil {
+		return CreateResult{}, err
+	}
+	if strings.TrimSpace(input.NodeID) == "" || !input.Expected.Expected || input.Expected.ReleaseDigest == "" || input.Expected.RevisionDigest == "" || input.Expected.EffectiveAt.IsZero() {
+		return CreateResult{}, fmt.Errorf("%w: nodeId and expected release/revision/time are required", ErrInvalidArgument)
+	}
+	if strings.TrimSpace(m.IdempotencyKey) == "" {
+		return CreateResult{}, fmt.Errorf("%w: idempotency key is required", ErrInvalidArgument)
+	}
+	c := s.config()
+	ttl := input.TTL
+	if ttl == 0 {
+		ttl = c.DefaultTTL
+	}
+	if ttl <= 0 || ttl > c.MaxTTL {
+		return CreateResult{}, fmt.Errorf("%w: ttl must be positive and no greater than %s", ErrInvalidArgument, c.MaxTTL)
+	}
+	requested := s.now()
+	id, err := s.newID()
+	if err != nil {
+		return CreateResult{}, err
+	}
+	job := ScreenshotJob{ID: id, NodeID: input.NodeID, Expected: input.Expected, RequestedAt: requested, ExpiresAt: requested.Add(ttl), Status: StatusQueued, RetentionPolicy: "retain-until-expiry", RetentionUntil: requested.Add(ttl).Add(c.RetentionTTL), ArtifactRetentionUntil: requested.Add(ttl).Add(c.ArtifactRetentionTTL)}
+	digest, err := requestDigest(input)
+	if err != nil {
+		return CreateResult{}, err
+	}
+	stored, replayed, err := s.Repository.Create(ctx, CreateRequest{Job: job, ActorID: m.ActorID, IdempotencyKey: m.IdempotencyKey, RequestDigest: digest, IdempotencyExpiresAt: job.RetentionUntil, Audit: AuditEvent{ID: auditID(id, "screenshot.requested", requested), JobID: id, Action: "screenshot.requested", ActorID: m.ActorID, NodeID: input.NodeID, At: requested}})
+	if err != nil {
+		return CreateResult{}, err
+	}
+	return CreateResult{Job: stored, Replayed: replayed}, nil
+}
+
+func (s Service) Get(ctx context.Context, actorID, id string) (ScreenshotJob, error) {
+	if err := s.authorize(ctx, actorID, "screenshot.read", id); err != nil {
+		return ScreenshotJob{}, err
+	}
+	if s.Repository == nil || strings.TrimSpace(id) == "" {
+		return ScreenshotJob{}, ErrNotFound
+	}
+	job, ok, err := s.Repository.Get(ctx, id)
+	if err != nil {
+		return ScreenshotJob{}, err
+	}
+	if !ok {
+		return ScreenshotJob{}, ErrNotFound
+	}
+	now := s.now()
+	if !job.Status.terminal() && !now.Before(job.ExpiresAt) {
+		job, _, err = s.Repository.Expire(ctx, id, now, AuditEvent{ID: auditID(id, "screenshot.expired", now), JobID: id, Action: "screenshot.expired", NodeID: job.NodeID, At: now, Detail: "job TTL elapsed"})
+		if err != nil {
+			return ScreenshotJob{}, err
+		}
+	}
+	return job, nil
+}
+
+func (s Service) Claim(ctx context.Context, nodeID, id string) (ScreenshotJob, error) {
+	if s.Repository == nil || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(id) == "" {
+		return ScreenshotJob{}, ErrInvalidArgument
+	}
+	now := s.now()
+	return s.Repository.Claim(ctx, nodeID, id, now, AuditEvent{ID: auditID(id, "screenshot.claimed", now), JobID: id, Action: "screenshot.claimed", NodeID: nodeID, At: now})
+}
+
+func (s Service) Complete(ctx context.Context, nodeID, id string, completion Completion) (ScreenshotJob, error) {
+	if s.Repository == nil || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(id) == "" {
+		return ScreenshotJob{}, ErrInvalidArgument
+	}
+	if err := validateCompletion(completion); err != nil {
+		return ScreenshotJob{}, err
+	}
+	now := s.now()
+	action := "screenshot." + string(completion.Status)
+	return s.Repository.Complete(ctx, nodeID, id, now, completion, AuditEvent{ID: auditID(id, action, now), JobID: id, Action: action, NodeID: nodeID, At: now, Detail: completion.ErrorReason})
+}
+
+func (s Service) CompleteUnsupported(ctx context.Context, nodeID, id, reason string) (ScreenshotJob, error) {
+	return s.Complete(ctx, nodeID, id, Completion{Status: StatusUnsupported, ErrorReason: reason})
+}
+func validateCompletion(c Completion) error {
+	if !c.Status.terminal() || c.Status == StatusExpired || c.Status == StatusQueued || c.Status == StatusClaimed {
+		return fmt.Errorf("%w: completion status must be completed, failed, or unsupported", ErrInvalidArgument)
+	}
+	switch c.Status {
+	case StatusCompleted:
+		if !validDigest(c.ArtifactDigest) || strings.TrimSpace(c.MediaType) == "" {
+			return fmt.Errorf("%w: completed result requires a sha256 artifact digest and media type", ErrInvalidArgument)
+		}
+	case StatusFailed, StatusUnsupported:
+		if strings.TrimSpace(c.ErrorReason) == "" {
+			return fmt.Errorf("%w: terminal error reason is required", ErrInvalidArgument)
+		}
+		if c.ArtifactDigest != "" || c.MediaType != "" {
+			return fmt.Errorf("%w: failed or unsupported result cannot include an artifact", ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+func validDigest(v string) bool {
+	if len(v) != 64 {
+		return false
+	}
+	for _, c := range v {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+func requestDigest(input CreateInput) (string, error) {
+	b, err := json.Marshal(struct {
+		NodeID   string
+		Expected ExpectedPreview
+		TTL      int64
+	}{input.NodeID, input.Expected, int64(input.TTL)})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+func auditID(jobID, action string, at time.Time) string {
+	sum := sha256.Sum256([]byte(jobID + "\x00" + action + "\x00" + at.UTC().Format(time.RFC3339Nano)))
+	return hex.EncodeToString(sum[:])
+}
+func (s Service) newID() (string, error) {
+	if s.IDs != nil {
+		return s.IDs.NewID()
+	}
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%s-%s-%s-%s-%s", hex.EncodeToString(b[0:4]), hex.EncodeToString(b[4:6]), hex.EncodeToString(b[6:8]), hex.EncodeToString(b[8:10]), hex.EncodeToString(b[10:])), nil
+}
+
+// test fixture. SQL adapters can implement Repository with the same atomic
+// transition and audit guarantees.
+type MemoryRepository struct {
+	mu          sync.Mutex
+	jobs        map[string]ScreenshotJob
+	idempotency map[string]memoryIdempotency
+	Audit       []AuditEvent
+}
+type memoryIdempotency struct {
+	Digest    string
+	JobID     string
+	ExpiresAt time.Time
+}
+
+func NewMemoryRepository() *MemoryRepository {
+	return &MemoryRepository{jobs: map[string]ScreenshotJob{}, idempotency: map[string]memoryIdempotency{}}
+}
+func cloneJob(j ScreenshotJob) ScreenshotJob {
+	j.Expected = j.Expected
+	if j.ClaimedAt != nil {
+		v := *j.ClaimedAt
+		j.ClaimedAt = &v
+	}
+	if j.CompletionAt != nil {
+		v := *j.CompletionAt
+		j.CompletionAt = &v
+	}
+	return j
+}
+func (r *MemoryRepository) Create(_ context.Context, req CreateRequest) (ScreenshotJob, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := req.ActorID + "\x00" + req.IdempotencyKey
+	if old, ok := r.idempotency[key]; ok && old.ExpiresAt.After(req.Job.RequestedAt) {
+		if old.Digest != req.RequestDigest {
+			return ScreenshotJob{}, false, ErrIdempotencyConflict
+		}
+		return cloneJob(r.jobs[old.JobID]), true, nil
+	}
+	if _, ok := r.jobs[req.Job.ID]; ok {
+		return ScreenshotJob{}, false, fmt.Errorf("%w: duplicate job id", ErrConflict)
+	}
+	r.jobs[req.Job.ID] = cloneJob(req.Job)
+	r.idempotency[key] = memoryIdempotency{req.RequestDigest, req.Job.ID, req.IdempotencyExpiresAt}
+	r.Audit = append(r.Audit, req.Audit)
+	return cloneJob(req.Job), false, nil
+}
+func (r *MemoryRepository) Get(_ context.Context, id string) (ScreenshotJob, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	return cloneJob(j), ok, nil
+}
+func (r *MemoryRepository) Expire(_ context.Context, id string, now time.Time, a AuditEvent) (ScreenshotJob, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return ScreenshotJob{}, false, nil
+	}
+	if j.Status.terminal() {
+		return cloneJob(j), false, nil
+	}
+	if now.Before(j.ExpiresAt) {
+		return cloneJob(j), false, nil
+	}
+	j.Status = StatusExpired
+	j.ErrorReason = "job TTL elapsed"
+	j.CompletionAt = timePtr(now)
+	r.jobs[id] = j
+	r.Audit = append(r.Audit, a)
+	return cloneJob(j), true, nil
+}
+func (r *MemoryRepository) Claim(_ context.Context, nodeID, id string, now time.Time, a AuditEvent) (ScreenshotJob, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return ScreenshotJob{}, ErrNotFound
+	}
+	if j.NodeID != nodeID {
+		return ScreenshotJob{}, ErrForbidden
+	}
+	if j.Status.terminal() {
+		if j.Status == StatusExpired {
+			return ScreenshotJob{}, ErrExpired
+		}
+		return ScreenshotJob{}, ErrTerminal
+	}
+	if !now.Before(j.ExpiresAt) {
+		j.Status = StatusExpired
+		j.ErrorReason = "job TTL elapsed"
+		j.CompletionAt = timePtr(now)
+		r.jobs[id] = j
+		r.Audit = append(r.Audit, AuditEvent{ID: a.ID, JobID: id, Action: "screenshot.expired", NodeID: nodeID, At: now, Detail: j.ErrorReason})
+		return ScreenshotJob{}, ErrExpired
+	}
+	if j.Status != StatusQueued {
+		return ScreenshotJob{}, ErrConflict
+	}
+	j.Status = StatusClaimed
+	j.ClaimedAt = timePtr(now)
+	r.jobs[id] = j
+	r.Audit = append(r.Audit, a)
+	return cloneJob(j), nil
+}
+func (r *MemoryRepository) Complete(_ context.Context, nodeID, id string, now time.Time, c Completion, a AuditEvent) (ScreenshotJob, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return ScreenshotJob{}, ErrNotFound
+	}
+	if j.NodeID != nodeID {
+		return ScreenshotJob{}, ErrForbidden
+	}
+	if j.Status.terminal() {
+		if j.Status == StatusExpired {
+			return ScreenshotJob{}, ErrExpired
+		}
+		return ScreenshotJob{}, ErrTerminal
+	}
+	if j.Status != StatusClaimed {
+		return ScreenshotJob{}, ErrNotClaimed
+	}
+	if !now.Before(j.ExpiresAt) {
+		j.Status = StatusExpired
+		j.ErrorReason = "job TTL elapsed"
+		j.CompletionAt = timePtr(now)
+		r.jobs[id] = j
+		r.Audit = append(r.Audit, AuditEvent{ID: a.ID, JobID: id, Action: "screenshot.expired", NodeID: nodeID, At: now, Detail: j.ErrorReason})
+		return ScreenshotJob{}, ErrExpired
+	}
+	j.Status = c.Status
+	j.CompletionAt = timePtr(now)
+	j.ResultArtifactDigest = c.ArtifactDigest
+	j.ResultMediaType = c.MediaType
+	j.ErrorReason = c.ErrorReason
+	r.jobs[id] = j
+	r.Audit = append(r.Audit, a)
+	return cloneJob(j), nil
+}
+func timePtr(v time.Time) *time.Time { return &v }

@@ -100,11 +100,11 @@ func (c playerConfig) validate() error {
 			return &configError{field.name, "is required"}
 		}
 	}
-	if c.RendererMode != "appliance" && c.RendererMode != "desktop" {
-		return &configError{"CABLE_PLAYER_RENDERER_MODE", "must be appliance or desktop"}
+	if c.RendererMode != "appliance" && c.RendererMode != "desktop" && c.RendererMode != "mpv-only" {
+		return &configError{"CABLE_PLAYER_RENDERER_MODE", "must be appliance, desktop, or mpv-only"}
 	}
-	if c.RendererMode == "appliance" && c.MPVSocketPath == "" {
-		return &configError{"CABLE_PLAYER_MPV_SOCKET", "is required in appliance mode"}
+	if (c.RendererMode == "appliance" || c.RendererMode == "mpv-only") && c.MPVSocketPath == "" {
+		return &configError{"CABLE_PLAYER_MPV_SOCKET", "is required in appliance or mpv-only mode"}
 	}
 	if c.RendererMode == "desktop" && (c.DesktopRendererURL == "" || c.DesktopRendererToken == "") {
 		return &configError{"desktop renderer", "URL and token are required in desktop mode"}
@@ -124,8 +124,8 @@ func (c playerConfig) validate() error {
 	if len(c.AcceptedMediaTypes) == 0 {
 		return &configError{"CABLE_PLAYER_ACCEPTED_MEDIA_TYPES", "must contain at least one media type"}
 	}
-	if c.PresentationMode != "automatic" && c.PresentationMode != release.PresentationMedia && c.PresentationMode != release.PresentationCable {
-		return &configError{"CABLE_PLAYER_PRESENTATION_MODE", "must be automatic, media, or cable"}
+	if c.PresentationMode != "automatic" && c.PresentationMode != release.PresentationMedia && c.PresentationMode != release.PresentationMediaSchedule && c.PresentationMode != release.PresentationCable {
+		return &configError{"CABLE_PLAYER_PRESENTATION_MODE", "must be automatic, media, media-schedule, or cable"}
 	}
 	if c.Probation <= 0 || c.PollWait < 0 || c.ReconnectMinimum <= 0 || c.ReconnectMaximum < c.ReconnectMinimum || c.PartialGrace < 0 || c.StreamTTL <= c.Probation || c.MPVTimeout <= 0 || c.ChromiumTimeout <= 0 {
 		return &configError{"timing", "durations must be positive, reconnect max must be at least min, and stream TTL must exceed probation"}

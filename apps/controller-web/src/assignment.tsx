@@ -37,7 +37,7 @@ async function mediaRelease(assetId: string): Promise<Release> {
   }));
 }
 
-export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId, title = "Assign content" }: NodeAssignmentComposerProps) {
+export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId, title }: NodeAssignmentComposerProps) {
   const client = useQueryClient();
   const nodeQuery = useQuery({ queryKey: ["assignment-composer", "nodes"], queryFn: nodes });
   const assetQuery = useQuery({ queryKey: ["assignment-composer", "assets"], queryFn: assets, enabled: !fixedAsset && !fixedReleaseId });
@@ -86,19 +86,19 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
   const pending = nodeQuery.isPending || assetQuery.isPending || profileQuery.isPending;
   const queryError = nodeQuery.error ?? assetQuery.error ?? profileQuery.error;
   const options = kind === "media" ? (assetQuery.data?.items ?? []).filter((item) => item.artifact.mediaType.startsWith("video/") || ["image/jpeg", "image/png", "image/webp"].includes(item.artifact.mediaType)) : kind === "profile" ? profileQuery.data?.items ?? [] : [];
-  return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="space-y-4">
+  return <Card>{title && <CardHeader><CardTitle>{title}</CardTitle></CardHeader>}<CardContent className={title ? "space-y-4" : "space-y-4 pt-5"}>
     {queryError instanceof Error && <ErrorState title="Assignment options unavailable" description={queryError.message} onRetry={() => { void nodeQuery.refetch(); void assetQuery.refetch(); void profileQuery.refetch(); }} />}
-    {!fixedNodeId && <label className="block text-sm font-medium">Target node<select className={selectClass} value={nodeId} onChange={(event) => setNodeId(event.currentTarget.value)} disabled={pending}><option value="">Choose a node</option>{nodeQuery.data?.items.map((node) => <option key={node.id} value={node.id}>{node.name} · generation {node.desiredGeneration ?? 0}</option>)}</select></label>}
-    {!fixedAsset && !fixedReleaseId && <label className="block text-sm font-medium">Content type<select className={selectClass} value={kind} onChange={(event) => { setKind(event.currentTarget.value as SourceKind); setSourceId(""); }}><option value="media">Media asset</option><option value="profile">Cable TV profile</option></select></label>}
-    {!fixedAsset && !fixedReleaseId && <label className="block text-sm font-medium">{kind === "media" ? "Media" : "Cable TV profile"}<select aria-label={kind === "media" ? "Media" : "Cable TV profile"} className={selectClass} value={sourceId} onChange={(event) => setSourceId(event.currentTarget.value)} disabled={pending}><option value="">Choose {kind === "media" ? "media" : "a Cable profile"}</option>{options.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+    {!fixedNodeId && <label className="block text-sm font-medium">Target node<select className={selectClass} value={nodeId} onChange={(event) => setNodeId(event.currentTarget.value)} disabled={pending}><option value="">Choose a node</option>{nodeQuery.data?.items.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></label>}
+    {!fixedAsset && !fixedReleaseId && <label className="block text-sm font-medium">Content type<select className={selectClass} value={kind} onChange={(event) => { setKind(event.currentTarget.value as SourceKind); setSourceId(""); }}><option value="media">Media</option><option value="profile">Cable profile</option></select></label>}
+    {!fixedAsset && !fixedReleaseId && <label className="block text-sm font-medium">{kind === "media" ? "Media" : "Cable profile"}<select aria-label={kind === "media" ? "Media" : "Cable profile"} className={selectClass} value={sourceId} onChange={(event) => setSourceId(event.currentTarget.value)} disabled={pending}><option value="">Choose {kind === "media" ? "media" : "a Cable profile"}</option>{options.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
     {fixedAsset && <p className="text-sm text-muted-foreground">Media: <strong className="text-foreground">{fixedAsset.name}</strong></p>}
     {fixedReleaseId && <p className="break-all text-sm text-muted-foreground">Release: <strong className="font-mono text-foreground">{fixedReleaseId}</strong></p>}
     <div className="grid gap-2 rounded-md border border-border p-3">
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={remoteInput} onChange={(event) => { setRemoteInput(event.currentTarget.checked); if (!event.currentTarget.checked) setShowQR(false); }} />Allow remote input for this node assignment</label>
-      <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={showQR} disabled={!remoteInput} onChange={(event) => setShowQR(event.currentTarget.checked)} />Show remote QR on Cable</label>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={remoteInput} onChange={(event) => { setRemoteInput(event.currentTarget.checked); if (!event.currentTarget.checked) setShowQR(false); }} />Allow remote control</label>
+      <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={showQR} disabled={!remoteInput} onChange={(event) => setShowQR(event.currentTarget.checked)} />Show a remote-control QR code on the node</label>
     </div>
     {mutation.error instanceof Error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
-    {mutation.isSuccess && <p role="status" className="text-sm text-status-success">Assignment advanced to generation {mutation.data.desiredGeneration}.</p>}
+    {mutation.isSuccess && <p role="status" className="text-sm text-status-success">Assignment updated.</p>}
     <Button onClick={() => mutation.mutate()} disabled={pending || mutation.isPending || !nodeId || !sourceId}>{mutation.isPending ? "Assigning…" : "Assign to node"}</Button>
   </CardContent></Card>;
 }

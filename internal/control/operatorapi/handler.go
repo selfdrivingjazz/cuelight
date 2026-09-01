@@ -48,6 +48,8 @@ var OperationScopes = map[string]string{
 	"listCableRevisions": ScopeCableRead, "getCableRevision": ScopeCableRead,
 	"previewCableCompile": ScopeCableRead, "publishCableRevision": ScopeCableWrite,
 	"publishCableRelease": ScopeCableWrite,
+	"getCableBlock":       ScopeCableRead, "updateCablePlaylist": ScopeCableWrite,
+	"updateCableBlock": ScopeCableWrite, "updateCableProfile": ScopeCableWrite,
 }
 
 type Handler struct{ deps Dependencies }
@@ -102,11 +104,15 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("GET /cable/playlists", h.authorized(ScopeCableRead, h.listCablePlaylists))
 	mux.Handle("POST /cable/playlists", h.authorized(ScopeCableWrite, h.createCablePlaylist))
 	mux.Handle("GET /cable/playlists/{playlistId}", h.authorized(ScopeCableRead, h.getCablePlaylist))
+	mux.Handle("PATCH /cable/playlists/{playlistId}", h.authorized(ScopeCableWrite, h.updateCablePlaylist))
 	mux.Handle("GET /cable/channels/{channelId}/blocks", h.authorized(ScopeCableRead, h.listCableBlocks))
 	mux.Handle("POST /cable/channels/{channelId}/blocks", h.authorized(ScopeCableWrite, h.createCableBlock))
+	mux.Handle("GET /cable/blocks/{blockId}", h.authorized(ScopeCableRead, h.getCableBlock))
+	mux.Handle("PATCH /cable/blocks/{blockId}", h.authorized(ScopeCableWrite, h.updateCableBlock))
 	mux.Handle("GET /cable/profiles", h.authorized(ScopeCableRead, h.listCableProfiles))
 	mux.Handle("POST /cable/profiles", h.authorized(ScopeCableWrite, h.createCableProfile))
 	mux.Handle("GET /cable/profiles/{profileId}", h.authorized(ScopeCableRead, h.getCableProfile))
+	mux.Handle("PATCH /cable/profiles/{profileId}", h.authorized(ScopeCableWrite, h.updateCableProfile))
 	mux.Handle("GET /cable/shell-builds", h.authorized(ScopeCableRead, h.listCableShellBuilds))
 	mux.Handle("POST /cable/shell-builds", h.authorized(ScopeCableWrite, h.registerCableShellBuild))
 	mux.Handle("GET /cable/shell-builds/{shellBuildId}", h.authorized(ScopeCableRead, h.getCableShellBuild))

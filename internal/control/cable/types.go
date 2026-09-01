@@ -361,6 +361,69 @@ type ProgrammingRepository interface {
 	ListProfiles(context.Context, string, int) (ProfilePage, error)
 }
 
+// ProgrammingDetailRepository provides canonical block detail reads without
+// forcing older programming repository implementations to grow a method.
+type ProgrammingDetailRepository interface {
+	Block(context.Context, string) (Block, error)
+}
+
+// ProgrammingMutationRepository contains optimistic-concurrency updates for
+// authored programming resources.
+type ProgrammingMutationRepository interface {
+	UpdatePlaylist(context.Context, Mutation, string, PlaylistInput) (Playlist, error)
+	UpdateBlock(context.Context, Mutation, string, BlockInput) (Block, error)
+	UpdateProfile(context.Context, Mutation, string, ProfileInput) (Profile, error)
+}
+
+func (s Service) Deployment(ctx context.Context, id string) (CableDeployment, error) {
+	if s.Repository == nil {
+		return CableDeployment{}, errors.New("cable repository is required")
+	}
+	return s.Repository.Deployment(ctx, id)
+}
+
+func (s Service) Channel(ctx context.Context, id string) (Channel, error) {
+	if s.Repository == nil {
+		return Channel{}, errors.New("cable repository is required")
+	}
+	return s.Repository.Channel(ctx, id)
+}
+
+func (s Service) ProgramEntry(ctx context.Context, id string) (ProgramEntry, error) {
+	if s.Repository == nil {
+		return ProgramEntry{}, errors.New("cable repository is required")
+	}
+	return s.Repository.ProgramEntry(ctx, id)
+}
+
+func (s Service) Playlist(ctx context.Context, id string) (Playlist, error) {
+	repository, err := s.programming()
+	if err != nil {
+		return Playlist{}, err
+	}
+	return repository.Playlist(ctx, id)
+}
+
+func (s Service) Block(ctx context.Context, id string) (Block, error) {
+	repository, err := s.programming()
+	if err != nil {
+		return Block{}, err
+	}
+	detail, ok := repository.(ProgrammingDetailRepository)
+	if !ok {
+		return Block{}, errors.New("Cable block detail repository is required")
+	}
+	return detail.Block(ctx, id)
+}
+
+func (s Service) Profile(ctx context.Context, id string) (Profile, error) {
+	repository, err := s.programming()
+	if err != nil {
+		return Profile{}, err
+	}
+	return repository.Profile(ctx, id)
+}
+
 type ArtifactRepository interface {
 	CableArtifactsForAsset(context.Context, string) ([]Artifact, error)
 }
@@ -633,4 +696,48 @@ func (s Service) CreateProfile(ctx context.Context, m Mutation, in ProfileInput)
 		return Profile{}, err
 	}
 	return repository.CreateProfile(ctx, m, in)
+}
+func (s Service) UpdatePlaylist(ctx context.Context, m Mutation, id string, in PlaylistInput) (Playlist, error) {
+	if e := s.allow(ctx, m, "cable.playlist.update", "playlist", id); e != nil {
+		return Playlist{}, e
+	}
+	repository, err := s.programming()
+	if err != nil {
+		return Playlist{}, err
+	}
+	mutator, ok := repository.(ProgrammingMutationRepository)
+	if !ok {
+		return Playlist{}, errors.New("Cable playlist mutation repository is required")
+	}
+	return mutator.UpdatePlaylist(ctx, m, id, in)
+}
+
+func (s Service) UpdateBlock(ctx context.Context, m Mutation, id string, in BlockInput) (Block, error) {
+	if e := s.allow(ctx, m, "cable.block.update", "block", id); e != nil {
+		return Block{}, e
+	}
+	repository, err := s.programming()
+	if err != nil {
+		return Block{}, err
+	}
+	mutator, ok := repository.(ProgrammingMutationRepository)
+	if !ok {
+		return Block{}, errors.New("Cable block mutation repository is required")
+	}
+	return mutator.UpdateBlock(ctx, m, id, in)
+}
+
+func (s Service) UpdateProfile(ctx context.Context, m Mutation, id string, in ProfileInput) (Profile, error) {
+	if e := s.allow(ctx, m, "cable.profile.update", "profile", id); e != nil {
+		return Profile{}, e
+	}
+	repository, err := s.programming()
+	if err != nil {
+		return Profile{}, err
+	}
+	mutator, ok := repository.(ProgrammingMutationRepository)
+	if !ok {
+		return Profile{}, errors.New("Cable profile mutation repository is required")
+	}
+	return mutator.UpdateProfile(ctx, m, id, in)
 }

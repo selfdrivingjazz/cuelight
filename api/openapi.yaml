@@ -755,6 +755,25 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CablePlaylist"}
         default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: updateCablePlaylist
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CablePlaylistInput"}
+      responses:
+        "200":
+          description: Cable playlist updated.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CablePlaylist"}
+        default: {$ref: "#/components/responses/Problem"}
   /cable/channels/{channelId}/blocks:
     parameters: [{$ref: "#/components/parameters/CableChannelId"}]
     get:
@@ -786,6 +805,44 @@ paths:
       responses:
         "201":
           description: Cable block created and materialized into the channel schedule.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableBlock"}
+        default: {$ref: "#/components/responses/Problem"}
+  /cable/blocks/{blockId}:
+    parameters:
+      - name: blockId
+        in: path
+        required: true
+        schema: {$ref: "#/components/schemas/Id"}
+    get:
+      tags: [operator]
+      operationId: getCableBlock
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Scheduled Cable block.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableBlock"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: updateCableBlock
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableBlockInput"}
+      responses:
+        "200":
+          description: Scheduled Cable block updated.
           headers: {ETag: {$ref: "#/components/headers/ETag"}}
           content:
             application/json:
@@ -840,6 +897,25 @@ paths:
       responses:
         "200":
           description: Assignable Cable television profile.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CableProfile"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: updateCableProfile
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters: [{$ref: "#/components/parameters/IfMatch"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CableProfileInput"}
+      responses:
+        "200":
+          description: Cable profile updated.
           headers: {ETag: {$ref: "#/components/headers/ETag"}}
           content:
             application/json:
@@ -1896,6 +1972,50 @@ components:
       required: [playback]
       properties:
         playback: {$ref: "#/components/schemas/PlaybackPayload"}
+    MediaScheduleWindow:
+      type: object
+      additionalProperties: false
+      required: [startsAt, endsAt]
+      properties:
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+    MediaScheduleItem:
+      type: object
+      additionalProperties: false
+      required: [id, startsAt, endsAt, artifactDigest, mediaType, fit, loop, muted, volume, orientation]
+      properties:
+        id: {type: string, minLength: 1}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        artifactDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        mediaType: {type: string}
+        fit: {type: string, enum: [fit, fill]}
+        loop: {type: boolean}
+        muted: {type: boolean}
+        volume: {type: integer, minimum: 0, maximum: 100}
+        imageDurationSeconds: {type: integer, minimum: 1, maximum: 86400}
+        orientation: {type: integer, enum: [0, 90, 180, 270]}
+    MediaSchedulePresentation:
+      type: object
+      additionalProperties: false
+      required: [timezone, window, items, artifactClosure, allowedDeliveryModes]
+      properties:
+        timezone: {type: string, minLength: 1}
+        window: {$ref: "#/components/schemas/MediaScheduleWindow"}
+        items:
+          type: array
+          minItems: 1
+          items: {$ref: "#/components/schemas/MediaScheduleItem"}
+        artifactClosure:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, pattern: "^[a-f0-9]{64}$"}
+        allowedDeliveryModes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, enum: [stream, cache_then_play]}
     CablePresentation:
       type: object
       required: [shellBuildDigest, revisionArtifactDigest, entrypoint, bridgeProtocol, artifactClosure]
@@ -1913,8 +2033,9 @@ components:
       type: object
       required: [kind]
       properties:
-        kind: {type: string, enum: [media, cable]}
+        kind: {type: string, enum: [media, media-schedule, cable]}
         media: {$ref: "#/components/schemas/MediaPresentation"}
+        mediaSchedule: {$ref: "#/components/schemas/MediaSchedulePresentation"}
         cable: {$ref: "#/components/schemas/CablePresentation"}
       discriminator: {propertyName: kind}
       oneOf:
@@ -1923,6 +2044,11 @@ components:
           properties:
             kind: {type: string, const: media}
             media: {$ref: "#/components/schemas/MediaPresentation"}
+        - type: object
+          required: [kind, mediaSchedule]
+          properties:
+            kind: {type: string, const: media-schedule}
+            mediaSchedule: {$ref: "#/components/schemas/MediaSchedulePresentation"}
         - type: object
           required: [kind, cable]
           properties:
@@ -1974,7 +2100,7 @@ components:
             id: {$ref: "#/components/schemas/Id"}
             nodeId: {$ref: "#/components/schemas/Id"}
             desiredGeneration: {type: integer, format: int64, minimum: 1}
-            presentationKind: {type: string, enum: [media, cable]}
+            presentationKind: {type: string, enum: [media, media-schedule, cable]}
     RemoteEvent:
       type: object
       additionalProperties: false
@@ -2054,7 +2180,7 @@ components:
         sequence: {type: integer, format: int64, minimum: 1}
         desiredGenerationSeen: {type: integer, format: int64, minimum: 0}
         observedGeneration: {type: integer, format: int64, minimum: 0}
-        presentationKind: {type: [string, "null"], enum: [media, cable, null]}
+        presentationKind: {type: [string, "null"], enum: [media, media-schedule, cable, null]}
         renderingReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         candidateReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         healthyReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}

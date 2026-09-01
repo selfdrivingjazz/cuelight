@@ -751,3 +751,94 @@ func (h *Handler) getCableProfile(w http.ResponseWriter, r *http.Request) {
 	setCableETag(w, result.Version)
 	writeJSON(w, http.StatusOK, result)
 }
+func (h *Handler) getCableBlock(w http.ResponseWriter, r *http.Request) {
+	repository := h.cableProgrammingRepository()
+	if repository == nil {
+		writeError(w, errors.New("Cable programming repository is not configured"))
+		return
+	}
+	detail, ok := repository.(cable.ProgrammingDetailRepository)
+	if !ok {
+		writeError(w, errors.New("Cable block detail repository is not configured"))
+		return
+	}
+	result, err := detail.Block(r.Context(), r.PathValue("blockId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) updateCablePlaylist(w http.ResponseWriter, r *http.Request) {
+	version, err := cableIfMatch(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if h.deps.Cable == nil {
+		writeError(w, errors.New("Cable service is not configured"))
+		return
+	}
+	var input cable.PlaylistInput
+	if err := decodeJSON(w, r, h.jsonLimit(), &input); err != nil {
+		writeError(w, err)
+		return
+	}
+	result, err := h.deps.Cable.UpdatePlaylist(r.Context(), cableMutation(r, "", version), r.PathValue("playlistId"), input)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) updateCableBlock(w http.ResponseWriter, r *http.Request) {
+	version, err := cableIfMatch(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if h.deps.Cable == nil {
+		writeError(w, errors.New("Cable service is not configured"))
+		return
+	}
+	var input cable.BlockInput
+	if err := decodeJSON(w, r, h.jsonLimit(), &input); err != nil {
+		writeError(w, err)
+		return
+	}
+	result, err := h.deps.Cable.UpdateBlock(r.Context(), cableMutation(r, "", version), r.PathValue("blockId"), input)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) updateCableProfile(w http.ResponseWriter, r *http.Request) {
+	version, err := cableIfMatch(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if h.deps.Cable == nil {
+		writeError(w, errors.New("Cable service is not configured"))
+		return
+	}
+	var input cable.ProfileInput
+	if err := decodeJSON(w, r, h.jsonLimit(), &input); err != nil {
+		writeError(w, err)
+		return
+	}
+	result, err := h.deps.Cable.UpdateProfile(r.Context(), cableMutation(r, "", version), r.PathValue("profileId"), input)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setCableETag(w, result.Version)
+	writeJSON(w, http.StatusOK, result)
+}

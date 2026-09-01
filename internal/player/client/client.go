@@ -177,7 +177,7 @@ func (c *Client) GetAssignment(ctx context.Context, etag string, wait time.Durat
 	if err := decodeJSON(response.Body, &assignment); err != nil {
 		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid JSON body"}
 	}
-	if assignment.PresentationKind != release.PresentationMedia && assignment.PresentationKind != release.PresentationCable {
+	if assignment.PresentationKind != release.PresentationMedia && assignment.PresentationKind != release.PresentationCable && assignment.PresentationKind != release.PresentationMediaSchedule {
 		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid presentation kind"}
 	}
 	return AssignmentResult{Assignment: assignment, ETag: responseETag}, nil

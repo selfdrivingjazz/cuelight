@@ -493,7 +493,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        patch: operations["updateCablePlaylist"];
         trace?: never;
     };
     "/cable/channels/{channelId}/blocks": {
@@ -512,6 +512,24 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/cable/blocks/{blockId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                blockId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCableBlock"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateCableBlock"];
         trace?: never;
     };
     "/cable/profiles": {
@@ -545,7 +563,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        patch: operations["updateCableProfile"];
         trace?: never;
     };
     "/cable/shell-builds": {
@@ -1365,6 +1383,36 @@ export interface components {
         MediaPresentation: {
             playback: components["schemas"]["PlaybackPayload"];
         };
+        MediaScheduleWindow: {
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+        };
+        MediaScheduleItem: {
+            id: string;
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+            artifactDigest: string;
+            mediaType: string;
+            /** @enum {string} */
+            fit: "fit" | "fill";
+            loop: boolean;
+            muted: boolean;
+            volume: number;
+            imageDurationSeconds?: number;
+            /** @enum {integer} */
+            orientation: 0 | 90 | 180 | 270;
+        };
+        MediaSchedulePresentation: {
+            timezone: string;
+            window: components["schemas"]["MediaScheduleWindow"];
+            items: components["schemas"]["MediaScheduleItem"][];
+            artifactClosure: string[];
+            allowedDeliveryModes: ("stream" | "cache_then_play")[];
+        };
         CablePresentation: {
             shellBuildDigest: string;
             revisionArtifactDigest: string;
@@ -1374,13 +1422,18 @@ export interface components {
         };
         ReleasePresentation: {
             /** @enum {string} */
-            kind: "media" | "cable";
+            kind: "media" | "media-schedule" | "cable";
             media?: components["schemas"]["MediaPresentation"];
+            mediaSchedule?: components["schemas"]["MediaSchedulePresentation"];
             cable?: components["schemas"]["CablePresentation"];
         } & ({
             /** @constant */
             kind: "media";
             media: components["schemas"]["MediaPresentation"];
+        } | {
+            /** @constant */
+            kind: "media-schedule";
+            mediaSchedule: components["schemas"]["MediaSchedulePresentation"];
         } | {
             /** @constant */
             kind: "cable";
@@ -1423,7 +1476,7 @@ export interface components {
             /** Format: int64 */
             desiredGeneration: number;
             /** @enum {string} */
-            presentationKind?: "media" | "cable";
+            presentationKind?: "media" | "media-schedule" | "cable";
         };
         RemoteEvent: {
             /** Format: int64 */
@@ -1496,7 +1549,7 @@ export interface components {
             /** Format: int64 */
             observedGeneration: number;
             /** @enum {string|null} */
-            presentationKind: "media" | "cable" | null;
+            presentationKind: "media" | "media-schedule" | "cable" | null;
             renderingReleaseDigest?: string | null;
             candidateReleaseDigest?: string | null;
             healthyReleaseDigest?: string | null;
@@ -2728,6 +2781,36 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    updateCablePlaylist: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                playlistId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CablePlaylistInput"];
+            };
+        };
+        responses: {
+            /** @description Cable playlist updated. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CablePlaylist"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     listCableBlocks: {
         parameters: {
             query?: {
@@ -2774,6 +2857,60 @@ export interface operations {
         responses: {
             /** @description Cable block created and materialized into the channel schedule. */
             201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableBlock"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableBlock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                blockId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scheduled Cable block. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableBlock"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateCableBlock: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                blockId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableBlockInput"];
+            };
+        };
+        responses: {
+            /** @description Scheduled Cable block updated. */
+            200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
@@ -2850,6 +2987,36 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Assignable Cable television profile. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableProfile"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateCableProfile: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                profileId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Cable profile updated. */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];

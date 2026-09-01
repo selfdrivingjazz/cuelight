@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -28,17 +29,52 @@ const (
 type PresentationKind string
 
 const (
-	PresentationMedia PresentationKind = "media"
-	PresentationCable PresentationKind = "cable"
+	PresentationMedia         PresentationKind = "media"
+	PresentationCable         PresentationKind = "cable"
+	PresentationMediaSchedule PresentationKind = "media-schedule"
 )
 
 type MediaPresentation struct {
 	Playback PlaybackPayload `json:"playback"`
 }
 
-// CablePresentation identifies the immutable shell and compiled revision. The
-// closure is repeated in the presentation so a player can reject a release
-// whose artifact list is incomplete before attempting activation.
+// MediaScheduleWindow bounds a schedule using UTC timestamps. Timezone is
+// retained separately for operators and does not change timestamp semantics.
+type MediaScheduleWindow struct {
+	StartsAt string `json:"startsAt"`
+	EndsAt   string `json:"endsAt"`
+}
+
+// MediaScheduleItem is an immutable, timestamped media occurrence. Sources
+// are resolved from ArtifactDigest by the player after verification.
+type MediaScheduleItem struct {
+	ID                  string `json:"id"`
+	StartsAt            string `json:"startsAt"`
+	EndsAt              string `json:"endsAt"`
+	ArtifactDigest      string `json:"artifactDigest"`
+	MediaType           string `json:"mediaType"`
+	Fit                 string `json:"fit"`
+	Loop                bool   `json:"loop"`
+	Muted               bool   `json:"muted"`
+	Volume              int    `json:"volume"`
+	ImageDurationSecond int    `json:"imageDurationSeconds,omitempty"`
+	Orientation         int    `json:"orientation"`
+}
+
+// MediaSchedulePresentation is the signed MPV-compatible presentation form.
+// ArtifactClosure must contain exactly the payload artifacts, allowing a node
+type MediaSchedulePresentation struct {
+	Timezone             string              `json:"timezone"`
+	Window               MediaScheduleWindow `json:"window"`
+	Items                []MediaScheduleItem `json:"items"`
+	ArtifactClosure      []string            `json:"artifactClosure"`
+	AllowedDeliveryModes []string            `json:"allowedDeliveryModes"`
+}
+
+// MediaSchedule is retained as a concise alias for callers constructing
+// presentation payloads.
+type MediaSchedule = MediaSchedulePresentation
+
 type CablePresentation struct {
 	ShellBuildDigest       string   `json:"shellBuildDigest"`
 	RevisionArtifactDigest string   `json:"revisionArtifactDigest"`
@@ -50,9 +86,10 @@ type CablePresentation struct {
 // Presentation is the signed release discriminator. Exactly one variant must
 // be populated, matching Kind.
 type Presentation struct {
-	Kind  PresentationKind   `json:"kind"`
-	Media *MediaPresentation `json:"media,omitempty"`
-	Cable *CablePresentation `json:"cable,omitempty"`
+	Kind          PresentationKind           `json:"kind"`
+	Media         *MediaPresentation         `json:"media,omitempty"`
+	MediaSchedule *MediaSchedulePresentation `json:"mediaSchedule,omitempty"`
+	Cable         *CablePresentation         `json:"cable,omitempty"`
 }
 
 type Artifact struct {
@@ -256,10 +293,32 @@ func normalized(payload PayloadV1) PayloadV1 {
 		payload.Presentation.Media = &media
 		payload.Playback = media.Playback
 	}
-	if payload.Presentation.Kind == PresentationCable && payload.Presentation.Cable != nil {
-		cable := *payload.Presentation.Cable
-		cable.ArtifactClosure = sortedUnique(cable.ArtifactClosure)
-		payload.Presentation.Cable = &cable
+	if payload.Presentation.Kind == PresentationMediaSchedule && payload.Presentation.MediaSchedule != nil {
+		schedule := *payload.Presentation.MediaSchedule
+		schedule.ArtifactClosure = sortedUnique(schedule.ArtifactClosure)
+		schedule.AllowedDeliveryModes = sortedUnique(schedule.AllowedDeliveryModes)
+		if value, err := time.Parse(time.RFC3339Nano, schedule.Window.StartsAt); err == nil {
+			schedule.Window.StartsAt = value.UTC().Format(time.RFC3339Nano)
+		}
+		if value, err := time.Parse(time.RFC3339Nano, schedule.Window.EndsAt); err == nil {
+			schedule.Window.EndsAt = value.UTC().Format(time.RFC3339Nano)
+		}
+		schedule.Items = slices.Clone(schedule.Items)
+		for index := range schedule.Items {
+			if value, err := time.Parse(time.RFC3339Nano, schedule.Items[index].StartsAt); err == nil {
+				schedule.Items[index].StartsAt = value.UTC().Format(time.RFC3339Nano)
+			}
+			if value, err := time.Parse(time.RFC3339Nano, schedule.Items[index].EndsAt); err == nil {
+				schedule.Items[index].EndsAt = value.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		slices.SortFunc(schedule.Items, func(a, b MediaScheduleItem) int {
+			if result := strings.Compare(a.StartsAt, b.StartsAt); result != 0 {
+				return result
+			}
+			return strings.Compare(a.ID, b.ID)
+		})
+		payload.Presentation.MediaSchedule = &schedule
 	}
 	return payload
 }
@@ -284,7 +343,6 @@ func parseVersion(value string) ([2]int, error) {
 	}
 	return version, nil
 }
-
 func validate(payload PayloadV1) error {
 	if payload.SchemaVersion != SchemaVersion && payload.SchemaVersion != LegacySchemaVersion {
 		return fmt.Errorf("schemaVersion must be %q or %q", SchemaVersion, LegacySchemaVersion)
@@ -296,7 +354,17 @@ func validate(payload PayloadV1) error {
 	if presentation.Kind == "" && payload.Playback.AssetID != "" {
 		presentation = Presentation{Kind: PresentationMedia, Media: &MediaPresentation{Playback: payload.Playback}}
 	}
-	if (presentation.Media == nil) == (presentation.Cable == nil) {
+	var variants int
+	if presentation.Media != nil {
+		variants++
+	}
+	if presentation.MediaSchedule != nil {
+		variants++
+	}
+	if presentation.Cable != nil {
+		variants++
+	}
+	if variants != 1 {
 		return errors.New("exactly one release presentation variant is required")
 	}
 	switch presentation.Kind {
@@ -310,6 +378,13 @@ func validate(payload PayloadV1) error {
 		if err := validatePlayback(presentation.Media.Playback); err != nil {
 			return err
 		}
+	case PresentationMediaSchedule:
+		if presentation.MediaSchedule == nil {
+			return errors.New("media schedule presentation is required")
+		}
+		if err := validateMediaSchedule(*presentation.MediaSchedule, payload.Artifacts); err != nil {
+			return err
+		}
 	case PresentationCable:
 		if presentation.Cable == nil {
 			return errors.New("cable presentation is required")
@@ -318,7 +393,7 @@ func validate(payload PayloadV1) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("presentation kind must be %q or %q", PresentationMedia, PresentationCable)
+		return fmt.Errorf("presentation kind must be %q, %q, or %q", PresentationMedia, PresentationMediaSchedule, PresentationCable)
 	}
 	if len(payload.Artifacts) == 0 {
 		return errors.New("at least one artifact is required")
@@ -355,6 +430,115 @@ func validatePlayback(playback PlaybackPayload) error {
 	for _, mode := range playback.AllowedDeliveryMode {
 		if mode != "stream" && mode != "cache_then_play" {
 			return fmt.Errorf("unsupported delivery mode %q", mode)
+		}
+	}
+	return nil
+}
+
+func validateMediaSchedule(schedule MediaSchedulePresentation, artifacts []Artifact) error {
+	if schedule.Timezone == "" {
+		return errors.New("timezone is required")
+	}
+	if _, err := time.LoadLocation(schedule.Timezone); err != nil {
+		return fmt.Errorf("invalid timezone: %w", err)
+	}
+	windowStart, err := time.Parse(time.RFC3339Nano, schedule.Window.StartsAt)
+	if err != nil {
+		return fmt.Errorf("window startsAt: %w", err)
+	}
+	windowEnd, err := time.Parse(time.RFC3339Nano, schedule.Window.EndsAt)
+	if err != nil {
+		return fmt.Errorf("window endsAt: %w", err)
+	}
+	if !windowStart.Before(windowEnd) {
+		return errors.New("schedule window must be non-empty")
+	}
+	if len(schedule.Items) == 0 {
+		return errors.New("schedule items are required")
+	}
+	if len(schedule.AllowedDeliveryModes) == 0 {
+		return errors.New("at least one delivery mode is required")
+	}
+	for _, mode := range schedule.AllowedDeliveryModes {
+		if mode != "stream" && mode != "cache_then_play" {
+			return fmt.Errorf("unsupported delivery mode %q", mode)
+		}
+	}
+	artifactTypes := make(map[string]string, len(artifacts))
+	for _, artifact := range artifacts {
+		artifactTypes[artifact.Digest] = artifact.MediaType
+	}
+	seenItems := make(map[string]struct{}, len(schedule.Items))
+	var previousEnd time.Time
+	for index, item := range schedule.Items {
+		if item.ID == "" {
+			return errors.New("schedule item id is required")
+		}
+		if _, exists := seenItems[item.ID]; exists {
+			return fmt.Errorf("schedule item %q is listed more than once", item.ID)
+		}
+		seenItems[item.ID] = struct{}{}
+		start, parseErr := time.Parse(time.RFC3339Nano, item.StartsAt)
+		if parseErr != nil {
+			return fmt.Errorf("item %q startsAt: %w", item.ID, parseErr)
+		}
+		end, parseErr := time.Parse(time.RFC3339Nano, item.EndsAt)
+		if parseErr != nil {
+			return fmt.Errorf("item %q endsAt: %w", item.ID, parseErr)
+		}
+		if !start.Before(end) || start.Before(windowStart) || end.After(windowEnd) {
+			return fmt.Errorf("item %q is outside the schedule window", item.ID)
+		}
+		if index == 0 && !start.Equal(windowStart) {
+			return errors.New("schedule must begin at the window start")
+		}
+		if index > 0 && start.Before(previousEnd) {
+			return fmt.Errorf("schedule items overlap at %q", item.ID)
+		}
+		if index > 0 && !start.Equal(previousEnd) {
+			return fmt.Errorf("schedule has a gap before %q", item.ID)
+		}
+		previousEnd = end
+		if err := ValidateDigest(item.ArtifactDigest); err != nil {
+			return fmt.Errorf("item %q artifactDigest: %w", item.ID, err)
+		}
+		mediaType := item.MediaType
+		if mediaType != "video/mp4" && mediaType != "image/jpeg" && mediaType != "image/png" && mediaType != "image/webp" {
+			return fmt.Errorf("item %q has unsupported media type %q", item.ID, mediaType)
+		}
+		if artifactTypes[item.ArtifactDigest] != mediaType {
+			return fmt.Errorf("item %q media type does not match artifact", item.ID)
+		}
+		if item.Fit != "fit" && item.Fit != "fill" {
+			return fmt.Errorf("item %q fit must be fit or fill", item.ID)
+		}
+		if item.Volume < 0 || item.Volume > 100 {
+			return fmt.Errorf("item %q volume must be between 0 and 100", item.ID)
+		}
+		switch item.Orientation {
+		case 0, 90, 180, 270:
+		default:
+			return fmt.Errorf("item %q orientation is invalid", item.ID)
+		}
+	}
+	if !previousEnd.Equal(windowEnd) {
+		return errors.New("schedule must end at the window end")
+	}
+	closure := sortedUnique(schedule.ArtifactClosure)
+	if len(closure) != len(schedule.ArtifactClosure) {
+		return errors.New("artifactClosure must contain unique digests")
+	}
+	if len(closure) != len(artifacts) {
+		return errors.New("artifact closure does not match artifacts")
+	}
+	for index, artifact := range artifacts {
+		if artifact.Digest != closure[index] {
+			return errors.New("artifact closure does not match artifacts")
+		}
+	}
+	for _, item := range schedule.Items {
+		if !slices.Contains(closure, item.ArtifactDigest) {
+			return fmt.Errorf("schedule item %q artifact is missing from artifactClosure", item.ID)
 		}
 	}
 	return nil
@@ -421,17 +605,23 @@ func (p PayloadV1) MediaPlayback() (PlaybackPayload, bool) {
 	return p.Presentation.Media.Playback, true
 }
 
-// AllowsDeliveryMode keeps assignment validation independent of a concrete
-// presentation variant. Cable releases always require the cache path because
-// their shell and revision are part of the immutable artifact closure.
+// MediaSchedulePlayback returns the immutable schedule when this is a media
+// schedule presentation.
+func (p PayloadV1) MediaSchedulePlayback() (MediaSchedulePresentation, bool) {
+	p = normalized(p)
+	if p.Presentation.Kind != PresentationMediaSchedule || p.Presentation.MediaSchedule == nil {
+		return MediaSchedulePresentation{}, false
+	}
+	return *p.Presentation.MediaSchedule, true
+}
+
 func (p PayloadV1) AllowsDeliveryMode(mode string) bool {
 	p = normalized(p)
 	switch p.Presentation.Kind {
 	case PresentationMedia:
-		if p.Presentation.Media == nil {
-			return false
-		}
-		return slices.Contains(p.Presentation.Media.Playback.AllowedDeliveryMode, mode)
+		return p.Presentation.Media != nil && slices.Contains(p.Presentation.Media.Playback.AllowedDeliveryMode, mode)
+	case PresentationMediaSchedule:
+		return p.Presentation.MediaSchedule != nil && slices.Contains(p.Presentation.MediaSchedule.AllowedDeliveryModes, mode)
 	case PresentationCable:
 		return mode == "cache_then_play"
 	default:

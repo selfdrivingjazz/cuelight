@@ -1,0 +1,22 @@
+[Unit]
+Description=Cable MPV minimal player node
+After=network-online.target cable-mpv.service
+Wants=network-online.target
+Requires=cable-mpv.service
+
+[Service]
+Type=simple
+User=cable
+Group=cable
+ExecStart=/usr/bin/cable-minimal-node
+EnvironmentFile=/etc/cable/minimal-node.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cable
+
+[Install]
+WantedBy=multi-user.target

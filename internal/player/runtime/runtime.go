@@ -360,7 +360,7 @@ func (r *Reconciler) checkProfile(envelope release.EnvelopeV1, mode string) erro
 			return fmt.Errorf("%w: required feature %q", ErrIncompatibleRelease, feature)
 		}
 	}
-	if envelope.Payload.PresentationMode() == release.PresentationMedia {
+	if envelope.Payload.PresentationMode() == release.PresentationMedia || envelope.Payload.PresentationMode() == release.PresentationMediaSchedule {
 		for _, artifact := range envelope.Payload.Artifacts {
 			if len(r.config.AcceptedMediaTypes) > 0 && !slices.Contains(r.config.AcceptedMediaTypes, artifact.MediaType) {
 				return fmt.Errorf("%w: media type %q", ErrIncompatibleRelease, artifact.MediaType)
@@ -398,6 +398,70 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 			}
 			candidate.Source = source
 			return candidate, revoke, nil
+		}
+	} else if kind == release.PresentationMediaSchedule {
+		schedule, ok := envelope.Payload.MediaSchedulePlayback()
+		if !ok {
+			return candidate, nil, ErrIncompatibleRelease
+		}
+		windowStart, err := time.Parse(time.RFC3339Nano, schedule.Window.StartsAt)
+		if err != nil {
+			return candidate, nil, err
+		}
+		windowEnd, err := time.Parse(time.RFC3339Nano, schedule.Window.EndsAt)
+		if err != nil {
+			return candidate, nil, err
+		}
+		candidate.Timezone, candidate.WindowStart, candidate.WindowEnd = schedule.Timezone, windowStart, windowEnd
+		candidate.Schedule = make([]renderer.ScheduleItem, 0, len(schedule.Items))
+		var revokes []func()
+		revokeAll := func() {
+			for _, revoke := range revokes {
+				revoke()
+			}
+		}
+		keepRevokes := false
+		defer func() {
+			if !keepRevokes {
+				revokeAll()
+			}
+		}()
+		for _, item := range schedule.Items {
+			start, parseErr := time.Parse(time.RFC3339Nano, item.StartsAt)
+			if parseErr != nil {
+				return candidate, nil, parseErr
+			}
+			end, parseErr := time.Parse(time.RFC3339Nano, item.EndsAt)
+			if parseErr != nil {
+				return candidate, nil, parseErr
+			}
+			resolved := renderer.ScheduleItem{ID: item.ID, StartsAt: start, EndsAt: end, MediaType: item.MediaType, Fit: item.Fit, Loop: item.Loop, Muted: item.Muted, Volume: item.Volume, ImageDurationSecond: item.ImageDurationSecond, Orientation: item.Orientation}
+			if mode == DeliveryStream {
+				if r.deps.Streamer == nil {
+					return candidate, nil, ErrUnsafeStreamSource
+				}
+				source, revoke, openErr := r.deps.Streamer.Open(ctx, item.ArtifactDigest, r.config.StreamTTL)
+				if openErr != nil {
+					return candidate, nil, openErr
+				}
+				if !isLoopbackURL(source) {
+					if revoke != nil {
+						revoke()
+					}
+					return candidate, nil, ErrUnsafeStreamSource
+				}
+				resolved.Source = source
+				if revoke != nil {
+					revokes = append(revokes, revoke)
+				}
+			}
+			if mode == DeliveryStream {
+				candidate.Schedule = append(candidate.Schedule, resolved)
+			}
+		}
+		if mode == DeliveryStream {
+			keepRevokes = true
+			return candidate, revokeAll, nil
 		}
 	} else if kind != release.PresentationCable {
 		return candidate, nil, ErrIncompatibleRelease
@@ -446,6 +510,35 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 			return candidate, nil, err
 		}
 		objects[item.Digest] = object
+	}
+	if kind == release.PresentationMediaSchedule {
+		schedule, ok := envelope.Payload.MediaSchedulePlayback()
+		if !ok {
+			return candidate, nil, ErrIncompatibleRelease
+		}
+		for _, item := range schedule.Items {
+			object := objects[item.ArtifactDigest]
+			if object.Path == "" {
+				return candidate, nil, errors.New("CAS committed object has no renderer path")
+			}
+			start, parseErr := time.Parse(time.RFC3339Nano, item.StartsAt)
+			if parseErr != nil {
+				return candidate, nil, parseErr
+			}
+			end, parseErr := time.Parse(time.RFC3339Nano, item.EndsAt)
+			if parseErr != nil {
+				return candidate, nil, parseErr
+			}
+			candidate.Schedule = append(candidate.Schedule, renderer.ScheduleItem{
+				ID: item.ID, StartsAt: start, EndsAt: end, Source: object.Path, MediaType: item.MediaType,
+				Fit: item.Fit, Loop: item.Loop, Muted: item.Muted, Volume: item.Volume,
+				ImageDurationSecond: item.ImageDurationSecond, Orientation: item.Orientation,
+			})
+		}
+		candidate.Timezone = schedule.Timezone
+		candidate.WindowStart, _ = time.Parse(time.RFC3339Nano, schedule.Window.StartsAt)
+		candidate.WindowEnd, _ = time.Parse(time.RFC3339Nano, schedule.Window.EndsAt)
+		return candidate, nil, nil
 	}
 	if kind == release.PresentationCable {
 		cable := envelope.Payload.Presentation.Cable
@@ -540,7 +633,7 @@ func (r *Reconciler) fail(ctx context.Context, generation uint64, operation stri
 }
 
 func (r *Reconciler) rollback(ctx context.Context, generation uint64, outcome string) bool {
-	if r.lkg.ReleaseDigest == "" || (r.lkg.Source == "" && r.lkg.Kind != release.PresentationCable) {
+	if r.lkg.ReleaseDigest == "" || (r.lkg.Source == "" && len(r.lkg.Schedule) == 0 && r.lkg.Kind != release.PresentationCable) {
 		return false
 	}
 	if err := r.deps.Renderer.Prepare(ctx, r.lkg); err != nil {
@@ -583,13 +676,23 @@ func (r *Reconciler) restoreHealthy(generation uint64, candidate renderer.Candid
 }
 
 func (r *Reconciler) renewActive(ctx context.Context) error {
-	if r.activeDelivery != DeliveryStream || r.lkg.Source == "" {
+	if r.activeDelivery != DeliveryStream {
 		return nil
 	}
 	if r.deps.Streamer == nil {
 		return ErrUnsafeStreamSource
 	}
-	return r.deps.Streamer.Renew(ctx, r.lkg.Source, r.config.StreamTTL)
+	if r.lkg.Source != "" {
+		return r.deps.Streamer.Renew(ctx, r.lkg.Source, r.config.StreamTTL)
+	}
+	for _, item := range r.lkg.Schedule {
+		if item.Source != "" {
+			if err := r.deps.Streamer.Renew(ctx, item.Source, r.config.StreamTTL); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (r *Reconciler) stopActive(ctx context.Context) {

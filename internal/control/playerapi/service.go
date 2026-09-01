@@ -96,7 +96,7 @@ func (s *Service) GetAssignment(ctx context.Context, nodeID, ifNoneMatch string,
 			return client.AssignmentResult{}, fmt.Errorf("%w: release binding mismatch", ErrForbidden)
 		}
 		kind = envelope.Payload.PresentationMode()
-		if kind != canonical.PresentationMedia && kind != canonical.PresentationCable {
+		if !validPresentationKind(kind) {
 			return client.AssignmentResult{}, fmt.Errorf("%w: invalid release presentation", ErrForbidden)
 		}
 	}
@@ -136,10 +136,14 @@ func (s *Service) Report(ctx context.Context, nodeID string, report client.NodeR
 	if report.EventEpoch == "" || report.Sequence <= 0 || report.ObservedGeneration < 0 || report.DesiredGenerationSeen < 0 {
 		return false, fmt.Errorf("%w: invalid report sequence or epoch", ErrInvalidRequest)
 	}
-	if report.PresentationKind != "" && report.PresentationKind != canonical.PresentationMedia && report.PresentationKind != canonical.PresentationCable {
+	if report.PresentationKind != "" && !validPresentationKind(report.PresentationKind) {
 		return false, fmt.Errorf("%w: invalid presentationKind", ErrInvalidRequest)
 	}
 	return s.Repository.RecordReport(ctx, nodeID, report)
+}
+
+func validPresentationKind(kind canonical.PresentationKind) bool {
+	return kind == canonical.PresentationMedia || kind == canonical.PresentationCable || kind == canonical.PresentationMediaSchedule
 }
 
 func (s *Service) AppendEvents(ctx context.Context, nodeID string, batch client.EventBatch) (client.EventAcknowledgement, error) {
