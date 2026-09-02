@@ -195,6 +195,20 @@ function ExpectedPreview({ expected, compact = false }: { expected?: PlaybackMet
     emptyDescription={expected ? "Expected metadata is available, but no media preview URL was supplied." : "No current schedule or assignment metadata was supplied."}
   />;
 }
+function ObservedPreview({ observed, compact = false }: { observed?: PlaybackMetadata; compact?: boolean }) {
+  const preview = mediaPreview(observed);
+  return <PreviewSurface
+    aria-label="Reported media preview"
+    media={preview}
+    state={preview ? undefined : "empty"}
+    className={compact ? "rounded-none border-x-0" : undefined}
+    fit={observed?.media?.playback.fit === "fill" ? "cover" : "contain"}
+    emptyTitle={observed ? "Reported media preview unavailable" : "No reported media"}
+    emptyDescription={observed ? "The player reported this media identity, but no preview URL was supplied." : "The node has not reported a current media identity."}
+    overlay={preview ? <span>Reported identity · not a screenshot</span> : undefined}
+  />;
+}
+
 
 function MetadataSummary({ metadata, empty }: { metadata?: PlaybackMetadata; empty: string }) {
   if (!metadata) return <p className="text-sm text-muted-foreground">{empty}</p>;
@@ -351,9 +365,9 @@ export function FleetNodeCard({
 
     <div className={`grid border-y border-border ${capture ? "sm:grid-cols-2 sm:divide-x sm:divide-border" : ""}`}>
       <section aria-labelledby={expectedHeadingId} className="min-w-0">
-        <h3 id={expectedHeadingId} className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</h3>
-        <ExpectedPreview expected={expectedNow} compact />
-        <div className="p-4"><MetadataSummary metadata={expectedNow} empty="Preview unavailable." /></div>
+        <h3 id={expectedHeadingId} className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{expectedNow ? "Expected preview" : observedNow ? "Reported media" : "Preview"}</h3>
+        {expectedNow ? <ExpectedPreview expected={expectedNow} compact /> : <ObservedPreview observed={observedNow} compact />}
+        <div className="p-4"><MetadataSummary metadata={expectedNow ?? observedNow} empty="Preview unavailable." /></div>
       </section>
       {capture && <section aria-labelledby={captureHeadingId} className="min-w-0 border-t border-border sm:border-t-0">
         <h3 id={captureHeadingId} className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actual capture</h3>
@@ -488,11 +502,11 @@ export function NodePlaybackView({
     <div className="grid gap-4 lg:grid-cols-2">
       <section aria-labelledby={expectedHeadingId} className="space-y-3">
         <div>
-          <h2 id={expectedHeadingId} className="text-base font-semibold tracking-tight">Expected now</h2>
-          <p className="text-xs text-muted-foreground">Schedule or assignment metadata, not observed pixels.</p>
+          <h2 id={expectedHeadingId} className="text-base font-semibold tracking-tight">{expectedNow ? "Expected now" : observedNow ? "Reported media" : "Expected now"}</h2>
+          <p className="text-xs text-muted-foreground">{expectedNow ? "Schedule or assignment metadata, not observed pixels." : observedNow ? "Media identity reported by the player; this preview is not a screenshot." : "No expected schedule or assignment metadata is available."}</p>
         </div>
-        <ExpectedPreview expected={expectedNow} />
-        <MetadataSummary metadata={expectedNow} empty="No expected metadata supplied." />
+        {expectedNow ? <ExpectedPreview expected={expectedNow} /> : <ObservedPreview observed={observedNow} />}
+        <MetadataSummary metadata={expectedNow ?? observedNow} empty={expectedNow ? "No expected metadata supplied." : "No reported media metadata supplied."} />
       </section>
       <section aria-labelledby={captureHeadingId} className="space-y-3">
         <div>

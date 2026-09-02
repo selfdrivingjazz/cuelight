@@ -137,7 +137,7 @@ function ResolvedNodeVisual({ node, report, detail = false }: { node: Node; repo
 function ResolvedNodeVisualWithMedia({ node, report, media, detail }: { node: Node; report?: NodeReport; media: Media; detail: boolean }) {
   const preview = useAuthenticatedPreview(media);
   const metadata = playbackMetadata(media, preview.status === "ready" ? preview.url : undefined);
-  const props = { node, report, lastContactAt: report?.reportedAt, observedNow: metadata, expectedNow: metadata, nodeHref: `/nodes/${node.id}` };
+  const props = { node, report, lastContactAt: report?.reportedAt, observedNow: metadata, nodeHref: `/nodes/${node.id}` };
   return detail ? <NodePlaybackView {...props} /> : <FleetNodeCard {...props} />;
 }
 
