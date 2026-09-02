@@ -65,7 +65,7 @@ func testAuthRequest(method, path string, body io.Reader) *http.Request {
 func TestAuthoredServiceRejectsInvalidPlaybackAndPlayableRejectsUnsupportedType(t *testing.T) {
 	repo := &authoredRepo{}
 	service, _ := NewAuthoredService(repo, func() string { return "media-1" })
-	_, err := service.Create(context.Background(), Mutation{ActorID: "actor-1", IdempotencyKey: "0123456789abcdef"}, MediaInput{AssetID: "asset-1", Title: "bad", Playback: Playback{Fit: "stretch", Volume: 1}})
+	_, err := service.Create(context.Background(), Mutation{ActorID: "actor-1", IdempotencyKey: "0123456789abcdef"}, MediaInput{AssetID: "11111111-1111-1111-1111-111111111111", Title: "bad", Playback: Playback{Fit: "stretch", Volume: 1}})
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("invalid fit error=%v", err)
 	}
@@ -111,7 +111,7 @@ func TestAuthoredMutationsReplayAndConflict(t *testing.T) {
 	repo := &authoredRepo{}
 	service, _ := NewAuthoredService(repo, func() string { return "media-1" })
 	m := Mutation{ActorID: "actor-1", IdempotencyKey: "0123456789abcdef"}
-	input := MediaInput{AssetID: "asset-1", Title: "title", Playback: Playback{Fit: "fit", Volume: 50}}
+	input := MediaInput{AssetID: "11111111-1111-1111-1111-111111111111", Title: "title", Playback: Playback{Fit: "fit", Volume: 50}}
 	if _, err := service.Create(context.Background(), m, input); err != nil {
 		t.Fatal(err)
 	}

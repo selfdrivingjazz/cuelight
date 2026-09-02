@@ -1,7 +1,7 @@
 -- +cable Up
 CREATE TABLE media (
   id uuid PRIMARY KEY,
-  asset_id uuid NOT NULL REFERENCES assets(id),
+  asset_id uuid NOT NULL UNIQUE REFERENCES assets(id),
   title text NOT NULL CHECK (length(title) > 0),
   description text,
   artist text,

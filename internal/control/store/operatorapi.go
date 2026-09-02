@@ -187,7 +187,8 @@ func (a *OperatorAdapter) UpdateNode(ctx context.Context, id, name, match string
 func (a *OperatorAdapter) GetNodeStatus(ctx context.Context, id string) (playerclient.NodeReport, error) {
 	s := a.Store
 	var payload []byte
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT report FROM node_report_snapshots WHERE node_id = $1`, id).Scan(&payload)
+	var reportedAt time.Time
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT report, updated_at FROM node_report_snapshots WHERE node_id = $1`, id).Scan(&payload, &reportedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return playerclient.NodeReport{}, pkiNotFound()
 	}
@@ -198,6 +199,7 @@ func (a *OperatorAdapter) GetNodeStatus(ctx context.Context, id string) (playerc
 	if err := json.Unmarshal(payload, &report); err != nil {
 		return playerclient.NodeReport{}, wrap("decode node status", err)
 	}
+	report.ReportedAt = &reportedAt
 	return report, nil
 }
 func (a *OperatorAdapter) GetNodeCapabilities(ctx context.Context, id string) (playerclient.CapabilityReport, error) {

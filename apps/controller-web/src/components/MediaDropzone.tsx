@@ -1,8 +1,8 @@
 import * as React from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { type Asset } from "@cable/api-client";
+import { type components } from "@cable/api-client";
 import { Button, ErrorState } from "@cable/controller-ui";
+import { api, readApiResult } from "../api";
 import { uploadSelectedFile } from "../cable";
 
 const acceptedMediaTypes: Record<string, true> = { "image/jpeg": true, "image/png": true, "image/webp": true, "video/mp4": true };
@@ -14,15 +14,30 @@ function fileSize(size: number) {
   return `${(size / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} MB`;
 }
 
-export function MediaDropzone({ onUploaded }: { onUploaded: (asset: Asset) => void }) {
+type Media = components["schemas"]["Media"];
+
+async function uploadMedia(file: File): Promise<Media> {
+  const asset = await uploadSelectedFile(file);
+  return readApiResult(await api.POST("/media", {
+    params: { header: { "Idempotency-Key": crypto.randomUUID() } },
+    body: {
+      assetId: asset.id,
+      title: asset.name,
+      tags: [],
+      playback: { fit: "fit", loop: true, muted: true, volume: 0, orientation: 0 },
+    },
+  }));
+}
+
+export function MediaDropzone({ onUploaded }: { onUploaded: (media: Media) => void }) {
   const [file, setFile] = React.useState<File>();
   const [validationError, setValidationError] = React.useState<string>();
   const [dragActive, setDragActive] = React.useState(false);
   const [inputKey, setInputKey] = React.useState(0);
   const dragDepth = React.useRef(0);
   const mutation = useMutation({
-    mutationFn: uploadSelectedFile,
-    onSuccess: (asset) => onUploaded(asset),
+    mutationFn: uploadMedia,
+    onSuccess: (media) => onUploaded(media),
   });
 
   const selectFile = (nextFile?: File) => {
@@ -110,8 +125,8 @@ export function MediaDropzone({ onUploaded }: { onUploaded: (asset: Asset) => vo
     {validationError && <ErrorState title="File not supported" description={validationError} />}
     {mutation.isError && <ErrorState title="Upload failed" description={mutation.error.message} onRetry={() => { if (file) mutation.mutate(file); }} />}
     {mutation.data && <div role="status" className="space-y-2 rounded-lg border border-status-success/40 bg-status-success/5 p-4">
-      <p className="font-medium text-status-success">{mutation.data.name} is ready in your library.</p>
-      <Link className="inline-block text-sm font-medium text-primary hover:underline" to="/assets/$assetId" params={{ assetId: mutation.data.id }}>View {mutation.data.name}</Link>
+      <p className="font-medium text-status-success">{mutation.data.title} is ready in your library.</p>
+      <a className="inline-block text-sm font-medium text-primary hover:underline" href={`/media/${encodeURIComponent(mutation.data.id)}`}>View {mutation.data.title}</a>
     </div>}
     <div className="flex flex-wrap gap-2">
       {!mutation.isSuccess && !mutation.isError && <Button type="submit" disabled={!file || mutation.isPending}>{mutation.isPending ? "Uploading…" : "Upload file"}</Button>}

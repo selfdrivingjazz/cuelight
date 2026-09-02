@@ -106,6 +106,21 @@ func (h *operatorHandler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Playable = &v
 	}
+	if kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind != "" {
+		if kind != "image" && kind != "video" && kind != "audio" {
+			writeMediaError(w, &ValidationError{Field: "kind", Reason: "must be image, video, or audio"})
+			return
+		}
+		filter.Kind = kind
+	}
+	for _, assetID := range r.URL.Query()["assetId"] {
+		assetID = strings.TrimSpace(assetID)
+		if !validUUID(assetID) || len(filter.AssetIDs) >= 100 {
+			writeMediaError(w, &ValidationError{Field: "assetId", Reason: "must contain at most 100 non-empty IDs"})
+			return
+		}
+		filter.AssetIDs = append(filter.AssetIDs, assetID)
+	}
 	_ = actor
 	result, err := h.deps.Service.List(r.Context(), request, filter)
 	if err != nil {

@@ -127,6 +127,7 @@ type NodeReport struct {
 	HealthyReleaseDigest       *string                  `json:"healthyReleaseDigest"`
 	LastKnownGoodReleaseDigest *string                  `json:"lastKnownGoodReleaseDigest"`
 	CurrentContent             *CurrentContent          `json:"currentContent,omitempty"`
+	ReportedAt                 *time.Time               `json:"reportedAt,omitempty"`
 	Conditions                 []Condition              `json:"conditions"`
 }
 

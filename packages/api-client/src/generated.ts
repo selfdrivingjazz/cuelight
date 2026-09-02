@@ -360,6 +360,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/usage/{kind}/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getResourceUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assignments": {
         parameters: {
             query?: never;
@@ -1492,6 +1508,19 @@ export interface components {
             items: components["schemas"]["Media"][];
             page: components["schemas"]["PageInfo"];
         };
+        UsageReference: {
+            /** @enum {string} */
+            kind: "media" | "playlist" | "block" | "channel" | "profile" | "revision" | "release" | "assignment";
+            id: components["schemas"]["Id"];
+            name: string;
+            href: string;
+        };
+        UsagePage: {
+            resourceId: components["schemas"]["Id"];
+            references: components["schemas"]["UsageReference"][];
+            nextCursor?: string;
+            hasMore: boolean;
+        };
         PlaybackPayload: {
             assetId: components["schemas"]["Id"];
             /** @enum {string} */
@@ -1701,6 +1730,8 @@ export interface components {
             healthyReleaseDigest?: string | null;
             lastKnownGoodReleaseDigest?: string | null;
             currentContent?: components["schemas"]["CurrentContent"];
+            /** Format: date-time */
+            reportedAt?: string;
             conditions: components["schemas"]["Condition"][];
         };
         Condition: {
@@ -2359,6 +2390,8 @@ export interface operations {
                 sort?: components["parameters"]["PageSort"];
                 order?: components["parameters"]["PageOrder"];
                 playable?: boolean;
+                assetId?: components["schemas"]["Id"][];
+                kind?: "image" | "video" | "audio";
             };
             header?: never;
             path?: never;
@@ -2543,6 +2576,34 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getResourceUsage: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path: {
+                kind: "media" | "playlist" | "block" | "channel" | "profile" | "revision" | "release" | "assignment";
+                id: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Direct resource references. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsagePage"];
+                };
             };
             default: components["responses"]["Problem"];
         };

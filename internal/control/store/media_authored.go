@@ -212,6 +212,14 @@ func (s *Store) ListMedia(ctx context.Context, request page.PageRequest, filter 
 	if filter.Playable != nil && *filter.Playable {
 		clauses = append(clauses, "r.state = 'ready' AND (r.media_type LIKE 'audio/%' OR r.media_type LIKE 'video/%' OR r.media_type LIKE 'image/%')")
 	}
+	if filter.Kind != "" {
+		args = append(args, filter.Kind+"/%")
+		clauses = append(clauses, "r.media_type LIKE $"+strconv.Itoa(len(args)))
+	}
+	if len(filter.AssetIDs) > 0 {
+		args = append(args, pgtype.FlatArray[string](filter.AssetIDs))
+		clauses = append(clauses, "m.asset_id = ANY($"+strconv.Itoa(len(args))+"::uuid[])")
+	}
 	if request.Cursor != "" {
 		op := ">"
 		if request.Order == "desc" {

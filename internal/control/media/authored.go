@@ -66,8 +66,9 @@ type MediaPatch struct {
 
 type MediaListFilter struct {
 	Playable *bool
+	AssetIDs []string
+	Kind     string
 }
-
 type MediaUsage struct {
 	MediaID       string `json:"mediaId"`
 	ReleaseCount  int64  `json:"releaseCount"`
@@ -160,8 +161,11 @@ func (s *AuthoredService) Usage(ctx context.Context, id string) (MediaUsage, err
 }
 
 func validateMediaInput(input MediaInput) error {
-	if strings.TrimSpace(input.AssetID) == "" {
-		return &ValidationError{Field: "assetId", Reason: "is required"}
+	if !validUUID(strings.TrimSpace(input.AssetID)) {
+		return &ValidationError{Field: "assetId", Reason: "must be a UUID"}
+	}
+	if input.ArtworkAssetID != "" && !validUUID(strings.TrimSpace(input.ArtworkAssetID)) {
+		return &ValidationError{Field: "artworkAssetId", Reason: "must be a UUID"}
 	}
 	if err := validateText("title", input.Title, 255); err != nil {
 		return err
@@ -264,6 +268,24 @@ func normalizePatch(p MediaPatch) MediaPatch {
 		p.Tags = &v
 	}
 	return p
+}
+
+func validUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for index, character := range value {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if character != '-' {
+				return false
+			}
+			continue
+		}
+		if !(character >= '0' && character <= '9' || character >= 'a' && character <= 'f' || character >= 'A' && character <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func (m Media) Playable() bool {

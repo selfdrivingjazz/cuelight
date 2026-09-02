@@ -31,6 +31,7 @@ import (
 	controlrelease "github.com/jmill/cable/internal/control/release"
 	"github.com/jmill/cable/internal/control/remote"
 	"github.com/jmill/cable/internal/control/store"
+	"github.com/jmill/cable/internal/control/usage"
 	"github.com/jmill/cable/internal/media/localcas"
 	playerclient "github.com/jmill/cable/internal/player/client"
 	"github.com/jmill/cable/internal/protocol"
@@ -155,6 +156,8 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		Idempotency:     operatorapi.NewIdempotencyCache(),
 	}
 	operator := operatorapi.NewHandler(operatorDependencies)
+	usageService := usage.NewService(repository, nil)
+	usageHandler := usage.NewHandler(usageService)
 	api := http.NewServeMux()
 	pkiHandler := newPKIHandler(pkiService, config.MaxBodyBytes)
 	api.Handle("/player/enroll", pkiHandler)
@@ -167,6 +170,7 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	api.Handle("/remote/", remoteHandler)
 	api.Handle("/media", operatorDependencies.Middleware(authoredMediaHandler))
 	api.Handle("/media/", operatorDependencies.Middleware(authoredMediaHandler))
+	api.Handle("/usage/", operatorDependencies.MiddlewareForScope(operatorapi.ScopeCableRead, usageHandler))
 	playerHandler := playerapi.NewHandler(playerService)
 	api.Handle("/player/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerHandler.ServeHTTP(w, r)

@@ -411,6 +411,17 @@ paths:
         - name: playable
           in: query
           schema: {type: boolean, default: true}
+        - name: assetId
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: {$ref: "#/components/schemas/Id"}
+        - name: kind
+          in: query
+          schema: {type: string, enum: [image, video, audio]}
       responses:
         "200":
           description: Authored playable media.
@@ -543,6 +554,30 @@ paths:
           content:
             application/octet-stream:
               schema: {type: string, format: binary}
+        default: {$ref: "#/components/responses/Problem"}
+  /usage/{kind}/{id}:
+    get:
+      tags: [operator]
+      operationId: getResourceUsage
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema: {type: string, enum: [media, playlist, block, channel, profile, revision, release, assignment]}
+        - name: id
+          in: path
+          required: true
+          schema: {$ref: "#/components/schemas/Id"}
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Direct resource references.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UsagePage"}
         default: {$ref: "#/components/responses/Problem"}
   /assignments:
     get:
@@ -2166,6 +2201,24 @@ components:
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/Media"}}
         page: {$ref: "#/components/schemas/PageInfo"}
+    UsageReference:
+      type: object
+      additionalProperties: false
+      required: [kind, id, name, href]
+      properties:
+        kind: {type: string, enum: [media, playlist, block, channel, profile, revision, release, assignment]}
+        id: {$ref: "#/components/schemas/Id"}
+        name: {type: string}
+        href: {type: string, pattern: "^/"}
+    UsagePage:
+      type: object
+      additionalProperties: false
+      required: [resourceId, references, hasMore]
+      properties:
+        resourceId: {$ref: "#/components/schemas/Id"}
+        references: {type: array, items: {$ref: "#/components/schemas/UsageReference"}}
+        nextCursor: {type: string}
+        hasMore: {type: boolean}
     PlaybackPayload:
       type: object
       required: [assetId, fit, loop, muted, volume, orientation, allowedDeliveryModes]
@@ -2419,6 +2472,7 @@ components:
         healthyReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         lastKnownGoodReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         currentContent: {$ref: "#/components/schemas/CurrentContent"}
+        reportedAt: {type: string, format: date-time}
         conditions: {type: array, items: {$ref: "#/components/schemas/Condition"}}
     Condition:
       type: object

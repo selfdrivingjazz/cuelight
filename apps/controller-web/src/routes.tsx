@@ -1,30 +1,32 @@
 import * as React from "react";
 import { createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate, useParams, useRouterState, useSearch } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Asset, type Node, type components } from "@cable/api-client";
-import { Breadcrumbs, Button, Card, CardContent, CardHeader, CardTitle, TanStackDataTable, EmptyState, ErrorState, MobileNav, MobileSidebar, Pagination, Sidebar, Skeleton, StatusBadge, type NavigationLink } from "@cable/controller-ui";
+import { Breadcrumbs, Button, Card, CardContent, CardHeader, CardTitle, TanStackDataTable, EmptyState, ErrorState, MobileNav, MobileSidebar, Pagination, PreviewMosaic, Sidebar, Skeleton, StatusBadge, type NavigationLink } from "@cable/controller-ui";
 import "@cable/controller-ui/styles.css";
 import { api, ApiRequestError, getControllerHealth, readApiResult } from "./api";
 import { AccessScreen, useAuth } from "./auth";
 import { CableChannelDetail, CableDeploymentsPage, CableDeploymentDetail, CableReleaseAssignmentPage, CableProgramDetailPage, RevisionDetailPage, ShellBuildsPage } from "./cable";
 import { ThemeControl } from "./theme";
 import { NodeAssignmentComposer } from "./assignment";
-import { BlockAuthoringDetailPage, BlockAuthoringListPage, PlaylistAuthoringDetailPage, PlaylistAuthoringListPage, ProfileAuthoringDetailPage, ProfileAuthoringListPage } from "./authoring-details";
+import { BlockAuthoringDetailPage, BlockAuthoringListPage, ChannelAuthoringDetailPage, PlaylistAuthoringDetailPage, PlaylistAuthoringListPage, ProfileAuthoringDetailPage, ProfileAuthoringListPage, type AuthoringQuerySeam } from "./authoring-details";
 import { MediaDropzone } from "./components/MediaDropzone";
+import { MediaDetailPage, MediaLibraryPage, getMedia, normalizeMediaSearch, useAuthenticatedPreview, type Media } from "./media-library";
+import { FleetNodeCard, NodePlaybackView, type NodeReport, type PlaybackMetadata } from "./fleet-visual";
 
 export interface PageSearch { cursor?: string; limit?: number; search?: string; sort?: string; order?: "asc" | "desc" }
 export type NodeSearch = PageSearch & { sort?: "name" | "desiredGeneration" };
 const navigation = [
-  { label: "Overview", href: "/", section: "" },
-  { label: "Nodes", href: "/nodes", section: "Fleet" },
-  { label: "Assign", href: "/assign", section: "Fleet" },
-  { label: "Assets", href: "/assets", section: "Library" },
-  { label: "Uploads", href: "/uploads", section: "Library" },
+  { label: "Fleet", href: "/nodes", section: "" },
+  { label: "Media", href: "/media", section: "Library" },
   { label: "Playlists", href: "/cable/playlists", section: "Library" },
-  { label: "Releases", href: "/releases", section: "Library" },
-  { label: "Deployments", href: "/cable/deployments", section: "Cable" },
-  { label: "Shell builds", href: "/cable/shell-builds", section: "Cable" },
-  { label: "Profiles", href: "/cable/profiles", section: "Cable" },
+  { label: "Blocks", href: "/cable/blocks", section: "Library" },
+  { label: "Channels", href: "/cable/channels", section: "Library" },
+  { label: "Profiles", href: "/cable/profiles", section: "Library" },
+  { label: "Releases", href: "/releases", section: "Publish" },
+  { label: "Assign", href: "/assign", section: "Publish" },
+  { label: "Deployments", href: "/cable/deployments", section: "System" },
+  { label: "Shell builds", href: "/cable/shell-builds", section: "System" },
 ];
 const queryKeys = {
   health: ["controller", "health"] as const,
@@ -65,6 +67,17 @@ function Shell() {
 }
 
 const RouterLink = Link as unknown as NavigationLink;
+const authoringQuerySeam: AuthoringQuerySeam = {
+  async query(request) {
+    const [mediaResult, usageResult] = await Promise.all([
+      request.assetIds.length
+        ? api.GET("/media", { params: { query: { assetId: [...request.assetIds], limit: 100, playable: true } } }).then(readApiResult)
+        : Promise.resolve(undefined),
+      api.GET("/usage/{kind}/{id}", { params: { path: { kind: request.kind, id: request.id }, query: { limit: 100 } } }).then(readApiResult),
+    ]);
+    return { media: mediaResult, usage: usageResult };
+  },
+};
 function QueryError({ error, retry }: { error: Error; retry: () => void }) { const status = error instanceof ApiRequestError ? error.status : undefined; const forbidden = status === 403; const notFound = status === 404; return <ErrorState title={forbidden ? "Access denied" : notFound ? "Not found" : "Unable to load data"} description={notFound ? "This resource may have been removed or you may not have access to it." : error.message} onRetry={retry} />; }
 function RoutePending() { return <main className="space-y-4 p-6" aria-busy="true"><Skeleton className="h-7 w-48" /><Skeleton className="h-40 w-full" /></main>; }
 function RouteError({ error, reset }: { error: Error; reset: () => void }) { return <main className="p-6"><ErrorState title={error instanceof ApiRequestError && error.status === 403 ? "Access denied" : "Unable to load this page"} description={error.message || "The controller returned an unexpected error."} onRetry={reset} /></main>; }
@@ -92,6 +105,29 @@ function OverviewPage() {
   }
   return <PageFrame breadcrumbs={[{ label: "Overview" }]}><PageHeader title="Overview" /><div className="grid gap-4 md:grid-cols-2">{content}</div></PageFrame>;
 }
+function playbackMetadata(media: Media, previewUrl?: string): PlaybackMetadata {
+  return {
+    title: media.title,
+    subtitle: media.artist || media.description,
+    media,
+    mediaPreviewUrl: previewUrl,
+  };
+}
+
+function ResolvedNodeVisual({ node, report, detail = false }: { node: Node; report?: NodeReport; detail?: boolean }) {
+  const mediaId = report?.currentContent?.mediaId || report?.currentContent?.assetId || "";
+  const media = useQuery({ queryKey: ["controller", "node-current-media", mediaId], queryFn: () => getMedia(mediaId), enabled: Boolean(mediaId) });
+  if (media.data) return <ResolvedNodeVisualWithMedia node={node} report={report} media={media.data.media} detail={detail} />;
+  const props = { node, report, lastContactAt: report?.reportedAt, nodeHref: `/nodes/${node.id}` };
+  return detail ? <NodePlaybackView {...props} /> : <FleetNodeCard {...props} />;
+}
+
+function ResolvedNodeVisualWithMedia({ node, report, media, detail }: { node: Node; report?: NodeReport; media: Media; detail: boolean }) {
+  const preview = useAuthenticatedPreview(media);
+  const metadata = playbackMetadata(media, preview.status === "ready" ? preview.url : undefined);
+  const props = { node, report, lastContactAt: report?.reportedAt, observedNow: metadata, expectedNow: metadata, nodeHref: `/nodes/${node.id}` };
+  return detail ? <NodePlaybackView {...props} /> : <FleetNodeCard {...props} />;
+}
 
 function NodesPage() {
   const search = useSearch({ from: "/nodes" });
@@ -99,16 +135,20 @@ function NodesPage() {
   const query = useQuery({ queryKey: queryKeys.nodes(search), queryFn: () => listNodes(search) });
   const operator = useQuery({ queryKey: queryKeys.operator, queryFn: getOperator });
   const enrollment = useMutation({ mutationFn: async () => readApiResult(await api.POST("/enrollment-tokens", { params: { header: { "Idempotency-Key": crypto.randomUUID() } } })) });
+  const items = query.data?.items ?? [];
+  const reports = useQueries({ queries: items.map((node) => ({ queryKey: queryKeys.nodeStatus(node.id), queryFn: () => getNodeStatus(node.id), staleTime: 5_000 })) });
   const setSearch = (value: string) => navigate({ search: (previous) => ({ ...previous, search: value || undefined, cursor: undefined }) });
   if (query.isPending) return <RoutePending />;
   if (query.isError) return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Fleet" }]}><QueryError error={query.error} retry={() => void query.refetch()} /></PageFrame>;
   const data = query.data;
   const canEnroll = operator.isSuccess && (operator.data.capabilities.node_enroll === true || operator.data.scopes.includes("node_enroll"));
-  return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Fleet" }, { label: "Nodes" }]}>
-    <PageHeader title="Nodes" description="See which displays are connected and whether they are showing the latest assignment.">{canEnroll && <Button onClick={() => enrollment.mutate()} disabled={enrollment.isPending}>{enrollment.isPending ? "Creating token…" : "Register node"}</Button>}</PageHeader>
+  return <PageFrame breadcrumbs={[{ label: "Fleet" }]}>
+    <PageHeader title="Fleet" description="See what every display is showing now.">{canEnroll && <Button onClick={() => enrollment.mutate()} disabled={enrollment.isPending}>{enrollment.isPending ? "Creating token…" : "Register node"}</Button>}</PageHeader>
     {enrollment.isError && <QueryError error={enrollment.error} retry={() => enrollment.reset()} />}
     {enrollment.data && <Card><CardHeader><CardTitle>One-time enrollment token</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Enter this secret in Cable Node before it expires. It cannot be retrieved again.</p><div className="flex gap-2"><input aria-label="Enrollment token" readOnly value={enrollment.data.secret} className="h-10 min-w-0 flex-1 rounded border border-border bg-background px-3 font-mono text-xs" /><Button variant="secondary" onClick={() => void navigator.clipboard.writeText(enrollment.data.secret)}>Copy</Button></div><time className="text-xs text-muted-foreground" dateTime={enrollment.data.expiresAt}>Expires {new Date(enrollment.data.expiresAt).toLocaleString()}</time></CardContent></Card>}
-    <Card><CardHeader className="gap-3"><CardTitle>Registered nodes</CardTitle><SearchBox value={search.search ?? ""} onChange={setSearch} label="Search by name or ID" /></CardHeader><CardContent className="space-y-4"><TanStackDataTable caption="Registered nodes" rows={data.items} rowKey={(node) => node.id} empty={<EmptyState title="No matching nodes" description="The controller returned no nodes matching this search." />} columns={[{ key: "name", header: "Node", render: (node: Node) => <Link className="font-medium text-primary hover:underline" to="/nodes/$nodeId" params={{ nodeId: node.id }}>{node.name}</Link> }, { key: "id", header: "ID", render: (node: Node) => <span className="font-mono text-xs">{node.id}</span> }, { key: "credential", header: "Credential", render: (node: Node) => <StatusBadge tone={node.credentialState === "active" ? "success" : "warning"}>{node.credentialState}</StatusBadge> }, { key: "generation", header: "Generation", render: (node: Node) => <span className="tabular-nums">{node.observedGeneration ?? "—"}/{node.desiredGeneration ?? "—"}</span> }]} /><Pagination page={data.page} onPrevious={() => navigate({ search: (previous) => ({ ...previous, cursor: data.page.previousCursor ?? undefined }) })} onNext={() => navigate({ search: (previous) => ({ ...previous, cursor: data.page.nextCursor ?? undefined }) })} /></CardContent></Card>
+    <SearchBox value={search.search ?? ""} onChange={setSearch} label="Search displays" />
+    {data.items.length ? <PreviewMosaic label="Fleet displays" columns={2}>{data.items.map((node, index) => <ResolvedNodeVisual key={node.id} node={node} report={reports[index]?.data} />)}</PreviewMosaic> : <EmptyState title="No matching displays" description="Try a different name or register a node." />}
+    <Pagination page={data.page} onPrevious={() => navigate({ search: (previous) => ({ ...previous, cursor: data.page.previousCursor ?? undefined }) })} onNext={() => navigate({ search: (previous) => ({ ...previous, cursor: data.page.nextCursor ?? undefined }) })} />
   </PageFrame>;
 }
 
@@ -143,10 +183,10 @@ function NodeDetailPage({ nodeId, tab = "" }: { nodeId: string; tab?: NodeTab })
   if (node.isError) return <PageFrame breadcrumbs={[{ label: "Nodes", href: "/nodes" }, { label: nodeId }]}><QueryError error={node.error} retry={() => void node.refetch()} /></PageFrame>;
   const detail = node.data;
   const tabTitle = nodeTabs.find((item) => item.slug === tab)?.label ?? "Overview";
-  const statusContent = status.isPending ? <LoadingCard /> : status.isError ? <QueryError error={status.error} retry={() => void status.refetch()} /> : tab === "playback" ? <NodePlayback status={status.data} /> : tab === "cache" ? <NodeCache status={status.data} /> : <NodeOverview node={detail} status={status.data} />;
+  const statusContent = status.isPending ? <LoadingCard /> : status.isError ? <QueryError error={status.error} retry={() => void status.refetch()} /> : tab === "cache" ? <NodeCache status={status.data} /> : <ResolvedNodeVisual node={detail} report={status.data} detail />;
   const canUnregister = auth.operator?.scopes.includes("security_admin") === true || auth.operator?.capabilities.security_admin === true;
   return <PageFrame breadcrumbs={[{ label: "Fleet", href: "/nodes" }, { label: detail.name }, ...(tab ? [{ label: tabTitle }] : [])]}>
-    <PageHeader title={detail.name} description={`Node ID ${detail.id}`}><StatusBadge tone={detail.credentialState === "active" ? "success" : "warning"}>{detail.credentialState}</StatusBadge>{canUnregister && !confirmUnregister && <Button variant="secondary" onClick={() => setConfirmUnregister(true)}>Unregister node</Button>}{confirmUnregister && <><Button variant="secondary" onClick={() => setConfirmUnregister(false)}>Cancel</Button><Button onClick={() => unregister.mutate()} disabled={unregister.isPending}>{unregister.isPending ? "Unregistering…" : "Confirm unregister"}</Button></>}</PageHeader>
+    <PageHeader title={detail.name}><StatusBadge tone={detail.credentialState === "active" ? "success" : "warning"}>{detail.credentialState}</StatusBadge>{canUnregister && !confirmUnregister && <Button variant="secondary" onClick={() => setConfirmUnregister(true)}>Unregister node</Button>}{confirmUnregister && <><Button variant="secondary" onClick={() => setConfirmUnregister(false)}>Cancel</Button><Button onClick={() => unregister.mutate()} disabled={unregister.isPending}>{unregister.isPending ? "Unregistering…" : "Confirm unregister"}</Button></>}</PageHeader>
     {unregister.isError && <QueryError error={unregister.error} retry={() => unregister.reset()} />}
     <nav aria-label="Node sections" className="flex gap-1 overflow-x-auto border-b border-border pb-px">{nodeTabs.map((item) => <Link key={item.slug || "overview"} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm ${item.slug === tab ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`} to={item.slug ? `/nodes/$nodeId/${item.slug}` : "/nodes/$nodeId"} params={{ nodeId }} aria-current={item.slug === tab ? "page" : undefined}>{item.label}</Link>)}</nav>
     {needsStatus && statusContent}
@@ -154,23 +194,6 @@ function NodeDetailPage({ nodeId, tab = "" }: { nodeId: string; tab?: NodeTab })
     {tab === "assignment" && (assignment.isPending ? <LoadingCard /> : assignment.isError ? <QueryError error={assignment.error} retry={() => void assignment.refetch()} /> : <div className="grid gap-4 lg:grid-cols-2"><NodeAssignment assignment={assignment.data} /><NodeAssignmentComposer fixedNodeId={detail.id} title="Change assignment" /></div>)}
     {tab === "events" && (events.isPending ? <LoadingCard /> : events.isError ? <QueryError error={events.error} retry={() => void events.refetch()} /> : <NodeEvents events={events.data.items} />)}
   </PageFrame>;
-}
-function NodeOverview({ node, status }: { node: Node; status: NodeStatus }) {
-  return <div className="grid gap-4 md:grid-cols-2">
-    <Card><CardHeader><CardTitle>Generation</CardTitle></CardHeader><CardContent><dl className="space-y-3 text-sm">
-      <div className="flex justify-between"><dt className="text-muted-foreground">Desired generation</dt><dd>{node.desiredGeneration ?? "—"}</dd></div>
-      <div className="flex justify-between"><dt className="text-muted-foreground">Observed generation</dt><dd>{node.observedGeneration ?? "—"}</dd></div>
-      <div className="flex justify-between"><dt className="text-muted-foreground">Last report sequence</dt><dd>{status.sequence}</dd></div>
-    </dl></CardContent></Card>
-    <Card><CardHeader><CardTitle>Renderer state</CardTitle></CardHeader><CardContent><dl className="space-y-3 break-all text-sm">
-      <div><dt className="text-muted-foreground">Presentation</dt><dd>{status.presentationKind || "—"}</dd></div>
-      <div><dt className="text-muted-foreground">Rendering release</dt><dd>{status.renderingReleaseDigest ?? "—"}</dd></div>
-      <div><dt className="text-muted-foreground">Healthy release</dt><dd>{status.healthyReleaseDigest ?? "—"}</dd></div>
-    </dl></CardContent></Card>
-  </div>;
-}
-function NodePlayback({ status }: { status: NodeStatus }) {
-  return <Card><CardHeader><CardTitle>Playback health</CardTitle></CardHeader><CardContent className="space-y-4"><dl className="grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-muted-foreground">Presentation</dt><dd>{status.presentationKind || "—"}</dd></div><div><dt className="text-muted-foreground">Healthy release</dt><dd className="break-all font-mono">{status.healthyReleaseDigest ?? "—"}</dd></div></dl><TanStackDataTable caption="Playback conditions" rows={status.conditions} rowKey={(condition) => condition.type} empty={<EmptyState title="No playback conditions" description="The node has not reported playback conditions." />} columns={[{ key: "condition", header: "Condition", render: (condition) => condition.type }, { key: "status", header: "Status", render: (condition) => <StatusBadge tone={condition.status ? "success" : "danger"}>{condition.status ? "Ready" : "Not ready"}</StatusBadge> }, { key: "reason", header: "Reason", render: (condition) => condition.reason }]} /></CardContent></Card>;
 }
 function NodeCache({ status }: { status: NodeStatus }) {
   return <Card><CardHeader><CardTitle>Cache activation</CardTitle></CardHeader><CardContent><dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt className="text-muted-foreground">Candidate release</dt><dd className="break-all font-mono">{status.candidateReleaseDigest ?? "None"}</dd></div><div><dt className="text-muted-foreground">Last known good</dt><dd className="break-all font-mono">{status.lastKnownGoodReleaseDigest ?? "—"}</dd></div></dl></CardContent></Card>;
@@ -206,6 +229,7 @@ function UploadsPage() {
       {canCreateUpload ? <Card><CardHeader><CardTitle>Upload a file</CardTitle></CardHeader><CardContent><MediaDropzone onUploaded={() => {
         void client.invalidateQueries({ queryKey: ["controller", "uploads"] });
         void client.invalidateQueries({ queryKey: ["controller", "assets"] });
+        void client.invalidateQueries({ queryKey: ["controller", "media"] });
       }} /></CardContent></Card> : operator.isPending ? <LoadingCard /> : operator.isError ? <QueryError error={operator.error} retry={() => void operator.refetch()} /> : <EmptyState title="Upload unavailable" description="Your operator permissions do not include upload creation." />}
       <Card className="lg:col-span-2"><CardHeader><CardTitle>Recent uploads</CardTitle></CardHeader><CardContent>{query.isError ? <QueryError error={query.error} retry={() => void query.refetch()} /> : <><TanStackDataTable caption="Uploads" rows={query.data.items} rowKey={(upload) => upload.id} empty={<EmptyState title="No uploads" description="Upload an image or video to add it to your library." />} columns={[{ key: "id", header: "Upload", render: (upload) => <span className="font-mono text-xs">{upload.id}</span> }, { key: "progress", header: "Progress", render: (upload) => `${upload.offset.toLocaleString()} / ${upload.length.toLocaleString()} bytes` }, { key: "state", header: "State", render: (upload) => <StatusBadge tone={upload.state === "complete" ? "success" : upload.state === "failed" ? "danger" : "info"}>{upload.state}</StatusBadge> }]} /><Pagination page={query.data.page} onPrevious={() => navigate({ search: (previous) => ({ ...previous, cursor: query.data.page.previousCursor ?? undefined }) })} onNext={() => navigate({ search: (previous) => ({ ...previous, cursor: query.data.page.nextCursor ?? undefined }) })} /></>}</CardContent></Card>
     </div>
@@ -277,6 +301,22 @@ function RemoteControlPage() {
 
 function ActivityPage() { const query = useQuery({ queryKey: queryKeys.activity, queryFn: async () => { const nodes = readApiResult(await api.GET("/nodes", { params: { query: { limit: 100 } } })); const eventPages = await Promise.all(nodes.items.map(async (node) => ({ node, page: await listNodeEvents(node.id) }))); return eventPages.flatMap(({ node, page }) => page.items.map((event) => ({ ...event, nodeName: node.name, nodeId: node.id }))).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)); } }); if (query.isPending) return <RoutePending />; return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Operations" }, { label: "Activity" }]}><PageHeader title="Activity" />{query.isError ? <QueryError error={query.error} retry={() => void query.refetch()} /> : <Card><CardHeader><CardTitle>Recent events</CardTitle></CardHeader><CardContent><TanStackDataTable caption="Operations activity" rows={query.data} rowKey={(event) => event.id} empty={<EmptyState title="No activity" description="The controller has not reported any node events." />} columns={[{ key: "node", header: "Node", render: (event) => <Link className="text-primary hover:underline" to="/nodes/$nodeId" params={{ nodeId: event.nodeId }}>{event.nodeName}</Link> }, { key: "type", header: "Type", render: (event) => event.type }, { key: "sequence", header: "Sequence", render: (event) => event.sequence }, { key: "occurred", header: "Occurred", render: (event) => <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleString()}</time> }]} /></CardContent></Card>}</PageFrame>; }
 function BoundaryPage({ title, description }: { title: string; description: string }) { return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: title }]}><PageHeader title={title} description={description} /><EmptyState title="Navigation boundary" description="Cable authoring is not part of the controller workspace. Use the Cable application to manage deployments." /></PageFrame>; }
+function AuthoringEntryPage({ kind }: { kind: "Channels" | "Blocks" }) {
+  const channels = kind === "Channels";
+  return <PageFrame breadcrumbs={[{ label: "Library", href: "/media" }, { label: kind }]}>
+    <PageHeader
+      title={kind}
+      description={channels ? "Channels are organized within a deployment." : "Blocks are organized within a channel."}
+    />
+    <Card>
+      <CardHeader><CardTitle>{channels ? "Choose a deployment" : "Choose a deployment and channel"}</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">{channels ? "Open a deployment to browse and author its channel lineup." : "Open a deployment, select a channel, then manage its scheduled blocks."}</p>
+        <Button asChild><Link to="/cable/deployments">Browse deployments</Link></Button>
+      </CardContent>
+    </Card>
+  </PageFrame>;
+}
 
 const rootRoute = createRootRoute({ component: Shell, pendingComponent: RoutePending, errorComponent: RouteError });
 const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: OverviewPage });
@@ -286,10 +326,11 @@ function NodePlaybackRoute() { const { nodeId } = nodePlaybackRoute.useParams();
 function NodeCacheRoute() { const { nodeId } = nodeCacheRoute.useParams(); return <NodeDetailPage nodeId={nodeId} tab="cache" />; }
 function NodeCapabilitiesRoute() { const { nodeId } = nodeCapabilitiesRoute.useParams(); return <NodeDetailPage nodeId={nodeId} tab="capabilities" />; }
 function NodeEventsRoute() { const { nodeId } = nodeEventsRoute.useParams(); return <NodeDetailPage nodeId={nodeId} tab="events" />; }
-function PlaylistDetailRoute() { const { playlistId = "" } = useParams({ strict: false }); return <PlaylistAuthoringDetailPage playlistId={playlistId} />; }
+function PlaylistDetailRoute() { const { playlistId = "" } = useParams({ strict: false }); return <PlaylistAuthoringDetailPage playlistId={playlistId} querySeam={authoringQuerySeam} />; }
 function BlockListRoute() { const { channelId = "" } = useParams({ strict: false }); return <BlockAuthoringListPage channelId={channelId} />; }
-function BlockDetailRoute() { const { blockId = "" } = useParams({ strict: false }); return <BlockAuthoringDetailPage blockId={blockId} />; }
-function ProfileDetailRoute() { const { profileId = "" } = useParams({ strict: false }); return <ProfileAuthoringDetailPage profileId={profileId} />; }
+function BlockDetailRoute() { const { blockId = "" } = useParams({ strict: false }); return <BlockAuthoringDetailPage blockId={blockId} querySeam={authoringQuerySeam} />; }
+function ProfileDetailRoute() { const { profileId = "" } = useParams({ strict: false }); return <ProfileAuthoringDetailPage profileId={profileId} querySeam={authoringQuerySeam} />; }
+function ChannelDetailRoute() { const { channelId = "" } = useParams({ strict: false }); return <ChannelAuthoringDetailPage channelId={channelId} querySeam={authoringQuerySeam} />; }
 const nodesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/nodes", validateSearch: (search: Record<string, unknown>): NodeSearch => ({ ...normalizePageSearch(search), sort: search.sort === "desiredGeneration" ? "desiredGeneration" : "name" }), component: NodesPage });
 const nodeDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/nodes/$nodeId", component: NodeOverviewRoute });
 const nodeAssignmentRoute = createRoute({ getParentRoute: () => rootRoute, path: "/nodes/$nodeId/assignment", component: NodeAssignmentRoute });
@@ -300,6 +341,9 @@ const nodeEventsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/n
 const assetsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/assets", validateSearch: normalizePageSearch, component: AssetsPage });
 const assetDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/assets/$assetId", component: AssetDetailPage });
 const uploadsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/uploads", validateSearch: normalizePageSearch, component: UploadsPage });
+const channelDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/channels/$channelId", component: ChannelDetailRoute });
+const mediaRoute = createRoute({ getParentRoute: () => rootRoute, path: "/media", validateSearch: normalizeMediaSearch, component: MediaLibraryPage });
+const mediaDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/media/$mediaId", component: MediaDetailPage });
 const releasesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/releases", validateSearch: normalizePageSearch, component: ReleasesPage });
 const releaseDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/releases/$releaseId", component: ReleasesDetailPage });
 const deploymentsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/deployments", component: CableDeploymentsPage });
@@ -308,14 +352,15 @@ const deploymentChannelsRoute = createRoute({ getParentRoute: () => rootRoute, p
 const deploymentScheduleRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/deployments/$deploymentId/schedule", component: () => <CableDeploymentDetail tab="schedule" /> });
 const deploymentRevisionsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/deployments/$deploymentId/revisions", component: () => <CableDeploymentDetail tab="revisions" /> });
 const deploymentPublishRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/deployments/$deploymentId/publish", component: () => <CableDeploymentDetail tab="publish" /> });
-const channelDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/channels/$channelId", component: () => <CableChannelDetail /> });
 const channelProgramsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/channels/$channelId/programs", component: () => <CableChannelDetail tab="programs" /> });
 const programDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/programs/$programId", component: CableProgramDetailPage });
 const shellBuildsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/shell-builds", component: ShellBuildsPage });
 const playlistsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/playlists", component: PlaylistAuthoringListPage });
 const playlistDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/playlists/$playlistId", component: PlaylistDetailRoute });
+const channelsEntryRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/channels", component: () => <AuthoringEntryPage kind="Channels" /> });
 const channelBlocksRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/channels/$channelId/blocks", component: BlockListRoute });
 const blockDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/blocks/$blockId", component: BlockDetailRoute });
+const blocksEntryRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/blocks", component: () => <AuthoringEntryPage kind="Blocks" /> });
 const profilesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/profiles", component: ProfileAuthoringListPage });
 const profileDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/profiles/$profileId", component: ProfileDetailRoute });
 const revisionDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cable/revisions/$revisionId", component: RevisionDetailPage });
@@ -323,7 +368,7 @@ const cableReleaseRoute = createRoute({ getParentRoute: () => rootRoute, path: "
 const activityRoute = createRoute({ getParentRoute: () => rootRoute, path: "/activity", component: ActivityPage });
 const assignRoute = createRoute({ getParentRoute: () => rootRoute, path: "/assign", component: AssignPage });
 const remoteControlRoute = createRoute({ getParentRoute: () => rootRoute, path: "/remote/$sessionId", component: RemoteControlPage });
-const routeTree = rootRoute.addChildren([indexRoute, remoteControlRoute, nodesRoute, nodeDetailRoute, nodeAssignmentRoute, nodePlaybackRoute, nodeCacheRoute, nodeCapabilitiesRoute, nodeEventsRoute, assignRoute, assetsRoute, assetDetailRoute, uploadsRoute, releasesRoute, releaseDetailRoute, deploymentsRoute, deploymentDetailRoute, deploymentChannelsRoute, deploymentScheduleRoute, deploymentRevisionsRoute, deploymentPublishRoute, channelDetailRoute, channelProgramsRoute, channelBlocksRoute, blockDetailRoute, playlistsRoute, playlistDetailRoute, profilesRoute, profileDetailRoute, programDetailRoute, shellBuildsRoute, revisionDetailRoute, cableReleaseRoute, activityRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, remoteControlRoute, nodesRoute, nodeDetailRoute, nodeAssignmentRoute, nodePlaybackRoute, nodeCacheRoute, nodeCapabilitiesRoute, nodeEventsRoute, assignRoute, mediaRoute, mediaDetailRoute, assetsRoute, assetDetailRoute, uploadsRoute, releasesRoute, releaseDetailRoute, deploymentsRoute, deploymentDetailRoute, deploymentChannelsRoute, deploymentScheduleRoute, deploymentRevisionsRoute, deploymentPublishRoute, channelsEntryRoute, channelDetailRoute, channelProgramsRoute, blocksEntryRoute, channelBlocksRoute, blockDetailRoute, playlistsRoute, playlistDetailRoute, profilesRoute, profileDetailRoute, programDetailRoute, shellBuildsRoute, revisionDetailRoute, cableReleaseRoute, activityRoute]);
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 declare module "@tanstack/react-router" { interface Register { router: typeof router } }
 export type AppRouter = typeof router;
