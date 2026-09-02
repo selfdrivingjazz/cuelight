@@ -389,6 +389,65 @@ function UsageSummary({ usage, pending, error, retry }: { usage?: MediaUsage; pe
     </CardContent>
   </Card>;
 }
+type CablePlaylist = components["schemas"]["CablePlaylist"];
+
+function MediaPlaylistAdder({ media }: { media: Media }) {
+  const queryClient = useQueryClient();
+  const playlists = useQuery({
+    queryKey: ["controller", "media-playlist-options"],
+    queryFn: async () => readApiResult(await api.GET("/cable/playlists", { params: { query: { limit: 100 } } })),
+  });
+  const [playlistId, setPlaylistId] = React.useState("");
+  const [durationSeconds, setDurationSeconds] = React.useState(60);
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!playlistId) throw new Error("Choose a playlist.");
+      const playlist = readApiResult(await api.GET("/cable/playlists/{playlistId}", { params: { path: { playlistId } } })) as CablePlaylist;
+      const position = playlist.items.reduce((highest, item) => Math.max(highest, item.position), 0) + 1;
+      return readApiResult(await api.PATCH("/cable/playlists/{playlistId}", {
+        params: { path: { playlistId }, header: { "If-Match": `"v${playlist.version}"` } },
+        body: {
+          name: playlist.name,
+          description: playlist.description,
+          items: [
+            ...playlist.items.map((item) => ({
+              assetId: item.assetId,
+              position: item.position,
+              durationSeconds: item.durationSeconds,
+              title: item.title,
+              subtitle: item.subtitle,
+            })),
+            { assetId: media.assetId, position, durationSeconds, title: media.title },
+          ],
+        },
+      }));
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["authoring", "playlists"] });
+      void queryClient.invalidateQueries({ queryKey: ["authoring", "playlist", playlistId] });
+    },
+  });
+
+  return <Card>
+    <CardHeader><CardTitle>Add to playlist</CardTitle></CardHeader>
+    <CardContent className="space-y-4">
+      <label className="block text-sm font-medium">Playlist
+        <select className={fieldClass} value={playlistId} onChange={(event) => setPlaylistId(event.currentTarget.value)} disabled={playlists.isPending || mutation.isPending}>
+          <option value="">Choose a playlist</option>
+          {playlists.data?.items.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
+        </select>
+      </label>
+      <label className="block text-sm font-medium">Play duration
+        <span className="flex items-center gap-2"><input className={fieldClass} type="number" min={1} max={86400} value={durationSeconds} onChange={(event) => setDurationSeconds(Math.max(1, Number(event.currentTarget.value)))} disabled={mutation.isPending} /><span className="text-sm text-muted-foreground">seconds</span></span>
+      </label>
+      {playlists.isError && <ErrorState title="Playlists unavailable" description={playlists.error.message} onRetry={() => void playlists.refetch()} />}
+      {mutation.isError && <ErrorState title="Could not add media" description={mutation.error.message} />}
+      {mutation.isSuccess && <p role="status" className="text-sm font-medium text-status-success">Added to playlist.</p>}
+      <Button type="button" onClick={() => mutation.mutate()} disabled={!playlistId || mutation.isPending}>{mutation.isPending ? "Adding…" : "Add to playlist"}</Button>
+    </CardContent>
+  </Card>;
+}
+
 
 export function MediaDetailPage() {
   const { mediaId = "" } = useParams({ strict: false });
@@ -397,15 +456,19 @@ export function MediaDetailPage() {
   const usageQuery = useQuery({ queryKey: ["controller", "media-usage", mediaId], queryFn: () => getMediaUsage(mediaId), enabled: Boolean(mediaId) });
   const [dimensions, setDimensions] = React.useState<PixelDimensions>();
   const [assigning, setAssigning] = React.useState(false);
+  const [addingToPlaylist, setAddingToPlaylist] = React.useState(false);
   if (mediaQuery.isPending) return <LibraryPending />;
   if (mediaQuery.isError) return <PageFrame breadcrumbs={[{ label: "Library", href: "/media" }, { label: "Media" }]}><QueryError error={mediaQuery.error} retry={() => void mediaQuery.refetch()} /></PageFrame>;
 
   const { media, etag } = mediaQuery.data;
   const canEdit = Boolean(auth.operator && hasCapability(auth.operator, "media_write", "media_write"));
+  const canAuthor = Boolean(auth.operator && hasCapability(auth.operator, "cable_write", "cable_write"));
   return <PageFrame breadcrumbs={[{ label: "Library" }, { label: "Media", href: "/media" }, { label: media.title }]}>
     <PageHeader title={media.title} description={media.artist || media.description}>
+      {canAuthor && <Button type="button" variant="secondary" onClick={() => setAddingToPlaylist((value) => !value)}>{addingToPlaylist ? "Close playlist picker" : "Add to playlist"}</Button>}
       <Button type="button" onClick={() => setAssigning((value) => !value)}>{assigning ? "Close assignment" : "Assign"}</Button>
     </PageHeader>
+    {addingToPlaylist && <MediaPlaylistAdder media={media} />}
     {assigning && <NodeAssignmentComposer fixedAsset={{ id: media.assetId, name: media.title, playback: media.playback }} title="Assign media" />}
 
     <AuthenticatedMediaPreview media={media} hero onDimensions={setDimensions} />
