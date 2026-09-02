@@ -28,7 +28,7 @@ import { NodeAssignmentComposer } from "./assignment";
 export type Media = components["schemas"]["Media"];
 type MediaPage = components["schemas"]["MediaPage"];
 type MediaPatch = components["schemas"]["MediaPatch"];
-type MediaUsage = components["schemas"]["MediaUsage"];
+type UsagePage = components["schemas"]["UsagePage"];
 type MediaTypeFilter = "all" | "image" | "video";
 
 export interface MediaLibrarySearch {
@@ -201,8 +201,8 @@ export async function getMedia(mediaId: string): Promise<{ media: Media; etag: s
   return { media, etag: result.response.headers.get("ETag") ?? `"media:${media.id}:${media.version}"` };
 }
 
-async function getMediaUsage(mediaId: string): Promise<MediaUsage> {
-  return readApiResult(await api.GET("/media/{mediaId}/usage", { params: { path: { mediaId } } }));
+async function getMediaUsage(mediaId: string): Promise<UsagePage> {
+  return readApiResult(await api.GET("/usage/{kind}/{id}", { params: { path: { kind: "media", id: mediaId }, query: { limit: 100 } } }));
 }
 
 function MediaLibraryCard({ media }: { media: Media }) {
@@ -378,14 +378,22 @@ function MediaEditor({ media, etag }: { media: Media; etag: string }) {
   </Card>;
 }
 
-function UsageSummary({ usage, pending, error, retry }: { usage?: MediaUsage; pending: boolean; error?: Error; retry: () => void }) {
+function UsageSummary({ usage, pending, error, retry }: { usage?: UsagePage; pending: boolean; error?: Error; retry: () => void }) {
   if (pending) return <Card><CardContent className="space-y-3 pt-5"><Skeleton className="h-5 w-36" /><Skeleton className="h-12 w-full" /></CardContent></Card>;
   if (error) return <QueryError error={error} retry={retry} />;
+  const references = usage?.references ?? [];
+  const playlists = references.filter((reference) => reference.kind === "playlist").length;
+  const blocks = references.filter((reference) => reference.kind === "block").length;
   return <Card>
     <CardHeader><CardTitle>Used in</CardTitle></CardHeader>
-    <CardContent className="grid grid-cols-2 gap-4">
-      <div><p className="text-2xl font-semibold tabular-nums">{usage?.scheduleCount ?? 0}</p><p className="text-sm text-muted-foreground">Schedules</p></div>
-      <div><p className="text-2xl font-semibold tabular-nums">{usage?.releaseCount ?? 0}</p><p className="text-sm text-muted-foreground">Releases</p></div>
+    <CardContent className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div><p className="text-2xl font-semibold tabular-nums">{playlists}</p><p className="text-sm text-muted-foreground">Playlists</p></div>
+        <div><p className="text-2xl font-semibold tabular-nums">{blocks}</p><p className="text-sm text-muted-foreground">Blocks</p></div>
+      </div>
+      {references.length > 0
+        ? <ul className="space-y-2 border-t border-border pt-4">{references.map((reference) => <li key={`${reference.kind}:${reference.id}`}><a className="text-sm font-medium text-primary hover:underline" href={reference.href}>{reference.name}</a><span className="ml-2 text-xs capitalize text-muted-foreground">{reference.kind}</span></li>)}</ul>
+        : <p className="text-sm text-muted-foreground">Not used by any playlist or block.</p>}
     </CardContent>
   </Card>;
 }
