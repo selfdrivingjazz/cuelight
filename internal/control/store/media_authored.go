@@ -3,13 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/page"
 )
@@ -38,8 +38,8 @@ func (s *Store) CreateMedia(ctx context.Context, mutation media.Mutation, value 
 			}
 			_, err := tx.ExecContext(txCtx, `INSERT INTO media
 				(id, asset_id, title, description, artist, tags, artwork_asset_id, fit, loop, muted, volume, orientation, version, created_by, updated_by)
-				VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, '') , $8, $9, $10, $11, $12, 1, $13, $13)`,
-				value.ID, value.AssetID, value.Title, value.Description, value.Artist, pgtype.FlatArray[string](value.Tags), value.ArtworkAssetID,
+				VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), ARRAY(SELECT jsonb_array_elements_text($6::jsonb)), NULLIF($7, '') , $8, $9, $10, $11, $12, 1, $13, $13)`,
+				value.ID, value.AssetID, value.Title, value.Description, value.Artist, jsonStrings(value.Tags), value.ArtworkAssetID,
 				value.Playback.Fit, value.Playback.Loop, value.Playback.Muted, value.Playback.Volume, value.Playback.Orientation, mutation.ActorID)
 			if err != nil {
 				return "", wrap("create authored media", err)
@@ -68,9 +68,9 @@ func (s *Store) GetMedia(ctx context.Context, id string) (media.Media, error) {
 func (s *Store) authoredMedia(ctx context.Context, q queryer, id string) (media.Media, error) {
 	var value media.Media
 	var description, artist, artwork sql.NullString
-	var tags pgtype.FlatArray[string]
+	var tags []byte
 	err := q.QueryRowContext(ctx, `SELECT m.id::text, m.asset_id::text, m.title, m.description, m.artist,
-		m.tags, m.artwork_asset_id::text, m.fit, m.loop, m.muted, m.volume, m.orientation, m.version,
+		array_to_json(m.tags), m.artwork_asset_id::text, m.fit, m.loop, m.muted, m.volume, m.orientation, m.version,
 		m.created_by::text, m.updated_by::text, m.created_at, m.updated_at,
 		r.digest, r.size_bytes, r.media_type, r.state
 		FROM media m JOIN asset_artifacts aa ON aa.asset_id = m.asset_id AND aa.role = 'original'
@@ -87,7 +87,9 @@ func (s *Store) authoredMedia(ctx context.Context, q queryer, id string) (media.
 	}
 	value.Description, value.Artist = description.String, artist.String
 	value.ArtworkAssetID = artwork.String
-	value.Tags = append([]string(nil), tags...)
+	if err := json.Unmarshal(tags, &value.Tags); err != nil {
+		return media.Media{}, wrap("decode authored media tags", err)
+	}
 	if value.Tags == nil {
 		value.Tags = []string{}
 	}
@@ -134,8 +136,8 @@ func (s *Store) UpdateMedia(ctx context.Context, mutation media.Mutation, id str
 				n++
 			}
 			if patch.Tags != nil {
-				sets = append(sets, "tags = $"+strconv.Itoa(n))
-				args = append(args, pgtype.FlatArray[string](*patch.Tags))
+				sets = append(sets, "tags = ARRAY(SELECT jsonb_array_elements_text($"+strconv.Itoa(n)+"::jsonb))")
+				args = append(args, jsonStrings(*patch.Tags))
 				n++
 			}
 			if patch.ArtworkAssetID != nil {
@@ -217,8 +219,8 @@ func (s *Store) ListMedia(ctx context.Context, request page.PageRequest, filter 
 		clauses = append(clauses, "r.media_type LIKE $"+strconv.Itoa(len(args)))
 	}
 	if len(filter.AssetIDs) > 0 {
-		args = append(args, pgtype.FlatArray[string](filter.AssetIDs))
-		clauses = append(clauses, "m.asset_id = ANY($"+strconv.Itoa(len(args))+"::uuid[])")
+		args = append(args, jsonStrings(filter.AssetIDs))
+		clauses = append(clauses, "m.asset_id = ANY(ARRAY(SELECT jsonb_array_elements_text($"+strconv.Itoa(len(args))+"::jsonb)::uuid))")
 	}
 	if request.Cursor != "" {
 		op := ">"
@@ -246,21 +248,26 @@ func (s *Store) ListMedia(ctx context.Context, request page.PageRequest, filter 
 		orderBy = "m.title " + order + ", m.id " + order
 	}
 	args = append(args, request.Limit+1)
-	rows, err := s.q(ctx).QueryContext(ctx, "SELECT m.id::text, m.asset_id::text, m.title, m.description, m.artist, m.tags, m.artwork_asset_id::text, m.fit, m.loop, m.muted, m.volume, m.orientation, m.version, m.created_by::text, m.updated_by::text, m.created_at, m.updated_at, r.digest, r.size_bytes, r.media_type, r.state FROM media m JOIN asset_artifacts aa ON aa.asset_id=m.asset_id AND aa.role='original' JOIN artifacts r ON r.digest=aa.artifact_digest WHERE "+strings.Join(clauses, " AND ")+" ORDER BY "+orderBy+" LIMIT $"+strconv.Itoa(len(args)), args...)
+	rows, err := s.q(ctx).QueryContext(ctx, "SELECT m.id::text, m.asset_id::text, m.title, m.description, m.artist, array_to_json(m.tags), m.artwork_asset_id::text, m.fit, m.loop, m.muted, m.volume, m.orientation, m.version, m.created_by::text, m.updated_by::text, m.created_at, m.updated_at, r.digest, r.size_bytes, r.media_type, r.state FROM media m JOIN asset_artifacts aa ON aa.asset_id=m.asset_id AND aa.role='original' JOIN artifacts r ON r.digest=aa.artifact_digest WHERE "+strings.Join(clauses, " AND ")+" ORDER BY "+orderBy+" LIMIT $"+strconv.Itoa(len(args)), args...)
 	items := make([]media.Media, 0, request.Limit)
 	var lastValue, lastID string
 	hasMore := false
 	for rows.Next() {
 		var item media.Media
 		var desc, artist, artwork sql.NullString
-		var tags pgtype.FlatArray[string]
+		var tags []byte
 		var created time.Time
 		err := rows.Scan(&item.ID, &item.AssetID, &item.Title, &desc, &artist, &tags, &artwork, &item.Playback.Fit, &item.Playback.Loop, &item.Playback.Muted, &item.Playback.Volume, &item.Playback.Orientation, &item.Version, &item.CreatedBy, &item.UpdatedBy, &created, &item.UpdatedAt, &item.Artifact.Digest, &item.Artifact.Size, &item.Artifact.MediaType, &item.Artifact.State)
 		if err != nil {
 			return page.Response[media.Media]{}, wrap("scan authored media", err)
 		}
 		item.Description, item.Artist, item.ArtworkAssetID = desc.String, artist.String, artwork.String
-		item.Tags = append([]string(nil), tags...)
+		if err := json.Unmarshal(tags, &item.Tags); err != nil {
+			return page.Response[media.Media]{}, wrap("decode authored media tags", err)
+		}
+		if item.Tags == nil {
+			item.Tags = []string{}
+		}
 		if len(items) < request.Limit {
 			item.CreatedAt = created
 			items = append(items, item)
@@ -286,6 +293,10 @@ func (s *Store) ListMedia(ctx context.Context, request page.PageRequest, filter 
 		next = &v
 	}
 	return page.NewResponse(items, next, previous, hasMore), nil
+}
+func jsonStrings(values []string) string {
+	encoded, _ := json.Marshal(values)
+	return string(encoded)
 }
 
 func (s *Store) GetMediaUsage(ctx context.Context, id string) (media.MediaUsage, error) {
