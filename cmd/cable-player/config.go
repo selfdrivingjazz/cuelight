@@ -16,6 +16,7 @@ import (
 
 type playerConfig struct {
 	ControlURL             string
+	NodeID                 string
 	ServerCAPath           string
 	NodeCertificatePath    string
 	NodePrivateKeyPath     string
@@ -53,7 +54,7 @@ func (e *configError) Error() string { return fmt.Sprintf("configuration %s: %s"
 
 func loadConfig(lookup func(string) (string, bool)) (playerConfig, error) {
 	config := playerConfig{
-		ControlURL: env(lookup, "CABLE_PLAYER_CONTROL_URL"), ServerCAPath: env(lookup, "CABLE_PLAYER_SERVER_CA_PATH"),
+		ControlURL: env(lookup, "CABLE_PLAYER_CONTROL_URL"), NodeID: env(lookup, "CABLE_PLAYER_NODE_ID"), ServerCAPath: env(lookup, "CABLE_PLAYER_SERVER_CA_PATH"),
 		NodeCertificatePath: env(lookup, "CABLE_PLAYER_NODE_CERT_PATH"), NodePrivateKeyPath: env(lookup, "CABLE_PLAYER_NODE_KEY_PATH"),
 		PublisherKeyID: env(lookup, "CABLE_PLAYER_PUBLISHER_KEY_ID"), PublisherPublicKeyPath: env(lookup, "CABLE_PLAYER_PUBLISHER_PUBLIC_KEY_PATH"),
 		EventEpoch: env(lookup, "CABLE_PLAYER_EVENT_EPOCH"), ProfileID: env(lookup, "CABLE_PLAYER_PROFILE_ID"), RendererVersion: env(lookup, "CABLE_PLAYER_RENDERER_VERSION"),
@@ -138,7 +139,7 @@ func (c playerConfig) validate() error {
 
 func (c playerConfig) runtimeConfig(publisherKey []byte) playerruntime.Config {
 	return playerruntime.Config{
-		Capabilities: capabilityReport(c), EventEpoch: c.EventEpoch, PublisherKeyID: c.PublisherKeyID, PublisherPublicKey: publisherKey,
+		NodeID: c.NodeID, Capabilities: capabilityReport(c), EventEpoch: c.EventEpoch, PublisherKeyID: c.PublisherKeyID, PublisherPublicKey: publisherKey,
 		Features: c.Features, AcceptedMediaTypes: c.AcceptedMediaTypes, Probation: c.Probation, PollWait: c.PollWait,
 		ReconnectMinimum: c.ReconnectMinimum, ReconnectMaximum: c.ReconnectMaximum, PartialGrace: c.PartialGrace, StreamTTL: c.StreamTTL,
 		PresentationMode: c.runtimePresentationMode(),

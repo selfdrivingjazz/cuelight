@@ -18,6 +18,7 @@ import (
 	"github.com/jmill/cable/internal/media/localcas"
 	playerclient "github.com/jmill/cable/internal/player/client"
 	"github.com/jmill/cable/internal/player/renderer"
+	"github.com/jmill/cable/internal/player/screenshot"
 	"github.com/jmill/cable/internal/release"
 )
 
@@ -37,6 +38,7 @@ type Reconciler struct {
 	activeRevoke   func()
 	activeDelivery string
 	recovered      bool
+	screenshot     *screenshot.Executor
 }
 
 type systemClock struct{}
@@ -88,15 +90,16 @@ func New(config Config, dependencies Dependencies) (*Reconciler, error) {
 	} else if epoch != config.EventEpoch {
 		return nil, errors.New("configured event epoch differs from durable player epoch")
 	}
-	return &Reconciler{
-		config:     config,
-		deps:       dependencies,
-		epoch:      epoch,
-		reportSeq:  reportSequence,
-		watermark:  watermark,
-		eventSeq:   watermark,
-		conditions: make(map[string]playerclient.Condition),
-	}, nil
+	reconciler := &Reconciler{
+		config: config, deps: dependencies, epoch: epoch, reportSeq: reportSequence,
+		watermark: watermark, eventSeq: watermark, conditions: make(map[string]playerclient.Condition),
+	}
+	if jobs, ok := dependencies.Controller.(screenshot.Jobs); ok && dependencies.ScreenshotCache != nil && strings.TrimSpace(config.NodeID) != "" {
+		if capturer, captureOK := dependencies.Renderer.(screenshot.Capturer); captureOK {
+			reconciler.screenshot, _ = screenshot.New(screenshot.Config{NodeID: config.NodeID}, jobs, capturer, dependencies.ScreenshotCache)
+		}
+	}
+	return reconciler, nil
 }
 
 func (r *Reconciler) Snapshot() Snapshot { return r.snapshot }
@@ -200,6 +203,11 @@ func (r *Reconciler) Run(ctx context.Context) error {
 				return err
 			}
 			backoff = nextBackoff(backoff, r.config.ReconnectMaximum)
+		}
+		if r.screenshot != nil {
+			if _, screenshotErr := r.screenshot.RunOnce(ctx); screenshotErr != nil && ctx.Err() == nil {
+				r.event("screenshot_execution_failed", r.snapshot.ObservedGeneration, map[string]any{"reason": screenshotErr.Error()})
+			}
 		}
 	}
 }

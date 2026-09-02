@@ -1,10 +1,9 @@
 // Package preview contains controller-side expected Cable preview derivation and
-// the durable screenshot-job state machine. It deliberately does not execute
-// rendering; player execution reports a typed terminal unsupported result until
-// a renderer capability is available.
+// the durable screenshot-job state machine.
 package preview
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -12,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -232,6 +232,31 @@ type ArtifactRecord struct {
 type ArtifactCatalog interface {
 	LookupArtifact(context.Context, string) (ArtifactRecord, error)
 }
+
+// QueueRepository and ArtifactSink/Reader are optional extensions used by
+// production player transfer. They keep the original repository contract
+// usable by lightweight fixtures while enabling secure queue discovery and
+// exact-byte CAS registration.
+type QueueRepository interface {
+	Next(context.Context, string, time.Time) (ScreenshotJob, bool, error)
+}
+type ArtifactSink interface {
+	StoreScreenshotArtifact(context.Context, string, string, int64, io.Reader) error
+}
+type ArtifactReader interface {
+	Open(context.Context, string) (io.ReadCloser, error)
+	Stat(context.Context, string) (ArtifactStat, error)
+}
+type ArtifactStat struct {
+	Digest string
+	Size   int64
+}
+type ResultContent struct {
+	Body      io.ReadCloser
+	Size      int64
+	MediaType string
+	ETag      string
+}
 type CreateResult struct {
 	Job      ScreenshotJob
 	Replayed bool
@@ -268,17 +293,20 @@ type Repository interface {
 	Complete(context.Context, string, string, time.Time, Completion, AuditEvent) (ScreenshotJob, error)
 	Expire(context.Context, string, time.Time, AuditEvent) (ScreenshotJob, bool, error)
 }
-
 type Authorizer interface {
 	Authorize(context.Context, string, string, string) error
 }
 type Clock interface{ Now() time.Time }
 type IDGenerator interface{ NewID() (string, error) }
-type Config struct{ DefaultTTL, MaxTTL, RetentionTTL, ArtifactRetentionTTL time.Duration }
+type Config struct {
+	DefaultTTL, MaxTTL, RetentionTTL, ArtifactRetentionTTL time.Duration
+}
 type Service struct {
 	Repository Repository
 	Authorizer Authorizer
 	Artifacts  ArtifactCatalog
+	Sink       ArtifactSink
+	Reader     ArtifactReader
 	Clock      Clock
 	IDs        IDGenerator
 	Config     Config
@@ -326,8 +354,15 @@ func (s Service) Create(ctx context.Context, m Mutation, input CreateInput) (Cre
 	if err := s.authorize(ctx, m.ActorID, "screenshot.create", input.NodeID); err != nil {
 		return CreateResult{}, err
 	}
-	if strings.TrimSpace(input.NodeID) == "" || !input.Expected.Expected || input.Expected.ReleaseDigest == "" || input.Expected.RevisionDigest == "" || input.Expected.EffectiveAt.IsZero() {
-		return CreateResult{}, fmt.Errorf("%w: nodeId and expected release/revision/time are required", ErrInvalidArgument)
+	if strings.TrimSpace(input.NodeID) == "" {
+		return CreateResult{}, fmt.Errorf("%w: nodeId is required", ErrInvalidArgument)
+	}
+	if input.Expected.Expected {
+		if !validDigest(input.Expected.ReleaseDigest) || !validDigest(input.Expected.RevisionDigest) || input.Expected.EffectiveAt.IsZero() {
+			return CreateResult{}, fmt.Errorf("%w: expected provenance requires valid release/revision digests and effective time", ErrInvalidArgument)
+		}
+	} else if input.Expected.ReleaseDigest != "" || input.Expected.RevisionDigest != "" || !input.Expected.EffectiveAt.IsZero() {
+		return CreateResult{}, fmt.Errorf("%w: expected provenance must set expected=true", ErrInvalidArgument)
 	}
 	if strings.TrimSpace(m.IdempotencyKey) == "" {
 		return CreateResult{}, fmt.Errorf("%w: idempotency key is required", ErrInvalidArgument)
@@ -356,6 +391,76 @@ func (s Service) Create(ctx context.Context, m Mutation, input CreateInput) (Cre
 	}
 	return CreateResult{Job: stored, Replayed: replayed}, nil
 }
+
+func (s Service) Next(ctx context.Context, nodeID string) (ScreenshotJob, bool, error) {
+	if s.Repository == nil || strings.TrimSpace(nodeID) == "" {
+		return ScreenshotJob{}, false, ErrInvalidArgument
+	}
+	queue, ok := s.Repository.(QueueRepository)
+	if !ok {
+		return ScreenshotJob{}, false, ErrNotFound
+	}
+	return queue.Next(ctx, nodeID, s.now())
+}
+
+// CompleteUpload verifies the declared digest and exact byte count before
+// handing bytes to the sink. The sink registers the immutable artifact, then
+// Complete performs the atomic claimed-to-completed transition.
+func (s Service) CompleteUpload(ctx context.Context, nodeID, id, digest, mediaType string, size int64, body io.Reader) (ScreenshotJob, error) {
+	if size <= 0 || size > 16<<20 || mediaType != "image/png" || !validDigest(digest) || body == nil {
+		return ScreenshotJob{}, fmt.Errorf("%w: invalid screenshot upload metadata", ErrInvalidArgument)
+	}
+	data := new(bytes.Buffer)
+	hash := sha256.New()
+	n, err := io.Copy(io.MultiWriter(data, hash), io.LimitReader(body, size+1))
+	if err != nil {
+		return ScreenshotJob{}, fmt.Errorf("%w: read screenshot upload: %v", ErrInvalidArgument, err)
+	}
+	if n != size {
+		return ScreenshotJob{}, fmt.Errorf("%w: screenshot byte count mismatch", ErrArtifactMismatch)
+	}
+	if extra, err := io.Copy(io.Discard, io.LimitReader(body, 1)); err != nil || extra != 0 {
+		return ScreenshotJob{}, fmt.Errorf("%w: screenshot body exceeds declared size", ErrArtifactMismatch)
+	}
+	observed := hex.EncodeToString(hash.Sum(nil))
+	if observed != digest {
+		return ScreenshotJob{}, fmt.Errorf("%w: screenshot digest mismatch", ErrArtifactMismatch)
+	}
+	if s.Sink == nil {
+		return ScreenshotJob{}, fmt.Errorf("%w: artifact sink is not configured", ErrArtifactUnavailable)
+	}
+	if err := s.Sink.StoreScreenshotArtifact(ctx, digest, mediaType, size, bytes.NewReader(data.Bytes())); err != nil {
+		return ScreenshotJob{}, err
+	}
+	return s.Complete(ctx, nodeID, id, Completion{Status: StatusCompleted, ArtifactDigest: digest, MediaType: mediaType})
+}
+
+func (s Service) Content(ctx context.Context, actorID, id string) (ResultContent, error) {
+	if err := s.authorize(ctx, actorID, "screenshot.read", id); err != nil {
+		return ResultContent{}, err
+	}
+	job, err := s.Get(ctx, actorID, id)
+	if err != nil {
+		return ResultContent{}, err
+	}
+	if job.Status != StatusCompleted || job.ResultArtifactDigest == "" || !s.now().Before(job.RetentionUntil) {
+		return ResultContent{}, ErrExpired
+	}
+	if s.Reader == nil {
+		return ResultContent{}, ErrArtifactUnavailable
+	}
+	stat, err := s.Reader.Stat(ctx, job.ResultArtifactDigest)
+	if err != nil || stat.Digest != job.ResultArtifactDigest {
+		return ResultContent{}, ErrArtifactUnavailable
+	}
+	body, err := s.Reader.Open(ctx, job.ResultArtifactDigest)
+	if err != nil {
+		return ResultContent{}, ErrArtifactUnavailable
+	}
+
+	return ResultContent{Body: body, Size: stat.Size, MediaType: job.ResultMediaType, ETag: artifactETag(job.ResultArtifactDigest)}, nil
+}
+func artifactETag(digest string) string { return fmt.Sprintf("\"%s\"", digest) }
 
 func (s Service) Get(ctx context.Context, actorID, id string) (ScreenshotJob, error) {
 	if err := s.authorize(ctx, actorID, "screenshot.read", id); err != nil {
@@ -493,7 +598,6 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{jobs: map[string]ScreenshotJob{}, idempotency: map[string]memoryIdempotency{}}
 }
 func cloneJob(j ScreenshotJob) ScreenshotJob {
-	j.Expected = j.Expected
 	if j.ClaimedAt != nil {
 		v := *j.ClaimedAt
 		j.ClaimedAt = &v
@@ -503,6 +607,22 @@ func cloneJob(j ScreenshotJob) ScreenshotJob {
 		j.CompletionAt = &v
 	}
 	return j
+}
+
+func (r *MemoryRepository) Next(_ context.Context, nodeID string, now time.Time) (ScreenshotJob, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var selected ScreenshotJob
+	found := false
+	for _, job := range r.jobs {
+		if job.NodeID != nodeID || job.Status != StatusQueued || !now.Before(job.ExpiresAt) {
+			continue
+		}
+		if !found || job.RequestedAt.Before(selected.RequestedAt) || (job.RequestedAt.Equal(selected.RequestedAt) && job.ID < selected.ID) {
+			selected, found = job, true
+		}
+	}
+	return cloneJob(selected), found, nil
 }
 func (r *MemoryRepository) Create(_ context.Context, req CreateRequest) (ScreenshotJob, bool, error) {
 	r.mu.Lock()

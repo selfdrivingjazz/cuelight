@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -14,6 +17,7 @@ import (
 	"time"
 
 	playerclient "github.com/jmill/cable/internal/player/client"
+	"github.com/jmill/cable/internal/player/screenshot"
 	"github.com/jmill/cable/internal/release"
 )
 
@@ -449,6 +453,35 @@ func (m *MPV) Current(ctx context.Context) (Status, error) {
 		return Status{}, nil
 	}
 	return m.Health(ctx, *current)
+}
+
+// Capture asks MPV to encode the currently presented frame as PNG. The
+// screenshot file is temporary and is removed after its bytes are read.
+func (m *MPV) Capture(ctx context.Context) ([]byte, error) {
+	if m.current.Load() == nil {
+		return nil, screenshot.ErrUnsupported
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("cable-screenshot-%d.png", m.requestID.Add(1)))
+	defer os.Remove(path)
+	if _, err := m.command(ctx, []any{"screenshot-to-file", path, "video"}); err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open MPV screenshot: %w", err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, screenshot.DefaultMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > screenshot.DefaultMaxBytes {
+		return nil, screenshot.ErrCaptureTooLarge
+	}
+	return data, nil
 }
 
 type candidateProperty struct {

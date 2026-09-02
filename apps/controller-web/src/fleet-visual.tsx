@@ -40,6 +40,8 @@ export interface NodeCapture {
   /** An already-authorized object URL for a screenshot captured from the node. */
   url: string;
   capturedAt?: string;
+  /** Provenance reported by the screenshot job, never inferred from playback metadata. */
+  provenance?: string;
   alt?: string;
 }
 
@@ -172,15 +174,14 @@ function mediaPreview(metadata: PlaybackMetadata | undefined): PreviewMedia | un
 }
 
 function CapturePreview({ nodeName, capture, compact = false }: { nodeName: string; capture?: NodeCapture; compact?: boolean }) {
-  return <PreviewSurface
+  return <div>{!capture && <p className="sr-only">No capture exists</p>}<PreviewSurface
     aria-label={`Actual capture for ${nodeName}`}
     media={capture ? { kind: "image", src: capture.url, alt: capture.alt ?? `Actual capture from ${nodeName}` } : undefined}
     state={capture ? undefined : "empty"}
     className={compact ? "rounded-none border-x-0" : undefined}
     emptyTitle="No capture exists"
     emptyDescription="The node has not supplied a screenshot. No image is inferred from its playback report."
-    overlay={capture?.capturedAt ? <time dateTime={capture.capturedAt}>Captured {formatDateTime(capture.capturedAt) ?? "at an unknown time"}</time> : undefined}
-  />;
+  />{capture && <p className="px-4 py-2 text-xs text-muted-foreground"><span className="font-medium text-foreground">Actual node capture</span>{capture.capturedAt && <> · <time dateTime={capture.capturedAt}>Captured {formatDateTime(capture.capturedAt) ?? "at an unknown time"}</time></>}{capture.provenance && <> · {capture.provenance}</>}</p>}</div>;
 }
 
 function ExpectedPreview({ expected, compact = false }: { expected?: PlaybackMetadata; compact?: boolean }) {
@@ -368,6 +369,11 @@ export function FleetNodeCard({
         <h3 id={expectedHeadingId} className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{expectedNow ? "Expected preview" : observedNow ? "Reported media" : "Preview"}</h3>
         {expectedNow ? <ExpectedPreview expected={expectedNow} compact /> : <ObservedPreview observed={observedNow} compact />}
         <div className="p-4"><MetadataSummary metadata={expectedNow ?? observedNow} empty="Preview unavailable." /></div>
+        {expectedNow && observedNow && <div className="border-t border-border">
+          <h3 className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reported media</h3>
+          <ObservedPreview observed={observedNow} compact />
+          <div className="p-4"><MetadataSummary metadata={observedNow} empty="Reported media unavailable." /></div>
+        </div>}
       </section>
       {capture && <section aria-labelledby={captureHeadingId} className="min-w-0 border-t border-border sm:border-t-0">
         <h3 id={captureHeadingId} className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actual capture</h3>

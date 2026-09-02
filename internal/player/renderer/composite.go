@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jmill/cable/internal/player/screenshot"
 	"github.com/jmill/cable/internal/release"
 )
 
@@ -87,4 +88,27 @@ func (c *Composite) Current(ctx context.Context) (Status, error) {
 		return c.Media.Current(ctx)
 	}
 	return Status{}, nil
+}
+
+func (c *Composite) Capture(ctx context.Context) ([]byte, error) {
+	for _, adapter := range []Adapter{c.Cable, c.Media} {
+		if adapter == nil {
+			continue
+		}
+		status, err := adapter.Current(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if status.ReleaseDigest == "" && !status.Healthy {
+			continue
+		}
+		capture, ok := adapter.(interface {
+			Capture(context.Context) ([]byte, error)
+		})
+		if !ok {
+			return nil, screenshot.ErrUnsupported
+		}
+		return capture.Capture(ctx)
+	}
+	return nil, screenshot.ErrUnsupported
 }

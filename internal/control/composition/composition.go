@@ -28,6 +28,7 @@ import (
 	"github.com/jmill/cable/internal/control/persistence"
 	"github.com/jmill/cable/internal/control/pki"
 	"github.com/jmill/cable/internal/control/playerapi"
+	"github.com/jmill/cable/internal/control/preview"
 	controlrelease "github.com/jmill/cable/internal/control/release"
 	"github.com/jmill/cable/internal/control/remote"
 	"github.com/jmill/cable/internal/control/store"
@@ -86,6 +87,9 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("construct CAS: %w", err)
 	}
+	previewRepository := store.NewPreviewRepository(repository)
+	previewRepository.CAS = cas
+	previewService := &preview.Service{Repository: previewRepository, Artifacts: previewRepository, Sink: previewRepository, Reader: previewRepository, Config: preview.Config{DefaultTTL: 5 * time.Minute, MaxTTL: 15 * time.Minute, RetentionTTL: 24 * time.Hour, ArtifactRetentionTTL: 24 * time.Hour}}
 	temporary, err := newTemporaryStore(config.TemporaryRoot)
 	if err != nil {
 		return nil, fmt.Errorf("construct temporary store: %w", err)
@@ -169,6 +173,11 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	api.Handle("/player/remote-sessions/", remoteHandler)
 	api.Handle("/remote/", remoteHandler)
 	api.Handle("/media", operatorDependencies.Middleware(authoredMediaHandler))
+	playerScreenshotHandler := preview.NewPlayerHandler(previewService, func(r *http.Request) (string, error) { return protocol.NodeIdentity(r, nil) })
+	api.Handle("/player/screenshots/", playerScreenshotHandler)
+	operatorScreenshotHandler := preview.NewOperatorHandler(previewService)
+	api.Handle("/screenshots", operatorDependencies.MiddlewareForScope(operatorapi.ScopeCableWrite, operatorScreenshotHandler))
+	api.Handle("/screenshots/", operatorDependencies.MiddlewareForScope(operatorapi.ScopeCableRead, operatorScreenshotHandler))
 	api.Handle("/media/", operatorDependencies.Middleware(authoredMediaHandler))
 	api.Handle("/usage/", operatorDependencies.MiddlewareForScope(operatorapi.ScopeCableRead, usageHandler))
 	playerHandler := playerapi.NewHandler(playerService)

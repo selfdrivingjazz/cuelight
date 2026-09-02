@@ -4,8 +4,11 @@ import (
 	"io"
 	"time"
 
+	"github.com/jmill/cable/internal/control/preview"
 	"github.com/jmill/cable/internal/release"
 )
+
+type ScreenshotJob = preview.ScreenshotJob
 
 type EnrollmentRequest struct {
 	Token     string `json:"token"`

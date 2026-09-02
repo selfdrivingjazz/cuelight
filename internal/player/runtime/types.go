@@ -87,6 +87,7 @@ type Clock interface {
 }
 
 type Config struct {
+	NodeID             string
 	Capabilities       playerclient.CapabilityReport
 	EventEpoch         string
 	PublisherKeyID     string
@@ -105,15 +106,18 @@ type Config struct {
 	MaxConditions      int
 	MaxMessageRunes    int
 }
-
 type Dependencies struct {
-	Controller Controller
-	Journal    Journal
-	CAS        CAS
-	Capacity   Capacity
-	Streamer   StreamSource
-	Renderer   renderer.Adapter
-	Clock      Clock
+	Controller      Controller
+	Journal         Journal
+	CAS             CAS
+	ScreenshotCache interface {
+		Put(io.Reader, string) (localcas.Object, error)
+		Open(string) (io.ReadCloser, error)
+	}
+	Capacity Capacity
+	Streamer StreamSource
+	Renderer renderer.Adapter
+	Clock    Clock
 }
 
 type Snapshot struct {

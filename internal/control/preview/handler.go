@@ -23,6 +23,7 @@ func NewOperatorHandler(service *Service) http.Handler {
 	}
 	mux.HandleFunc("POST /screenshots", service.createHTTP)
 	mux.HandleFunc("GET /screenshots/{jobId}", service.getHTTP)
+	mux.HandleFunc("GET /screenshots/{jobId}/content", service.getContentHTTP)
 	return mux
 }
 
@@ -40,6 +41,23 @@ func NewPlayerHandler(service *Service, identity NodeIdentity) http.Handler {
 	if identity == nil {
 		identity = func(r *http.Request) (string, error) { return protocol.NodeIdentity(r, nil) }
 	}
+	mux.HandleFunc("GET /player/screenshots/next", func(w http.ResponseWriter, r *http.Request) {
+		nodeID, err := identity(r)
+		if err != nil || strings.TrimSpace(nodeID) == "" {
+			writeError(w, fmt.Errorf("%w: %v", ErrUnauthorized, err))
+			return
+		}
+		job, ok, err := service.Next(r.Context(), nodeID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if !ok {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
+	})
 	mux.HandleFunc("POST /player/screenshots/{jobId}/claim", func(w http.ResponseWriter, r *http.Request) {
 		nodeID, err := identity(r)
 		if err != nil || strings.TrimSpace(nodeID) == "" {
@@ -59,12 +77,22 @@ func NewPlayerHandler(service *Service, identity NodeIdentity) http.Handler {
 			writeError(w, fmt.Errorf("%w: %v", ErrUnauthorized, err))
 			return
 		}
-		var completion Completion
-		if err := decodeJSON(r, &completion); err != nil {
-			writeError(w, err)
-			return
+		var job ScreenshotJob
+		if r.Header.Get("Content-Type") == "image/png" || strings.HasPrefix(r.Header.Get("Content-Type"), "image/png;") {
+			size := r.ContentLength
+			if size < 0 {
+				writeError(w, fmt.Errorf("%w: Content-Length is required", ErrInvalidArgument))
+				return
+			}
+			job, err = service.CompleteUpload(r.Context(), nodeID, r.PathValue("jobId"), r.Header.Get("X-Artifact-Digest"), "image/png", size, io.LimitReader(r.Body, 16<<20+1))
+		} else {
+			var completion Completion
+			if err := decodeJSON(r, &completion); err != nil {
+				writeError(w, err)
+				return
+			}
+			job, err = service.Complete(r.Context(), nodeID, r.PathValue("jobId"), completion)
 		}
-		job, err := service.Complete(r.Context(), nodeID, r.PathValue("jobId"), completion)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -129,6 +157,26 @@ func (s *Service) getHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Service) getContentHTTP(w http.ResponseWriter, r *http.Request) {
+	actor, err := actorID(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	content, err := s.Content(r.Context(), actor, r.PathValue("jobId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	defer content.Body.Close()
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", content.MediaType)
+	w.Header().Set("ETag", content.ETag)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", content.Size))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.CopyN(w, content.Body, content.Size)
 }
 func decodeJSON(r *http.Request, target any) error {
 	if r.Body == nil {

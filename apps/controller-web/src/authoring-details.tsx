@@ -18,20 +18,26 @@ import {
   StatusBadge,
   TechnicalDetails,
 } from "@cable/controller-ui";
-import { api, readApiResult } from "./api";
+import { ApiRequestError, api, readApiResult } from "./api";
 import { AuthoringMediaPreview } from "./components/AuthoringMediaPreview";
 
 type CableChannel = components["schemas"]["CableChannel"];
 type CablePlaylist = components["schemas"]["CablePlaylist"];
 type CablePlaylistItem = components["schemas"]["CablePlaylistItem"];
+type CablePlaylistItemInput = components["schemas"]["CablePlaylistItemInput"];
 type CableBlock = components["schemas"]["CableBlock"];
+type CableBlockInput = components["schemas"]["CableBlockInput"];
 type CableProfile = components["schemas"]["CableProfile"];
+type CableProfileInput = components["schemas"]["CableProfileInput"];
 type CableChannelInput = components["schemas"]["CableChannelInput"];
 type CableRevisionProgram = components["schemas"]["CableRevisionProgram"];
 type Media = components["schemas"]["Media"];
 type MediaPage = components["schemas"]["MediaPage"];
 type UsagePage = components["schemas"]["UsagePage"];
 type CurrentContent = components["schemas"]["CurrentContent"];
+type CableShellBuild = components["schemas"]["CableShellBuild"];
+type CableDeployment = components["schemas"]["CableDeployment"];
+type ReleaseEnvelope = components["schemas"]["ReleaseEnvelope"];
 
 type LinkIntent = { href: string; label: string };
 export type AuthoringResourceKind = "playlist" | "block" | "channel" | "profile";
@@ -125,11 +131,49 @@ async function listBlocks(channelId: string): Promise<{ items: CableBlock[] }> {
 async function getProfile(profileId: string): Promise<CableProfile> {
   return readApiResult(await api.GET("/cable/profiles/{profileId}", { params: { path: { profileId } } }));
 }
+async function listMedia(): Promise<MediaPage> {
+  return readApiResult(await api.GET("/media", { params: { query: { limit: 100, playable: true } } }));
+}
+async function listShellBuilds(): Promise<{ items: CableShellBuild[] }> {
+  return readApiResult(await api.GET("/cable/shell-builds", { params: { query: { limit: 100 } } })) as { items: CableShellBuild[] };
+}
+async function listReleases(): Promise<{ items: ReleaseEnvelope[] }> {
+  return readApiResult(await api.GET("/releases", { params: { query: { limit: 100 } } })) as { items: ReleaseEnvelope[] };
+}
+function localDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  const pad = (number: number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function isoDateTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : date.toISOString();
+}
+function replacementItems(items: CablePlaylistItem[]): CablePlaylistItemInput[] {
+  return [...items].sort((left, right) => left.position - right.position).map((item, index) => ({
+    assetId: item.assetId,
+    position: index + 1,
+    durationSeconds: item.durationSeconds,
+    title: item.title || undefined,
+    subtitle: item.subtitle || undefined,
+  }));
+}
 async function listProfiles(): Promise<{ items: CableProfile[] }> {
   return readApiResult(await api.GET("/cable/profiles", { params: { query: { limit: 100 } } }));
 }
 async function getBlock(blockId: string): Promise<CableBlock> {
   return readApiResult(await api.GET("/cable/blocks/{blockId}", { params: { path: { blockId } } }));
+}
+async function listDeployments(): Promise<{ items: CableDeployment[] }> {
+  return readApiResult(await api.GET("/cable/deployments", { params: { query: { limit: 100 } } })) as { items: CableDeployment[] };
+}
+export function authoringIfMatch(version: number): string {
+  return `"v${version}"`;
+}
+function mutationMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiRequestError && error.status === 412) return "This resource changed elsewhere. Reload before saving.";
+  return error instanceof Error ? error.message : fallback;
 }
 
 function useAuthoringVisuals(request: AuthoringVisualRequest | null, override?: AuthoringQuerySeam) {
@@ -261,14 +305,22 @@ export interface PlaylistInspectorProps {
   playlist: CablePlaylist;
   visuals?: AuthoringVisualSnapshot;
   visualState?: string | null;
+  mediaOptions?: Media[];
   movingItemId?: string | null;
+  mutating?: boolean;
   onMove?: (itemId: string, direction: -1 | 1) => void;
+  onAdd?: (assetId: string, durationSeconds: number) => void;
+  onRemove?: (itemId: string) => void;
+  onDurationChange?: (itemId: string, durationSeconds: number) => void;
 }
 
-export function PlaylistInspector({ playlist, visuals, visualState, movingItemId, onMove }: PlaylistInspectorProps) {
+export function PlaylistInspector({ playlist, visuals, visualState, mediaOptions = [], movingItemId, mutating = false, onMove, onAdd, onRemove, onDurationChange }: PlaylistInspectorProps) {
   const ordered = [...playlist.items].sort((left, right) => left.position - right.position);
   const resolved = mediaMap(visuals);
   const totalSeconds = ordered.reduce((sum, item) => sum + item.durationSeconds, 0);
+  const [newAssetId, setNewAssetId] = React.useState("");
+  const [newDuration, setNewDuration] = React.useState(60);
+  const available = mediaOptions.filter((media) => !playlist.items.some((item) => item.assetId === media.assetId));
   return <div className="space-y-6">
     <section aria-labelledby="playlist-look-heading" className="space-y-3">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -280,6 +332,14 @@ export function PlaylistInspector({ playlist, visuals, visualState, movingItemId
         return <MediaCard key={item.id} title={item.title || media?.title || "Untitled media"} description={item.subtitle || undefined} preview={<PlaylistItemPreview item={item} media={media} />} metadata={<span>{formatDuration(item.durationSeconds)}</span>} />;
       })}</PreviewMosaic> : <EmptyState title="Playlist is empty" description="Add authored media before placing this playlist in a scheduled block." />}
     </section>
+    <section aria-labelledby="playlist-add-heading" className="space-y-3">
+      <div><h2 id="playlist-add-heading" className="text-lg font-semibold tracking-tight">Add media</h2><p className="text-sm text-muted-foreground">Choose playable Media from the catalog; no asset IDs need to be copied.</p></div>
+      {available.length ? <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-end">
+        <label className="min-w-0 flex-1 text-sm font-medium">Media<select className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={newAssetId} onChange={(event) => setNewAssetId(event.currentTarget.value)} disabled={mutating}><option value="">Choose media</option>{available.map((media) => <option key={media.assetId} value={media.assetId}>{media.title || "Untitled media"}</option>)}</select></label>
+        <label className="text-sm font-medium">Duration (seconds)<input className="mt-1 h-9 w-32 rounded-md border border-border bg-background px-3" type="number" min={1} max={86400} value={newDuration} onChange={(event) => setNewDuration(Math.max(1, Number(event.currentTarget.value) || 1))} disabled={mutating} /></label>
+        {onAdd && <Button type="button" disabled={!newAssetId || mutating} onClick={() => { onAdd(newAssetId, newDuration); setNewAssetId(""); }}>Add media</Button>}
+      </div> : <EmptyState title={mediaOptions.length ? "All available media is already included" : "No playable media available"} description={mediaOptions.length ? "Choose another catalog item after one is removed." : "Register playable Media before adding it to this playlist."} />}
+    </section>
     {ordered.length > 0 && <section aria-labelledby="playlist-order-heading" className="space-y-3">
       <div><h2 id="playlist-order-heading" className="text-lg font-semibold tracking-tight">Play order</h2><p className="text-sm text-muted-foreground">Media runs from top to bottom.</p></div>
       <ol className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card" aria-label="Playlist order">{ordered.map((item, index) => {
@@ -287,8 +347,8 @@ export function PlaylistInspector({ playlist, visuals, visualState, movingItemId
         return <li className="grid gap-3 p-3 sm:grid-cols-[2rem_8rem_minmax(0,1fr)_auto] sm:items-center" key={item.id}>
           <span className="text-sm font-semibold tabular-nums text-muted-foreground" aria-label={`Position ${index + 1}`}>{index + 1}</span>
           <PlaylistItemPreview item={item} media={media} compact />
-          <div className="min-w-0"><h3 className="truncate font-medium">{item.title || media?.title || "Untitled media"}</h3>{item.subtitle && <p className="truncate text-sm text-muted-foreground">{item.subtitle}</p>}<p className="mt-1 text-xs tabular-nums text-muted-foreground">{formatDuration(item.durationSeconds)}</p></div>
-          {onMove && <div className="flex gap-2" aria-label={`${item.title || "Playlist item"} reorder controls`}><Button type="button" variant="secondary" size="sm" disabled={index === 0 || Boolean(movingItemId)} onClick={() => onMove(item.id, -1)}>Move up</Button><Button type="button" variant="secondary" size="sm" disabled={index === ordered.length - 1 || Boolean(movingItemId)} onClick={() => onMove(item.id, 1)}>Move down</Button></div>}
+          <div className="min-w-0"><h3 className="truncate font-medium">{item.title || media?.title || "Untitled media"}</h3>{item.subtitle && <p className="truncate text-sm text-muted-foreground">{item.subtitle}</p>}<label className="mt-1 inline-flex items-center gap-2 text-xs text-muted-foreground">Duration<input aria-label={`Duration for ${item.title || media?.title || "playlist item"}`} className="h-8 w-20 rounded-md border border-border bg-background px-2 text-foreground" type="number" min={1} max={86400} defaultValue={item.durationSeconds} onBlur={(event) => onDurationChange?.(item.id, Math.max(1, Number(event.currentTarget.value) || 1))} disabled={mutating} /><span>seconds</span></label></div>
+          <div className="flex flex-wrap gap-2" aria-label={`${item.title || "Playlist item"} controls`}>{onMove && <><Button type="button" variant="secondary" size="sm" disabled={index === 0 || Boolean(movingItemId) || mutating} onClick={() => onMove(item.id, -1)}>Move up</Button><Button type="button" variant="secondary" size="sm" disabled={index === ordered.length - 1 || Boolean(movingItemId) || mutating} onClick={() => onMove(item.id, 1)}>Move down</Button></>}{onRemove && <Button type="button" variant="secondary" size="sm" disabled={mutating} onClick={() => onRemove(item.id)}>Remove</Button>}</div>
         </li>;
       })}</ol>
     </section>}
@@ -299,36 +359,50 @@ export function PlaylistInspector({ playlist, visuals, visualState, movingItemId
 export function PlaylistAuthoringDetailPage({ playlistId, querySeam }: { playlistId: string; querySeam?: AuthoringQuerySeam }) {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["authoring", "playlist", playlistId], queryFn: () => getPlaylist(playlistId) });
+  const mediaQuery = useQuery({ queryKey: ["authoring", "media-library"], queryFn: listMedia });
   const request = query.data ? { kind: "playlist" as const, id: playlistId, assetIds: query.data.items.map((item) => item.assetId) } : null;
   const visualQuery = useAuthoringVisuals(request, querySeam);
   const inheritedSeam = React.useContext(AuthoringQueryContext);
   const [movingItemId, setMovingItemId] = React.useState<string | null>(null);
-  const [moveError, setMoveError] = React.useState<string | null>(null);
+  const [mutationError, setMutationError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<string | null>(null);
+  async function replace(items: CablePlaylistItemInput[], message: string) {
+    if (!query.data) return;
+    setMutationError(null); setSuccess(null);
+    try {
+      const updated = readApiResult(await api.PATCH("/cable/playlists/{playlistId}", { params: { path: { playlistId }, header: { "If-Match": authoringIfMatch(query.data.version) } }, body: { name: query.data.name, description: query.data.description, items } }));
+      queryClient.setQueryData(["authoring", "playlist", playlistId], updated);
+      await queryClient.invalidateQueries({ queryKey: ["authoring", "playlist", playlistId] });
+      await queryClient.invalidateQueries({ queryKey: ["authoring", "playlists"] });
+      setSuccess(message);
+    } catch (error) { setMutationError(mutationMessage(error, "The playlist could not be saved.")); }
+  }
   async function move(itemId: string, direction: -1 | 1) {
     if (!query.data) return;
     const ordered = [...query.data.items].sort((left, right) => left.position - right.position);
     const index = ordered.findIndex((item) => item.id === itemId);
     const destination = index + direction;
     if (index < 0 || destination < 0 || destination >= ordered.length) return;
-    const source = ordered[index]!;
-    ordered[index] = ordered[destination]!;
-    ordered[destination] = source;
-    const firstPosition = Math.min(...query.data.items.map((item) => item.position));
+    [ordered[index], ordered[destination]] = [ordered[destination]!, ordered[index]!];
     setMovingItemId(itemId);
-    setMoveError(null);
-    try {
-      const updated = readApiResult(await api.PATCH("/cable/playlists/{playlistId}", {
-        params: { path: { playlistId }, header: { "If-Match": `\"v${query.data.version}\"` } },
-        body: { name: query.data.name, description: query.data.description, items: ordered.map((item, order) => ({ assetId: item.assetId, position: firstPosition + order, durationSeconds: item.durationSeconds, title: item.title, subtitle: item.subtitle })) },
-      }));
-      queryClient.setQueryData(["authoring", "playlist", playlistId], updated);
-    } catch (error) {
-      setMoveError(error instanceof Error ? error.message : "The playlist order could not be saved.");
-    } finally {
-      setMovingItemId(null);
-    }
+    try { await replace(replacementItems(ordered), "Playlist order saved."); } finally { setMovingItemId(null); }
   }
-  return <QueryBoundary query={query}>{query.data && <PageFrame title={query.data.name} description={query.data.description || "An ordered set of media for scheduled playback."}>{moveError && <ErrorState title="Unable to reorder playlist" description={moveError} />}<PlaylistInspector playlist={query.data} visuals={visualQuery.data} visualState={visualQueryNote(querySeam || inheritedSeam ? visualQuery : undefined)} movingItemId={movingItemId} onMove={move} /></PageFrame>}</QueryBoundary>;
+  async function add(assetId: string, durationSeconds: number) {
+    if (!query.data) return;
+    const selected = mediaQuery.data?.items.find((media) => media.assetId === assetId);
+    const position = query.data.items.length + 1;
+    await replace([...replacementItems(query.data.items), { assetId, position, durationSeconds, title: selected?.title || undefined }], "Media added to playlist.");
+  }
+  async function remove(itemId: string) {
+    if (!query.data) return;
+    await replace(replacementItems(query.data.items.filter((item) => item.id !== itemId)), "Media removed from playlist.");
+  }
+  async function updateDuration(itemId: string, durationSeconds: number) {
+    if (!query.data) return;
+    await replace(replacementItems(query.data.items.map((item) => item.id === itemId ? { ...item, durationSeconds } : item)), "Duration updated.");
+  }
+  if (mediaQuery.isError) return <QueryBoundary query={query}>{query.data && <PageFrame title={query.data.name} description={query.data.description || "An ordered set of media for scheduled playback."}><ErrorState title="Media catalog unavailable" description={mediaQuery.error instanceof Error ? mediaQuery.error.message : "Playable Media could not be loaded."} /></PageFrame>}</QueryBoundary>;
+  return <QueryBoundary query={query}>{query.data && <PageFrame title={query.data.name} description={query.data.description || "An ordered set of media for scheduled playback."}>{mutationError && <ErrorState title="Unable to save playlist" description={mutationError} />}{success && <p role="status" className="text-sm font-medium text-status-success">{success}</p>}<PlaylistInspector playlist={query.data} mediaOptions={mediaQuery.data?.items} visuals={visualQuery.data} visualState={visualQueryNote(querySeam || inheritedSeam ? visualQuery : undefined)} movingItemId={movingItemId} mutating={Boolean(movingItemId) || query.isFetching} onMove={move} onAdd={add} onRemove={remove} onDurationChange={updateDuration} /></PageFrame>}</QueryBoundary>;
 }
 
 export function ChannelAuthoringListPage({ deploymentId }: { deploymentId: string }) {
@@ -359,20 +433,31 @@ export function ChannelInspector({ channel, blocks, visuals, visualState, now = 
       <MediaCard title={`${channel.number} · ${channel.name}`} artist={channel.callsign || undefined} description={channel.description || "No channel description"} preview={media ? <AuthoringMediaPreview media={media} label={`${channel.name} artwork`} /> : <EmptyPreview label={`${channel.name} artwork`} description={channel.artworkAssetId ? "Artwork media has not been resolved." : "No channel artwork is assigned."} />} status={channel.enabled ? channel.standby ? "standby" : "active" : "disabled"} actions={action} />
       <Card><CardHeader><CardTitle>Schedule status</CardTitle></CardHeader><CardContent className="space-y-3"><StatusSummary status={current ? "scheduled" : "unscheduled"} label={current ? "Scheduled now" : "No current block"} detail={current?.title} /><p className="text-sm text-muted-foreground">{observations.length ? `${observations.length} current player ${observations.length === 1 ? "observation" : "observations"}.` : "No player observation is available for this channel."}</p>{visualState && <p className="text-xs text-muted-foreground">{visualState}</p>}</CardContent></Card>
     </div>
+    <a className="inline-block text-sm font-medium text-primary hover:underline" href={authoringLinks.channel(channel.id).href + "/blocks"}>Open full block schedule</a>
     <section aria-labelledby="current-next-heading" className="space-y-3"><h2 id="current-next-heading" className="text-lg font-semibold tracking-tight">Current and next</h2><div className="grid gap-4 md:grid-cols-2">{current ? <MediaCard title={current.title} description={`${formatTimestamp(current.startsAt)} – ${formatTimestamp(current.endsAt)}`} titleHref={authoringLinks.block(current.id).href} preview={<EmptyPreview label={`${current.title} source preview`} description="Open the block to resolve its authored sequence." />} status="playing" statusLabel="Current" metadata={<span><SourceLabel block={current} /></span>} /> : <EmptyState title="Nothing scheduled now" description="The authored schedule has no block covering the current time." />}{next ? <MediaCard title={next.title} description={`Starts ${formatTimestamp(next.startsAt)}`} titleHref={authoringLinks.block(next.id).href} preview={<EmptyPreview label={`${next.title} source preview`} description="Open the block to resolve its authored sequence." />} status="pending" statusLabel="Up next" metadata={<span><SourceLabel block={next} /></span>} /> : <EmptyState title="No next block" description="There is no later authored block in the loaded schedule window." />}</div></section>
     <section aria-labelledby="timeline-heading" className="space-y-3"><div><h2 id="timeline-heading" className="text-lg font-semibold tracking-tight">Schedule timeline</h2><p className="text-sm text-muted-foreground">Block sizes are proportional to runtime in the loaded window.</p></div>{ordered.length ? <ol className="flex min-h-24 flex-col overflow-hidden rounded-lg border border-border bg-card sm:flex-row" aria-label="Proportional channel schedule">{ordered.map((block) => { const duration = Math.max(secondsBetween(block.startsAt, block.endsAt), 0); return <li key={block.id} className="min-w-0 border-b border-border bg-muted/40 p-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0" style={{ flexBasis: 0, flexGrow: timelineDuration ? duration / timelineDuration : 1 }}><a className="block truncate text-sm font-medium hover:text-primary hover:underline" href={authoringLinks.block(block.id).href}>{block.title}</a><time className="mt-1 block truncate text-xs text-muted-foreground" dateTime={block.startsAt}>{new Date(block.startsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time></li>; })}</ol> : <EmptyState title="No scheduled blocks" description="This channel has no authored blocks in the loaded schedule window." />}</section>
     <TechnicalDetails items={[{ label: "Channel ID", value: channel.id }, { label: "Deployment ID", value: channel.deploymentId }, { label: "Revision", value: `v${channel.version}` }, { label: "Artwork asset ID", value: channel.artworkAssetId || "Not assigned" }, { label: "Created", value: formatTimestamp(channel.createdAt) }, { label: "Updated", value: formatTimestamp(channel.updatedAt) }]} />
   </div>;
 }
 
-function ChannelEditForm({ draft, saving, error, onChange, onSave, onCancel }: { draft: CableChannelInput; saving: boolean; error: string | null; onChange: (draft: CableChannelInput) => void; onSave: () => void; onCancel: () => void }) {
-  return <Card><CardHeader><CardTitle>Edit channel</CardTitle></CardHeader><CardContent><form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); onSave(); }}><label className="text-sm font-medium">Name<input required className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.name} onChange={(event) => onChange({ ...draft, name: event.currentTarget.value })} /></label><label className="text-sm font-medium">Callsign<input className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.callsign ?? ""} onChange={(event) => onChange({ ...draft, callsign: event.currentTarget.value })} /></label><label className="text-sm font-medium sm:col-span-2">Description<textarea className="mt-1 min-h-24 w-full rounded-md border border-border bg-background p-3" value={draft.description ?? ""} onChange={(event) => onChange({ ...draft, description: event.currentTarget.value })} /></label>{error && <p role="alert" className="text-sm text-status-danger sm:col-span-2">{error}</p>}<div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save channel"}</Button><Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button></div></form></CardContent></Card>;
+function ChannelEditForm({ draft, mediaOptions, saving, error, onChange, onSave, onCancel }: { draft: CableChannelInput; mediaOptions: Media[]; saving: boolean; error: string | null; onChange: (draft: CableChannelInput) => void; onSave: () => void; onCancel: () => void }) {
+  return <Card><CardHeader><CardTitle>Edit channel</CardTitle></CardHeader><CardContent><form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
+    <label className="text-sm font-medium">Name<input required className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.name} onChange={(event) => onChange({ ...draft, name: event.currentTarget.value })} /></label>
+    <label className="text-sm font-medium">Callsign<input className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.callsign ?? ""} onChange={(event) => onChange({ ...draft, callsign: event.currentTarget.value })} /></label>
+    <label className="text-sm font-medium sm:col-span-2">Description<textarea className="mt-1 min-h-24 w-full rounded-md border border-border bg-background p-3" value={draft.description ?? ""} onChange={(event) => onChange({ ...draft, description: event.currentTarget.value })} /></label>
+    <label className="text-sm font-medium">Artwork<select className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.artworkAssetId ?? ""} onChange={(event) => onChange({ ...draft, artworkAssetId: event.currentTarget.value || undefined })} disabled={saving}><option value="">No artwork</option>{mediaOptions.map((media) => <option key={media.assetId} value={media.assetId}>{media.title || "Untitled media"}</option>)}</select></label>
+    <label className="flex items-center gap-2 self-end pb-2 text-sm font-medium"><input type="checkbox" checked={draft.enabled ?? false} onChange={(event) => onChange({ ...draft, enabled: event.currentTarget.checked })} />Enabled</label>
+    <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={draft.standby ?? false} onChange={(event) => onChange({ ...draft, standby: event.currentTarget.checked })} />Standby</label>
+    {error && <p role="alert" className="text-sm text-status-danger sm:col-span-2">{error}</p>}
+    <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save channel"}</Button><Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button></div>
+  </form></CardContent></Card>;
 }
 
 export function ChannelAuthoringDetailPage({ channelId, querySeam }: { channelId: string; querySeam?: AuthoringQuerySeam }) {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["authoring", "channel", channelId], queryFn: () => getChannel(channelId) });
   const blocks = useQuery({ queryKey: ["authoring", "channel", channelId, "blocks"], queryFn: () => listBlocks(channelId), enabled: query.isSuccess });
+  const mediaQuery = useQuery({ queryKey: ["authoring", "media-library"], queryFn: listMedia });
   const assetIds = query.data?.artworkAssetId ? [query.data.artworkAssetId] : [];
   const visualQuery = useAuthoringVisuals(query.data ? { kind: "channel", id: channelId, assetIds } : null, querySeam);
   const inheritedSeam = React.useContext(AuthoringQueryContext);
@@ -385,49 +470,86 @@ export function ChannelAuthoringDetailPage({ channelId, querySeam }: { channelId
     if (!query.data || !draft) return;
     setSaving(true); setSaveError(null);
     try {
-      const result = readApiResult(await api.PATCH("/cable/channels/{channelId}", { params: { path: { channelId }, header: { "If-Match": `\"v${query.data.version}\"` } }, body: draft }));
+      const result = readApiResult(await api.PATCH("/cable/channels/{channelId}", { params: { path: { channelId }, header: { "If-Match": authoringIfMatch(query.data.version) } }, body: draft }));
       queryClient.setQueryData(["authoring", "channel", channelId], result);
+      await queryClient.invalidateQueries({ queryKey: ["authoring", "channel", channelId] });
+      await queryClient.invalidateQueries({ queryKey: ["authoring", "channels"] });
       setEditing(false);
-    } catch (error) { setSaveError(error instanceof Error ? error.message : "The channel could not be saved."); }
+    } catch (error) { setSaveError(mutationMessage(error, "The channel could not be saved.")); }
     finally { setSaving(false); }
   }
-  return <QueryBoundary query={query}>{query.data && <PageFrame title={`${query.data.number} · ${query.data.name}`} description="See the on-air identity, current block, and what follows.">{editing && draft ? <ChannelEditForm draft={draft} saving={saving} error={saveError} onChange={setDraft} onSave={() => void save()} onCancel={() => setEditing(false)} /> : <InlineQueryBoundary query={blocks}>{blocks.data && <ChannelInspector channel={query.data} blocks={blocks.data.items} visuals={visualQuery.data} visualState={visualQueryNote(querySeam || inheritedSeam ? visualQuery : undefined)} action={<Button type="button" variant="secondary" size="sm" onClick={() => setEditing(true)}>Edit channel</Button>} />}</InlineQueryBoundary>}</PageFrame>}</QueryBoundary>;
+  return <QueryBoundary query={query}>{query.data && <PageFrame title={`${query.data.number} · ${query.data.name}`} description="See the on-air identity, current block, and what follows.">{editing && draft ? <ChannelEditForm draft={draft} mediaOptions={mediaQuery.data?.items ?? []} saving={saving} error={saveError} onChange={setDraft} onSave={() => void save()} onCancel={() => setEditing(false)} /> : <InlineQueryBoundary query={blocks}>{blocks.data && <ChannelInspector channel={query.data} blocks={blocks.data.items} visuals={visualQuery.data} visualState={visualQueryNote(querySeam || inheritedSeam ? visualQuery : undefined)} action={<Button type="button" variant="secondary" size="sm" onClick={() => setEditing(true)}>Edit channel</Button>} />}</InlineQueryBoundary>}</PageFrame>}</QueryBoundary>;
 }
-
 export function BlockAuthoringListPage({ channelId }: { channelId: string }) {
   const query = useQuery({ queryKey: ["authoring", "blocks", channelId], queryFn: () => listBlocks(channelId) });
   const blocks = query.data?.items ?? [];
-  return <QueryBoundary query={query}><PageFrame title="Blocks" description="Timed source windows in this channel's schedule.">{blocks.length ? <PreviewMosaic label="Schedule blocks" columns={3}>{blocks.map((block) => <MediaCard key={block.id} title={block.title} description={`${formatTimestamp(block.startsAt)} – ${formatTimestamp(block.endsAt)}`} titleHref={authoringLinks.block(block.id).href} preview={<EmptyPreview label={`${block.title} source preview`} description="Open the block to resolve its media sequence." />} metadata={<><span><SourceLabel block={block} /></span><span>{formatDuration(secondsBetween(block.startsAt, block.endsAt))}</span></>} />)}</PreviewMosaic> : <EmptyState title="No blocks" description="No schedule blocks have been authored for this channel." />}</PageFrame></QueryBoundary>;
+  return <QueryBoundary query={query}><PageFrame title="Blocks" description="Timed source windows in this channel's schedule.">{blocks.length ? <PreviewMosaic label="Schedule blocks" columns={3}>{blocks.map((block) => <MediaCard key={block.id} title={block.title} description={`${formatTimestamp(block.startsAt)} – ${formatTimestamp(block.endsAt)}`} titleHref={authoringLinks.block(block.id).href} preview={<EmptyPreview label={`${block.title} source preview`} description="Open the block to resolve its media sequence." />} metadata={<><span><SourceLabel block={block} /></span><span>{formatDuration(secondsBetween(block.startsAt, block.endsAt))}</span></>} />)}</PreviewMosaic> : <EmptyState title="No blocks" description="No schedule blocks have been authored for this channel yet." />}</PageFrame></QueryBoundary>;
 }
-
 export interface BlockInspectorProps {
   block: CableBlock;
   playlist?: CablePlaylist;
   visuals?: AuthoringVisualSnapshot;
   visualState?: string | null;
   sourceError?: boolean;
+  action?: React.ReactNode;
 }
 
-export function BlockInspector({ block, playlist, visuals, visualState, sourceError = false }: BlockInspectorProps) {
+export function BlockInspector({ block, playlist, visuals, visualState, sourceError = false, action }: BlockInspectorProps) {
   const resolved = mediaMap(visuals);
   const sourceAssetId = block.assetId ?? playlist?.items[0]?.assetId;
   const sourceMedia = sourceAssetId ? resolved.get(sourceAssetId) : undefined;
   const compiled = visuals?.compiledPrograms;
   const authoredItems = playlist ? [...playlist.items].sort((left, right) => left.position - right.position) : [];
   return <div className="space-y-6">
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]"><MediaCard title={playlist?.name || sourceMedia?.title || block.title} description={playlist?.description || sourceMedia?.description || (block.playlistId ? "Playlist source" : "Single media source")} titleHref={block.playlistId ? authoringLinks.playlist(block.playlistId).href : block.assetId ? authoringLinks.asset(block.assetId).href : undefined} preview={sourceMedia ? <AuthoringMediaPreview media={sourceMedia} label={`${block.title} source preview`} /> : <EmptyPreview label={`${block.title} source preview`} description={sourceError ? "The authored source could not be loaded." : "The source media has not been resolved."} />} metadata={<span><SourceLabel block={block} /></span>} /><Card><CardHeader><CardTitle>Schedule window</CardTitle></CardHeader><CardContent><BlockWindow block={block} /></CardContent></Card></div>
-    <section aria-labelledby="compiled-sequence-heading" className="space-y-3"><div><h2 id="compiled-sequence-heading" className="text-lg font-semibold tracking-tight">Compiled media sequence</h2><p className="text-sm text-muted-foreground">The exact order players receive after schedule compilation.</p></div>{compiled?.length ? <ol className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card" aria-label="Compiled media sequence">{compiled.map((program, index) => { const media = resolved.get(program.assetId); return <li key={`${program.id}-${program.occurrence ?? index}`} className="grid gap-3 p-3 sm:grid-cols-[2rem_8rem_minmax(0,1fr)_auto] sm:items-center"><span className="text-sm font-semibold tabular-nums text-muted-foreground">{index + 1}</span>{media ? <AuthoringMediaPreview media={media} label={`${program.title || media.title} preview`} compact /> : <EmptyPreview label={`${program.title || "Compiled item"} preview`} />}<div className="min-w-0"><h3 className="truncate font-medium">{program.title || media?.title || "Untitled media"}</h3>{program.subtitle && <p className="truncate text-sm text-muted-foreground">{program.subtitle}</p>}</div><span className="text-xs tabular-nums text-muted-foreground">{formatDuration(secondsBetween(program.startsAt, program.endsAt))}</span></li>; })}</ol> : authoredItems.length ? <div className="space-y-3"><p className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">A compiled sequence is not available. Showing the authored playlist order instead.</p><PreviewMosaic label="Authored playlist sequence" columns={4}>{authoredItems.slice(0, 4).map((item) => <MediaCard key={item.id} title={item.title || resolved.get(item.assetId)?.title || "Untitled media"} preview={<PlaylistItemPreview item={item} media={resolved.get(item.assetId)} />} metadata={<span>{formatDuration(item.durationSeconds)}</span>} />)}</PreviewMosaic></div> : <EmptyState title="Compiled sequence unavailable" description={visualState || "Compile the deployment schedule to inspect the exact media sequence for this block."} />}</section>
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]"><MediaCard title={playlist?.name || sourceMedia?.title || block.title} description={playlist?.description || sourceMedia?.description || (block.playlistId ? "Playlist source" : "Single media source")} titleHref={block.playlistId ? authoringLinks.playlist(block.playlistId).href : block.assetId ? authoringLinks.asset(block.assetId).href : undefined} preview={sourceMedia ? <AuthoringMediaPreview media={sourceMedia} label={`${block.title} source preview`} /> : <EmptyPreview label={`${block.title} source preview`} description={sourceError ? "The authored source could not be loaded." : "The source media has not been resolved."} />} metadata={<span><SourceLabel block={block} /></span>} actions={action} /><Card><CardHeader><CardTitle>Schedule window</CardTitle></CardHeader><CardContent><BlockWindow block={block} /></CardContent></Card></div>
+    <section aria-labelledby="block-source-heading" className="space-y-3"><div><h2 id="block-source-heading" className="text-lg font-semibold tracking-tight">Authored source</h2><p className="text-sm text-muted-foreground">{playlist ? `Playlist with ${authoredItems.length} authored ${authoredItems.length === 1 ? "item" : "items"}.` : block.assetId ? "One Media item plays in this window." : "No source is assigned."}</p></div>{playlist ? <PreviewMosaic label={`${playlist.name} authored sequence`} columns={4}>{authoredItems.slice(0, 4).map((item) => <MediaCard key={item.id} title={item.title || resolved.get(item.assetId)?.title || "Untitled media"} description={item.subtitle || undefined} preview={<PlaylistItemPreview item={item} media={resolved.get(item.assetId)} />} metadata={<span>{formatDuration(item.durationSeconds)}</span>} />)}</PreviewMosaic> : sourceMedia ? <MediaCard title={sourceMedia.title} description={sourceMedia.description || "Single Media source"} preview={<AuthoringMediaPreview media={sourceMedia} label={`${block.title} media`} />} /> : <EmptyPreview label={`${block.title} source`} />}</section>
+    <section aria-labelledby="compiled-sequence-heading" className="space-y-3"><div><h2 id="compiled-sequence-heading" className="text-lg font-semibold tracking-tight">Compiled media sequence</h2><p className="text-sm text-muted-foreground">The exact order players receive after schedule compilation.</p></div>{compiled?.length ? <ol className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card" aria-label="Compiled media sequence">{compiled.map((program, index) => { const media = resolved.get(program.assetId); return <li key={`${program.id}-${program.occurrence ?? index}`} className="grid gap-3 p-3 sm:grid-cols-[2rem_8rem_minmax(0,1fr)_auto] sm:items-center"><span className="text-sm font-semibold tabular-nums text-muted-foreground">{index + 1}</span><PlaylistItemPreview item={{ id: program.itemId || program.id, playlistId: block.playlistId || "", assetId: program.assetId, position: program.itemPosition || index + 1, durationSeconds: secondsBetween(program.startsAt, program.endsAt), title: program.title || "", subtitle: program.subtitle || "" }} media={media} compact /><div><p className="font-medium">{program.title || media?.title || "Untitled media"}</p><p className="text-xs text-muted-foreground">{formatTimestamp(program.startsAt)} – {formatTimestamp(program.endsAt)}</p></div><span className="text-sm tabular-nums text-muted-foreground">{formatDuration(secondsBetween(program.startsAt, program.endsAt))}</span></li>; })}</ol> : authoredItems.length ? <PreviewMosaic label="Authored fallback sequence" columns={4}>{authoredItems.slice(0, 4).map((item) => <MediaCard key={item.id} title={item.title || resolved.get(item.assetId)?.title || "Untitled media"} description="Showing the authored playlist order instead" preview={<PlaylistItemPreview item={item} media={resolved.get(item.assetId)} />} metadata={<span>{formatDuration(item.durationSeconds)}</span>} />)}</PreviewMosaic> : <EmptyState title="Compiled sequence unavailable" description={visualState || "The controller has not returned compiled programs for this block."} />}</section>
     <TechnicalDetails items={[{ label: "Block ID", value: block.id }, { label: "Channel ID", value: block.channelId }, { label: "Playlist ID", value: block.playlistId || "Not used" }, { label: "Asset ID", value: block.assetId || "Not used" }, { label: "Revision", value: `v${block.version}` }, { label: "Created by", value: block.createdBy }, { label: "Created", value: formatTimestamp(block.createdAt) }]} />
   </div>;
 }
 
+function BlockEditForm({ draft, playlists, mediaOptions, saving, error, onChange, onSave, onCancel }: { draft: CableBlockInput & { sourceType: "playlist" | "media" }; playlists: CablePlaylist[]; mediaOptions: Media[]; saving: boolean; error: string | null; onChange: (draft: CableBlockInput & { sourceType: "playlist" | "media" }) => void; onSave: () => void; onCancel: () => void }) {
+  return <Card><CardHeader><CardTitle>Edit block</CardTitle></CardHeader><CardContent><form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
+    <label className="text-sm font-medium sm:col-span-2">Title<input required className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.title ?? ""} onChange={(event) => onChange({ ...draft, title: event.currentTarget.value })} /></label>
+    <label className="text-sm font-medium">Starts<input required type="datetime-local" className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.startsAt} onChange={(event) => onChange({ ...draft, startsAt: event.currentTarget.value })} /></label>
+    <label className="text-sm font-medium">Ends<input required type="datetime-local" className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.endsAt} onChange={(event) => onChange({ ...draft, endsAt: event.currentTarget.value })} /></label>
+    <label className="text-sm font-medium">Source type<select className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.sourceType} onChange={(event) => { const sourceType = event.currentTarget.value as "playlist" | "media"; onChange({ ...draft, sourceType, playlistId: sourceType === "playlist" ? (playlists[0]?.id || draft.playlistId) : undefined, assetId: sourceType === "media" ? (mediaOptions[0]?.assetId || draft.assetId) : undefined }); }} disabled={saving}><option value="playlist">Playlist</option><option value="media">Single Media</option></select></label>
+    {draft.sourceType === "playlist" && <label className="text-sm font-medium">Playlist<select required className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.playlistId ?? ""} onChange={(event) => onChange({ ...draft, playlistId: event.currentTarget.value || undefined })} disabled={saving}><option value="">Choose playlist</option>{playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}</select></label>}
+    {draft.sourceType === "media" && <label className="text-sm font-medium">Media<select required className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.assetId ?? ""} onChange={(event) => onChange({ ...draft, assetId: event.currentTarget.value || undefined })} disabled={saving}><option value="">Choose media</option>{mediaOptions.map((media) => <option key={media.assetId} value={media.assetId}>{media.title || "Untitled media"}</option>)}</select></label>}
+    {error && <p role="alert" className="text-sm text-status-danger sm:col-span-2">{error}</p>}
+    <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={saving || (draft.sourceType === "playlist" && !draft.playlistId) || (draft.sourceType === "media" && !draft.assetId)}>{saving ? "Saving…" : "Save block"}</Button><Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button></div>
+  </form></CardContent></Card>;
+}
+
 export function BlockAuthoringDetailPage({ blockId, querySeam }: { blockId: string; querySeam?: AuthoringQuerySeam }) {
+  const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["authoring", "block", blockId], queryFn: () => getBlock(blockId) });
   const playlist = useQuery({ queryKey: ["authoring", "block", blockId, "playlist", query.data?.playlistId], queryFn: () => getPlaylist(query.data!.playlistId!), enabled: Boolean(query.data?.playlistId) });
+  const playlists = useQuery({ queryKey: ["authoring", "playlists"], queryFn: listPlaylists });
+  const mediaQuery = useQuery({ queryKey: ["authoring", "media-library"], queryFn: listMedia });
   const assetIds = query.data ? [query.data.assetId, ...(playlist.data?.items.map((item) => item.assetId) ?? [])].filter((id): id is string => Boolean(id)) : [];
   const visualQuery = useAuthoringVisuals(query.data ? { kind: "block", id: blockId, assetIds } : null, querySeam);
   const inheritedSeam = React.useContext(AuthoringQueryContext);
-  return <QueryBoundary query={query}>{query.data && <PageFrame title={query.data.title} description="Inspect the authored source, schedule window, and compiled playback order."><BlockInspector block={query.data} playlist={playlist.data} visuals={visualQuery.data} visualState={visualQueryNote(querySeam || inheritedSeam ? visualQuery : undefined)} sourceError={playlist.isError} /></PageFrame>}</QueryBoundary>;
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState<(CableBlockInput & { sourceType: "playlist" | "media" }) | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+  React.useEffect(() => { if (query.data) setDraft({ playlistId: query.data.playlistId, assetId: query.data.assetId, startsAt: localDateTime(query.data.startsAt), endsAt: localDateTime(query.data.endsAt), title: query.data.title, sourceType: query.data.playlistId ? "playlist" : "media" }); }, [query.data]);
+  async function save() {
+    if (!query.data || !draft) return;
+    if (new Date(draft.endsAt).valueOf() <= new Date(draft.startsAt).valueOf()) { setSaveError("End time must be after start time."); return; }
+    setSaving(true); setSaveError(null);
+    try {
+      const body: CableBlockInput = { startsAt: isoDateTime(draft.startsAt), endsAt: isoDateTime(draft.endsAt), title: draft.title || undefined, playlistId: draft.sourceType === "playlist" ? draft.playlistId : undefined, assetId: draft.sourceType === "media" ? draft.assetId : undefined };
+      const result = readApiResult(await api.PATCH("/cable/blocks/{blockId}", { params: { path: { blockId }, header: { "If-Match": authoringIfMatch(query.data.version) } }, body }));
+      queryClient.setQueryData(["authoring", "block", blockId], result);
+      await queryClient.invalidateQueries({ queryKey: ["authoring", "block", blockId] });
+      await queryClient.invalidateQueries({ queryKey: ["authoring", "blocks"] });
+      setEditing(false);
+    } catch (error) { setSaveError(mutationMessage(error, "The block could not be saved.")); }
+    finally { setSaving(false); }
+  }
+  return <QueryBoundary query={query}>{query.data && <PageFrame title={query.data.title} description="Inspect the authored source, schedule window, and compiled playback order.">{editing && draft ? <BlockEditForm draft={draft} playlists={playlists.data?.items ?? []} mediaOptions={mediaQuery.data?.items ?? []} saving={saving} error={saveError} onChange={setDraft} onSave={() => void save()} onCancel={() => setEditing(false)} /> : <BlockInspector block={query.data} playlist={playlist.data} visuals={visualQuery.data} visualState={visualQueryNote(querySeam || inheritedSeam ? visualQuery : undefined)} sourceError={playlist.isError} action={<Button type="button" variant="secondary" size="sm" onClick={() => setEditing(true)}>Edit block</Button>} />}</PageFrame>}</QueryBoundary>;
 }
 
 export function ProfileAuthoringListPage() {
@@ -441,25 +563,59 @@ export interface ProfileInspectorProps {
   channels: CableChannel[];
   visuals?: AuthoringVisualSnapshot;
   visualState?: string | null;
+  action?: React.ReactNode;
 }
 
-export function ProfileInspector({ profile, channels, visuals, visualState }: ProfileInspectorProps) {
+export function ProfileInspector({ profile, channels, visuals, visualState, action }: ProfileInspectorProps) {
   const resolved = mediaMap(visuals);
   const references = extractUsageReferences(visuals?.usage);
   const releaseReference = references.find((reference) => reference.kind === "release" && reference.id === profile.releaseId);
   const nodeReferences = references.filter((reference) => reference.kind === "node" || reference.kind === "assignment");
   return <div className="space-y-6">
-    <section aria-labelledby="profile-look-heading" className="space-y-3"><div><h2 id="profile-look-heading" className="text-lg font-semibold tracking-tight">Representative lineup</h2><p className="text-sm text-muted-foreground">A sample of channels and content carried by this profile.</p></div>{channels.length ? <PreviewMosaic label={`${profile.name} representative channels`} columns={4}>{channels.slice(0, 4).map((channel) => { const media = resolved.get(channel.artworkAssetId ?? ""); return <MediaCard key={channel.id} title={`${channel.number} · ${channel.name}`} artist={channel.callsign || undefined} titleHref={authoringLinks.channel(channel.id).href} preview={media ? <AuthoringMediaPreview media={media} label={`${channel.name} representative content`} /> : <EmptyPreview label={`${channel.name} representative content`} description={channel.artworkAssetId ? "Channel artwork has not been resolved." : "No channel artwork is assigned."} />} status={channel.enabled ? "active" : "disabled"} />; })}</PreviewMosaic> : <EmptyState title="No representative channels" description="No channels are available in this profile's deployment." />}</section>
-    <div className="grid gap-4 md:grid-cols-2"><Card><CardHeader><CardTitle>Linked release</CardTitle></CardHeader><CardContent>{profile.releaseId ? <div className="space-y-2"><StatusSummary status="ready" label="Release assigned" /><a className="inline-block text-sm font-medium text-primary hover:underline" href={releaseReference?.href || authoringLinks.release(profile.releaseId).href}>{releaseReference?.name || "Open assigned release"}</a></div> : <EmptyState title="No release linked" description="Publish and link a release before assigning this profile to players." />}</CardContent></Card><Card><CardHeader><CardTitle>Assigned players</CardTitle></CardHeader><CardContent>{visuals?.usage ? nodeReferences.length ? <><p className="mb-3 text-sm text-muted-foreground">{nodeReferences.length} assigned {nodeReferences.length === 1 ? "player" : "players"}</p><ul className="space-y-2">{nodeReferences.map((reference) => <li key={`${reference.kind}-${reference.id}`}><a className="text-sm font-medium text-primary hover:underline" href={reference.href}>{reference.name}</a></li>)}</ul></> : <EmptyState title="No assigned players" description="This profile is not referenced by a player assignment." /> : <p className="text-sm text-muted-foreground">{visualState || "Assignment usage is not connected on this route."}</p>}</CardContent></Card></div>
+    <section aria-labelledby="profile-look-heading" className="space-y-3"><div className="flex items-end justify-between"><div><h2 id="profile-look-heading" className="text-lg font-semibold tracking-tight">Representative lineup</h2><p className="text-sm text-muted-foreground">The deployment channels and artwork this profile carries.</p></div>{action}</div>{channels.length ? <PreviewMosaic label={`${profile.name} representative channels`} columns={4}>{channels.slice(0, 4).map((channel) => { const media = resolved.get(channel.artworkAssetId ?? ""); return <MediaCard key={channel.id} title={`${channel.number} · ${channel.name}`} artist={channel.callsign || undefined} titleHref={authoringLinks.channel(channel.id).href} preview={media ? <AuthoringMediaPreview media={media} label={`${channel.name} representative content`} /> : <EmptyPreview label={`${channel.name} representative content`} description={channel.artworkAssetId ? "Artwork Media has not been resolved." : "No artwork is assigned."} />} status={channel.enabled ? channel.standby ? "standby" : "active" : "disabled"} />; })}</PreviewMosaic> : <EmptyState title="No representative channels" description="This profile's deployment has no authored channels yet." />}</section>
+    <div className="grid gap-4 md:grid-cols-2"><Card><CardHeader><CardTitle>Linked release</CardTitle></CardHeader><CardContent>{profile.releaseId ? <div className="space-y-2"><StatusSummary status="ready" label="Release assigned" /><a className="inline-block text-sm font-medium text-primary hover:underline" href={releaseReference?.href || authoringLinks.release(profile.releaseId).href}>{releaseReference?.name || "Open assigned release"}</a></div> : <EmptyState title="No release linked" description="Choose a published release while editing this profile." />}</CardContent></Card><Card><CardHeader><CardTitle>Assigned players</CardTitle></CardHeader><CardContent>{visuals?.usage ? nodeReferences.length ? <><p className="mb-3 text-sm text-muted-foreground">{nodeReferences.length} assigned {nodeReferences.length === 1 ? "player" : "players"}</p><ul className="space-y-2">{nodeReferences.map((reference) => <li key={`${reference.kind}:${reference.id}`}><a className="text-sm font-medium text-primary hover:underline" href={reference.href}>{reference.name}</a></li>)}</ul></> : <p className="text-sm text-muted-foreground">No players are assigned to this profile.</p> : <p className="text-sm text-muted-foreground">{visualState || "Assignment usage is not connected on this route."}</p>}</CardContent></Card></div>
     <TechnicalDetails items={[{ label: "Profile ID", value: profile.id }, { label: "Deployment ID", value: profile.deploymentId }, { label: "Shell build ID", value: profile.shellBuildId }, { label: "Release ID", value: profile.releaseId || "Not assigned" }, { label: "Revision", value: `v${profile.version}` }, { label: "Created by", value: profile.createdBy }, { label: "Created", value: formatTimestamp(profile.createdAt) }, { label: "Updated", value: formatTimestamp(profile.updatedAt) }]} />
   </div>;
 }
 
+function ProfileEditForm({ draft, deployments, shellBuilds, releases, saving, error, onChange, onSave, onCancel }: { draft: CableProfileInput; deployments: CableDeployment[]; shellBuilds: CableShellBuild[]; releases: ReleaseEnvelope[]; saving: boolean; error: string | null; onChange: (draft: CableProfileInput) => void; onSave: () => void; onCancel: () => void }) {
+  return <Card><CardHeader><CardTitle>Edit profile</CardTitle></CardHeader><CardContent><form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
+    <label className="text-sm font-medium">Name<input required className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.name} onChange={(event) => onChange({ ...draft, name: event.currentTarget.value })} /></label>
+    <label className="text-sm font-medium">Deployment<select required className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.deploymentId} onChange={(event) => onChange({ ...draft, deploymentId: event.currentTarget.value })} disabled={saving}><option value="">Choose deployment</option>{deployments.map((deployment) => <option key={deployment.id} value={deployment.id}>{deployment.name}</option>)}</select></label>
+    <label className="text-sm font-medium sm:col-span-2">Description<textarea className="mt-1 min-h-24 w-full rounded-md border border-border bg-background p-3" value={draft.description ?? ""} onChange={(event) => onChange({ ...draft, description: event.currentTarget.value })} /></label>
+    <label className="text-sm font-medium">Shell build<select required className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.shellBuildId} onChange={(event) => onChange({ ...draft, shellBuildId: event.currentTarget.value })} disabled={saving}><option value="">Choose shell build</option>{shellBuilds.map((build) => <option key={build.id} value={build.id}>{build.versionMetadata?.version || build.digest.slice(0, 12)}</option>)}</select></label>
+    <label className="text-sm font-medium">Release<select className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3" value={draft.releaseId ?? ""} onChange={(event) => onChange({ ...draft, releaseId: event.currentTarget.value || undefined })} disabled={saving}><option value="">No release</option>{releases.map((release) => <option key={release.id} value={release.id}>{release.id} · {release.digest.slice(0, 12)}</option>)}</select></label>
+    {error && <p role="alert" className="text-sm text-status-danger sm:col-span-2">{error}</p>}
+    <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={saving || !draft.name.trim() || !draft.deploymentId || !draft.shellBuildId}>{saving ? "Saving…" : "Save profile"}</Button><Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button></div>
+  </form></CardContent></Card>;
+}
+
 export function ProfileAuthoringDetailPage({ profileId, querySeam }: { profileId: string; querySeam?: AuthoringQuerySeam }) {
+  const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["authoring", "profile", profileId], queryFn: () => getProfile(profileId) });
   const channels = useQuery({ queryKey: ["authoring", "profile", profileId, "channels", query.data?.deploymentId], queryFn: () => listChannels(query.data!.deploymentId), enabled: query.isSuccess });
+  const deployments = useQuery({ queryKey: ["authoring", "deployments"], queryFn: listDeployments });
+  const shellBuilds = useQuery({ queryKey: ["authoring", "shell-builds"], queryFn: listShellBuilds });
+  const releases = useQuery({ queryKey: ["authoring", "releases"], queryFn: listReleases });
   const assetIds = channels.data?.items.map((channel) => channel.artworkAssetId).filter((id): id is string => Boolean(id)) ?? [];
   const visualQuery = useAuthoringVisuals(query.data ? { kind: "profile", id: profileId, assetIds } : null, querySeam);
   const inheritedSeam = React.useContext(AuthoringQueryContext);
-  return <QueryBoundary query={query}>{query.data && <PageFrame title={query.data.name} description={query.data.description || "A Cable lineup, presentation shell, release, and player assignment boundary."}><InlineQueryBoundary query={channels}>{channels.data && <ProfileInspector profile={query.data} channels={channels.data.items} visuals={visualQuery.data} visualState={visualQueryNote(querySeam || inheritedSeam ? visualQuery : undefined)} />}</InlineQueryBoundary></PageFrame>}</QueryBoundary>;
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState<CableProfileInput | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+  React.useEffect(() => { if (query.data) setDraft({ name: query.data.name, description: query.data.description, deploymentId: query.data.deploymentId, shellBuildId: query.data.shellBuildId, releaseId: query.data.releaseId }); }, [query.data]);
+  async function save() {
+    if (!query.data || !draft) return;
+    setSaving(true); setSaveError(null);
+    try {
+      const result = readApiResult(await api.PATCH("/cable/profiles/{profileId}", { params: { path: { profileId }, header: { "If-Match": authoringIfMatch(query.data.version) } }, body: draft }));
+      await queryClient.invalidateQueries({ queryKey: ["authoring", "profile", profileId] });
+      queryClient.setQueryData(["authoring", "profile", profileId], result);
+      await queryClient.invalidateQueries({ queryKey: ["authoring", "profiles"] });
+      setEditing(false);
+    } catch (error) { setSaveError(mutationMessage(error, "The profile could not be saved.")); }
+    finally { setSaving(false); }
+  }
+  return <QueryBoundary query={query}>{query.data && <PageFrame title={query.data.name} description={query.data.description || "A Cable lineup, presentation shell, release, and player assignment boundary."}>{editing && draft ? <ProfileEditForm draft={draft} deployments={deployments.data?.items ?? []} shellBuilds={shellBuilds.data?.items ?? []} releases={releases.data?.items ?? []} saving={saving} error={saveError} onChange={setDraft} onSave={() => void save()} onCancel={() => setEditing(false)} /> : <InlineQueryBoundary query={channels}>{channels.data && <ProfileInspector profile={query.data} channels={channels.data.items} visuals={visualQuery.data} visualState={visualQueryNote(querySeam || inheritedSeam ? visualQuery : undefined)} action={<Button type="button" variant="secondary" size="sm" onClick={() => setEditing(true)}>Edit profile</Button>} />}</InlineQueryBoundary>}</PageFrame>}</QueryBoundary>;
 }

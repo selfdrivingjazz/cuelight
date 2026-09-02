@@ -1251,6 +1251,89 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CableRevision"}
         default: {$ref: "#/components/responses/Problem"}
+  /screenshots:
+    post:
+      tags: [operator]
+      operationId: createScreenshot
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nodeId]
+              properties:
+                nodeId: {$ref: "#/components/schemas/Id"}
+                ttlSeconds: {type: integer, format: int64, minimum: 0}
+                expected: {$ref: "#/components/schemas/ScreenshotExpected"}
+      responses:
+        "201": {description: Screenshot queued, content: {application/json: {schema: {$ref: "#/components/schemas/ScreenshotJob"}}}}
+        "200": {description: Idempotent replay, content: {application/json: {schema: {$ref: "#/components/schemas/ScreenshotJob"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /screenshots/{jobId}:
+    parameters: [{name: jobId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}]
+    get:
+      tags: [operator]
+      operationId: getScreenshot
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200": {description: Screenshot job status, content: {application/json: {schema: {$ref: "#/components/schemas/ScreenshotJob"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /screenshots/{jobId}/content:
+    parameters: [{name: jobId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}]
+    get:
+      tags: [operator]
+      operationId: getScreenshotContent
+      security: [{operatorToken: []}]
+      x-required-scopes: [cable_read]
+      responses:
+        "200":
+          description: Exact captured PNG bytes.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            image/png: {schema: {type: string, format: binary}}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/screenshots/next:
+    get:
+      tags: [player]
+      operationId: getNextScreenshot
+      security: [{nodeMTLS: []}]
+      responses:
+        "200": {description: Own queued screenshot, content: {application/json: {schema: {$ref: "#/components/schemas/ScreenshotJob"}}}}
+        "204": {description: No queued screenshot}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/screenshots/{jobId}/claim:
+    parameters: [{name: jobId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}]
+    post:
+      tags: [player]
+      operationId: claimScreenshot
+      security: [{nodeMTLS: []}]
+      responses:
+        "200": {description: Claimed screenshot, content: {application/json: {schema: {$ref: "#/components/schemas/ScreenshotJob"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/screenshots/{jobId}/complete:
+    parameters: [{name: jobId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}]
+    post:
+      tags: [player]
+      operationId: completeScreenshot
+      security: [{nodeMTLS: []}]
+      parameters:
+        - {name: X-Artifact-Digest, in: header, required: false, schema: {type: string, pattern: "^[0-9a-f]{64}$"}}
+      requestBody:
+        required: true
+        content:
+          image/png: {schema: {type: string, format: binary}}
+          application/json: {schema: {$ref: "#/components/schemas/ScreenshotCompletion"}}
+      responses:
+        "200": {description: Terminal screenshot job, content: {application/json: {schema: {$ref: "#/components/schemas/ScreenshotJob"}}}}
+        default: {$ref: "#/components/responses/Problem"}
   /player/enroll:
     post:
       tags: [player]
@@ -1569,6 +1652,42 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
   schemas:
+    ScreenshotExpected:
+      type: object
+      properties:
+        expected: {type: boolean}
+        releaseDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        revisionDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        channelId: {type: string}
+        blockId: {type: string}
+        itemId: {type: string}
+        effectiveAt: {type: string, format: date-time}
+    ScreenshotCompletion:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [completed, failed, unsupported]}
+        artifactDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        mediaType: {type: string}
+        errorReason: {type: string}
+    ScreenshotJob:
+      type: object
+      required: [id, nodeId, expected, requestedAt, expiresAt, status, retentionPolicy, retentionUntil, artifactRetentionUntil]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        nodeId: {$ref: "#/components/schemas/Id"}
+        expected: {$ref: "#/components/schemas/ScreenshotExpected"}
+        requestedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        claimedAt: {type: string, format: date-time}
+        completionAt: {type: string, format: date-time}
+        status: {type: string, enum: [queued, claimed, completed, failed, unsupported, expired]}
+        resultArtifactDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        resultMediaType: {type: string}
+        errorReason: {type: string}
+        retentionPolicy: {type: string}
+        retentionUntil: {type: string, format: date-time}
+        artifactRetentionUntil: {type: string, format: date-time}
     Id: {type: string, format: uuid}
     Health:
       type: object

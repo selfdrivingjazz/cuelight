@@ -4,7 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { type Asset, type Node, type components } from "@cable/api-client";
 import { Breadcrumbs, Button, Card, CardContent, CardHeader, CardTitle, TanStackDataTable, EmptyState, ErrorState, MobileNav, MobileSidebar, Pagination, PreviewMosaic, Sidebar, Skeleton, StatusBadge, type NavigationLink } from "@cable/controller-ui";
 import "@cable/controller-ui/styles.css";
-import { api, ApiRequestError, getControllerHealth, readApiResult } from "./api";
+import { api, ApiRequestError, controllerBaseUrl, getApiToken, getControllerHealth, readApiResult } from "./api";
 import { AccessScreen, useAuth } from "./auth";
 import { CableChannelDetail, CableDeploymentsPage, CableDeploymentDetail, CableReleaseAssignmentPage, CableProgramDetailPage, RevisionDetailPage, ShellBuildsPage } from "./cable";
 import { ThemeControl } from "./theme";
@@ -12,7 +12,7 @@ import { NodeAssignmentComposer } from "./assignment";
 import { BlockAuthoringDetailPage, BlockAuthoringListPage, ChannelAuthoringDetailPage, PlaylistAuthoringDetailPage, PlaylistAuthoringListPage, ProfileAuthoringDetailPage, ProfileAuthoringListPage, type AuthoringQuerySeam } from "./authoring-details";
 import { MediaDropzone } from "./components/MediaDropzone";
 import { MediaDetailPage, MediaLibraryPage, getMedia, normalizeMediaSearch, useAuthenticatedPreview, type Media } from "./media-library";
-import { FleetNodeCard, NodePlaybackView, type NodeReport, type PlaybackMetadata } from "./fleet-visual";
+import { FleetNodeCard, FleetNodeList, NodePlaybackView, type FleetNodeVisual, type NodeCapture, type NodeReport, type PlaybackMetadata } from "./fleet-visual";
 
 export interface PageSearch { cursor?: string; limit?: number; search?: string; sort?: string; order?: "asc" | "desc" }
 export type NodeSearch = PageSearch & { sort?: "name" | "desiredGeneration" };
@@ -105,6 +105,159 @@ function OverviewPage() {
   }
   return <PageFrame breadcrumbs={[{ label: "Overview" }]}><PageHeader title="Overview" /><div className="grid gap-4 md:grid-cols-2">{content}</div></PageFrame>;
 }
+type ScreenshotFailureCode = "unsupported" | "failed" | "expired" | "timeout" | "cancelled" | "http";
+
+export class ScreenshotLifecycleError extends Error {
+  constructor(public readonly code: ScreenshotFailureCode, message: string, public readonly status?: number) {
+    super(message);
+    this.name = "ScreenshotLifecycleError";
+  }
+}
+
+export interface ScreenshotJob {
+  id: string;
+  status: "queued" | "claimed" | "completed" | "failed" | "unsupported" | "expired";
+  requestedAt?: string;
+  completionAt?: string;
+  retentionUntil?: string;
+  resultArtifactDigest?: string;
+  resultMediaType?: string;
+  errorReason?: string;
+}
+
+export interface ScreenshotRequestOptions {
+  ttlSeconds?: number;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  maxPolls?: number;
+  signal?: AbortSignal;
+}
+
+const screenshotFailureMessage: Record<Exclude<ScreenshotFailureCode, "http" | "timeout" | "cancelled">, string> = {
+  unsupported: "This node does not support screenshots.",
+  failed: "The node could not capture a screenshot.",
+  expired: "The screenshot job expired before the node completed it.",
+};
+
+function screenshotURL(path: string): string {
+  return `${controllerBaseUrl.replace(/\/$/, "")}${path}`;
+}
+
+function screenshotHeaders(): Headers {
+  const headers = new Headers({ Accept: "application/json" });
+  const token = getApiToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return headers;
+}
+
+async function screenshotJSON<T>(path: string, init: RequestInit, signal: AbortSignal): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(screenshotURL(path), { ...init, credentials: "omit", cache: "no-store", signal });
+  } catch (error) {
+    if (signal.aborted) throw error;
+    throw new ScreenshotLifecycleError("http", "The screenshot service is unavailable.");
+  }
+  if (!response.ok) {
+    const message = response.status === 404 ? "The screenshot job was not found." : "The screenshot request was rejected.";
+    throw new ScreenshotLifecycleError("http", message, response.status);
+  }
+  return await response.json() as T;
+}
+
+function waitForScreenshot(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason ?? new ScreenshotLifecycleError("cancelled", "Screenshot refresh cancelled."));
+      return;
+    }
+    const timer = globalThis.setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      globalThis.clearTimeout(timer);
+      reject(signal.reason ?? new ScreenshotLifecycleError("cancelled", "Screenshot refresh cancelled."));
+    }, { once: true });
+  });
+}
+
+export async function requestNodeScreenshot(nodeId: string, options: ScreenshotRequestOptions = {}): Promise<{ job: ScreenshotJob; capture: NodeCapture }> {
+  const timeout = Math.max(1_000, options.timeoutMs ?? 55_000);
+  const controller = new AbortController();
+  const abort = () => controller.abort(options.signal?.reason ?? new ScreenshotLifecycleError("cancelled", "Screenshot refresh cancelled."));
+  options.signal?.addEventListener("abort", abort, { once: true });
+  const timer = globalThis.setTimeout(() => controller.abort(new ScreenshotLifecycleError("timeout", "Screenshot refresh timed out.")), timeout);
+  try {
+    if (options.signal?.aborted) throw new ScreenshotLifecycleError("cancelled", "Screenshot refresh cancelled.");
+    const createHeaders = screenshotHeaders();
+    createHeaders.set("Content-Type", "application/json");
+    createHeaders.set("Idempotency-Key", crypto.randomUUID());
+    const created = await screenshotJSON<ScreenshotJob>("/screenshots", {
+      method: "POST",
+      headers: createHeaders,
+      body: JSON.stringify({ nodeId, ttlSeconds: options.ttlSeconds ?? 60 }),
+    }, controller.signal);
+    if (!created.id) throw new ScreenshotLifecycleError("http", "The screenshot service returned no job ID.");
+    let job = created;
+    const pollInterval = Math.max(50, options.pollIntervalMs ?? 250);
+    const maxPolls = Math.max(1, options.maxPolls ?? Math.ceil(timeout / pollInterval));
+    for (let poll = 0; poll < maxPolls && job.status !== "completed"; poll += 1) {
+      if (job.status === "unsupported" || job.status === "failed" || job.status === "expired") {
+        throw new ScreenshotLifecycleError(job.status, job.errorReason || screenshotFailureMessage[job.status]);
+      }
+      if (poll > 0) await waitForScreenshot(pollInterval, controller.signal);
+      job = await screenshotJSON<ScreenshotJob>(`/screenshots/${encodeURIComponent(job.id)}`, { headers: screenshotHeaders() }, controller.signal);
+    }
+    if (job.status !== "completed") throw new ScreenshotLifecycleError("timeout", "The screenshot node did not complete before the polling limit.");
+    const response = await fetch(screenshotURL(`/screenshots/${encodeURIComponent(job.id)}/content`), { headers: new Headers({ ...Object.fromEntries(screenshotHeaders()), Accept: "image/*" }), credentials: "omit", cache: "no-store", signal: controller.signal });
+    if (!response.ok) throw new ScreenshotLifecycleError("http", "The completed screenshot could not be downloaded.", response.status);
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/")) throw new ScreenshotLifecycleError("failed", "The screenshot service returned non-image content.");
+    const url = URL.createObjectURL(blob);
+    return { job, capture: { url, capturedAt: job.completionAt, provenance: job.resultArtifactDigest ? `Node screenshot · ${job.resultArtifactDigest.slice(0, 12)}` : "Node screenshot", alt: `Actual capture from node ${nodeId}` } };
+  } catch (error) {
+    if (error instanceof ScreenshotLifecycleError) throw error;
+    if (controller.signal.aborted) {
+      const reason = controller.signal.reason;
+      if (reason instanceof ScreenshotLifecycleError) throw reason;
+      throw new ScreenshotLifecycleError("cancelled", "Screenshot refresh cancelled.");
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
+  }
+}
+export function disposeNodeCapture(capture?: NodeCapture): void {
+  if (capture?.url) URL.revokeObjectURL(capture.url);
+}
+
+function NodeScreenshotControl({ nodeId, onCapture }: { nodeId: string; onCapture: (capture: NodeCapture) => void }) {
+  const [state, setState] = React.useState<{ status: "idle" | "loading" | "ready" | "error"; capture?: NodeCapture; error?: ScreenshotLifecycleError }>({ status: "idle" });
+  const request = React.useCallback(() => {
+    const controller = new AbortController();
+    setState((previous) => ({ status: "loading", capture: previous.capture }));
+    void requestNodeScreenshot(nodeId, { signal: controller.signal }).then(({ capture }) => {
+      onCapture(capture);
+      setState({ status: "ready", capture });
+    }).catch((error: unknown) => {
+      if (error instanceof ScreenshotLifecycleError && error.code === "cancelled") return;
+      setState((previous) => ({ status: "error", capture: previous.capture, error: error instanceof ScreenshotLifecycleError ? error : new ScreenshotLifecycleError("http", "Screenshot refresh failed.") }));
+    });
+    return controller;
+  }, [nodeId, onCapture]);
+  const controller = React.useRef<AbortController | null>(null);
+  const refresh = () => {
+    controller.current?.abort();
+    controller.current = request();
+  };
+  React.useEffect(() => () => {
+    controller.current?.abort();
+  }, []);
+  return <div className="flex flex-wrap items-center gap-2">
+    <Button variant="secondary" onClick={refresh} disabled={state.status === "loading"}>{state.status === "loading" ? "Capturing…" : state.capture ? "Refresh screenshot" : "Capture screenshot"}</Button>
+    {state.capture?.capturedAt && <time className="text-xs text-muted-foreground" dateTime={state.capture.capturedAt}>Captured {new Date(state.capture.capturedAt).toLocaleString()}</time>}
+    {state.error && <span role="alert" className="text-xs text-destructive">{screenshotFailureMessage[state.error.code as keyof typeof screenshotFailureMessage] ?? state.error.message}</span>}
+  </div>;
+}
 function playbackMetadata(media: Media, previewUrl?: string): PlaybackMetadata {
   return {
     title: media.title,
@@ -125,21 +278,119 @@ async function resolveObservedMedia(report?: NodeReport) {
   return { media, etag: `"media:${media.id}:${media.version}"` };
 }
 
+async function resolveExpectedContent(nodeId: string): Promise<PlaybackMetadata | undefined> {
+  let assignment: components["schemas"]["Assignment"];
+  try {
+    assignment = await getNodeAssignment(nodeId);
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) return undefined;
+    throw error;
+  }
+  let release: components["schemas"]["ReleaseEnvelope"];
+  try {
+    release = await getRelease(assignment.releaseId);
+  } catch {
+    return { title: `Release ${assignment.releaseId}`, subtitle: `Expected digest ${assignment.releaseDigest}` };
+  }
+  const presentation = release.payload.presentation;
+  const assetId = release.payload.playback?.assetId ?? presentation?.media?.playback.assetId;
+  if (assetId) {
+    try {
+      const page = readApiResult(await api.GET("/media", { params: { query: { assetId: [assetId], limit: 1, playable: true } } }));
+      const media = page.items[0];
+      if (media) return playbackMetadata(media);
+    } catch {
+      // Keep the release identity visible when its media is not available to this operator.
+    }
+  }
+  return {
+    title: `Release ${release.id}`,
+    subtitle: `Expected digest ${release.digest}`,
+  };
+}
 
-function ResolvedNodeVisual({ node, report, detail = false }: { node: Node; report?: NodeReport; detail?: boolean }) {
+function NodeActions({ nodeId, onCapture }: { nodeId: string; onCapture: (capture: NodeCapture) => void }) {
+  return <NodeScreenshotControl nodeId={nodeId} onCapture={onCapture} />;
+}
+
+function ResolvedNodeVisual({ node, report, detail = false, selected = false, onSelectedChange }: { node: Node; report?: NodeReport; detail?: boolean; selected?: boolean; onSelectedChange?: (selected: boolean) => void }) {
+  const [capture, setCapture] = React.useState<NodeCapture>();
   const mediaIdentity = report?.currentContent?.mediaId || report?.currentContent?.assetId || "";
   const media = useQuery({ queryKey: ["controller", "node-current-media", mediaIdentity], queryFn: () => resolveObservedMedia(report), enabled: Boolean(mediaIdentity) });
-  if (media.data) return <ResolvedNodeVisualWithMedia node={node} report={report} media={media.data.media} detail={detail} />;
-  const props = { node, report, lastContactAt: report?.reportedAt, nodeHref: `/nodes/${node.id}` };
-  return detail ? <NodePlaybackView {...props} /> : <FleetNodeCard {...props} />;
+  const expected = useQuery({ queryKey: ["controller", "node-expected", node.id], queryFn: () => resolveExpectedContent(node.id), staleTime: 5_000 });
+  const onCapture = React.useCallback((next: NodeCapture) => setCapture(next), []);
+  React.useEffect(() => () => disposeNodeCapture(capture), [capture?.url]);
+  if (media.data) return <ResolvedNodeVisualWithMedia node={node} report={report} media={media.data.media} expectedNow={expected.data} capture={capture} onCapture={onCapture} detail={detail} selected={selected} onSelectedChange={onSelectedChange} />;
+  const props: FleetNodeVisual = { node, report, expectedNow: expected.data, capture, lastContactAt: report?.reportedAt, nodeHref: `/nodes/${node.id}`, actions: <NodeActions nodeId={node.id} onCapture={onCapture} /> };
+  return detail ? <NodePlaybackView {...props} /> : <FleetNodeCard {...props} selected={selected} onSelectedChange={onSelectedChange} />;
 }
 
-function ResolvedNodeVisualWithMedia({ node, report, media, detail }: { node: Node; report?: NodeReport; media: Media; detail: boolean }) {
+function renderResolvedVisual(props: FleetNodeVisual, detail: boolean, selected?: boolean, onSelectedChange?: (selected: boolean) => void) {
+  return detail ? <NodePlaybackView {...props} /> : <FleetNodeCard {...props} selected={selected} onSelectedChange={onSelectedChange} />;
+}
+
+function ExpectedMediaVisual({ props, expectedNow, detail, selected, onSelectedChange }: { props: FleetNodeVisual; expectedNow: PlaybackMetadata & { media: Media }; detail: boolean; selected?: boolean; onSelectedChange?: (selected: boolean) => void }) {
+  const preview = useAuthenticatedPreview(expectedNow.media);
+  return renderResolvedVisual({ ...props, expectedNow: { ...expectedNow, mediaPreviewUrl: preview.status === "ready" ? preview.url : undefined } }, detail, selected, onSelectedChange);
+}
+
+function ResolvedNodeVisualWithMedia({ node, report, media, expectedNow, capture, onCapture, detail, selected, onSelectedChange }: { node: Node; report?: NodeReport; media: Media; expectedNow?: PlaybackMetadata; capture?: NodeCapture; onCapture: (capture: NodeCapture) => void; detail: boolean; selected?: boolean; onSelectedChange?: (selected: boolean) => void }) {
   const preview = useAuthenticatedPreview(media);
   const metadata = playbackMetadata(media, preview.status === "ready" ? preview.url : undefined);
-  const props = { node, report, lastContactAt: report?.reportedAt, observedNow: metadata, nodeHref: `/nodes/${node.id}` };
-  return detail ? <NodePlaybackView {...props} /> : <FleetNodeCard {...props} />;
+  const props: FleetNodeVisual = { node, report, lastContactAt: report?.reportedAt, observedNow: metadata, expectedNow, capture, nodeHref: `/nodes/${node.id}`, actions: <NodeActions nodeId={node.id} onCapture={onCapture} /> };
+  if (expectedNow?.media) return <ExpectedMediaVisual props={props} expectedNow={expectedNow as PlaybackMetadata & { media: Media }} detail={detail} selected={selected} onSelectedChange={onSelectedChange} />;
+  return renderResolvedVisual(props, detail, selected, onSelectedChange);
 }
+function BulkAssignmentComposer({ nodes, onClose }: { nodes: readonly FleetNodeVisual[]; onClose: () => void }) {
+  const client = useQueryClient();
+  const releases = useQuery({ queryKey: queryKeys.releases({ limit: 100 }), queryFn: () => listReleases({ limit: 100 }) });
+  const [releaseId, setReleaseId] = React.useState("");
+  const [deliveryMode, setDeliveryMode] = React.useState<"stream" | "cache_then_play">("cache_then_play");
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const release = releases.data?.items.find((item) => item.id === releaseId);
+      if (!release) throw new Error("Choose a release before assigning.");
+      for (const item of nodes) {
+        const current = await api.GET("/nodes/{nodeId}/assignment", { params: { path: { nodeId: item.node.id } } });
+        const etag = current.response.headers.get("ETag") ?? "*";
+        readApiResult(await api.PUT("/nodes/{nodeId}/assignment", {
+          params: { path: { nodeId: item.node.id }, header: { "If-Match": etag, "Idempotency-Key": crypto.randomUUID() } },
+          body: { releaseId: release.id, releaseDigest: release.digest, deliveryMode, expectedGeneration: item.node.desiredGeneration ?? 0, remoteInput: false, showQr: false },
+        }));
+      }
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["controller", "node-assignment"] });
+      void client.invalidateQueries({ queryKey: ["controller", "node-expected"] });
+      onClose();
+    },
+  });
+  return <Card className="border-primary/40"><CardHeader><CardTitle>Assign release to {nodes.length} selected nodes</CardTitle></CardHeader><CardContent className="space-y-4">
+    {releases.isError && <ErrorState title="Releases unavailable" description={releases.error.message} onRetry={() => void releases.refetch()} />}
+    <label className="block text-sm font-medium">Release<select aria-label="Bulk assignment release" className="mt-1 h-10 w-full rounded-md border border-border bg-background px-3 text-sm" value={releaseId} onChange={(event) => setReleaseId(event.currentTarget.value)} disabled={releases.isPending || mutation.isPending}><option value="">Choose a release</option>{releases.data?.items.map((release) => <option key={release.id} value={release.id}>{release.id} · {release.digest}</option>)}</select></label>
+    <label className="block text-sm font-medium">Delivery mode<select aria-label="Bulk assignment delivery mode" className="mt-1 h-10 w-full rounded-md border border-border bg-background px-3 text-sm" value={deliveryMode} onChange={(event) => setDeliveryMode(event.currentTarget.value as "stream" | "cache_then_play")} disabled={mutation.isPending}><option value="cache_then_play">Cache then play</option><option value="stream">Stream</option></select></label>
+    {mutation.isError && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
+    <div className="flex flex-wrap gap-2"><Button onClick={() => mutation.mutate()} disabled={releases.isPending || mutation.isPending || !releaseId}>{mutation.isPending ? "Assigning…" : "Assign to selected nodes"}</Button><Button variant="secondary" onClick={onClose} disabled={mutation.isPending}>Cancel</Button></div>
+  </CardContent></Card>;
+}
+
+function FleetSelectionToolbar({ nodes, selectedNodeIds, onSelectionChange }: { nodes: readonly FleetNodeVisual[]; selectedNodeIds: readonly string[]; onSelectionChange: (ids: string[]) => void }) {
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+  const selected = nodes.filter((item) => selectedNodeIds.includes(item.node.id));
+  const allSelected = nodes.length > 0 && selected.length === nodes.length;
+  const someSelected = selected.length > 0 && !allSelected;
+  const selectAll = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => { if (selectAll.current) selectAll.current.indeterminate = someSelected; }, [someSelected]);
+  if (!nodes.length) return null;
+  return <div className="space-y-3">
+    <div className="flex flex-col justify-between gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center" aria-label="Fleet selection and bulk actions">
+      <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium"><input ref={selectAll} type="checkbox" aria-label="Select all nodes" checked={allSelected} onChange={(event) => onSelectionChange(event.currentTarget.checked ? nodes.map((item) => item.node.id) : [])} className="h-4 w-4 rounded border-input accent-primary" />Select all <span className="text-muted-foreground">({selected.length} selected)</span></label>
+      {selected.length > 0 && <Button variant="secondary" onClick={() => setBulkOpen((open) => !open)}>{bulkOpen ? "Close bulk assignment" : "Assign selected"}</Button>}
+    </div>
+    {bulkOpen && selected.length > 0 && <BulkAssignmentComposer nodes={selected} onClose={() => setBulkOpen(false)} />}
+  </div>;
+}
+
 
 function NodesPage() {
   const search = useSearch({ from: "/nodes" });
@@ -147,19 +398,22 @@ function NodesPage() {
   const query = useQuery({ queryKey: queryKeys.nodes(search), queryFn: () => listNodes(search) });
   const operator = useQuery({ queryKey: queryKeys.operator, queryFn: getOperator });
   const enrollment = useMutation({ mutationFn: async () => readApiResult(await api.POST("/enrollment-tokens", { params: { header: { "Idempotency-Key": crypto.randomUUID() } } })) });
+  const [selectedNodeIds, setSelectedNodeIds] = React.useState<string[]>([]);
   const items = query.data?.items ?? [];
   const reports = useQueries({ queries: items.map((node) => ({ queryKey: queryKeys.nodeStatus(node.id), queryFn: () => getNodeStatus(node.id), staleTime: 5_000 })) });
   const setSearch = (value: string) => navigate({ search: (previous) => ({ ...previous, search: value || undefined, cursor: undefined }) });
   if (query.isPending) return <RoutePending />;
   if (query.isError) return <PageFrame breadcrumbs={[{ label: "Overview", href: "/" }, { label: "Fleet" }]}><QueryError error={query.error} retry={() => void query.refetch()} /></PageFrame>;
   const data = query.data;
+  const visibleIds = new Set(items.map((node) => node.id));
+  const visibleSelection = selectedNodeIds.filter((id) => visibleIds.has(id));
   const canEnroll = operator.isSuccess && (operator.data.capabilities.node_enroll === true || operator.data.scopes.includes("node_enroll"));
   return <PageFrame breadcrumbs={[{ label: "Fleet" }]}>
     <PageHeader title="Fleet" description="See what every display is showing now.">{canEnroll && <Button onClick={() => enrollment.mutate()} disabled={enrollment.isPending}>{enrollment.isPending ? "Creating token…" : "Register node"}</Button>}</PageHeader>
     {enrollment.isError && <QueryError error={enrollment.error} retry={() => enrollment.reset()} />}
     {enrollment.data && <Card><CardHeader><CardTitle>One-time enrollment token</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Enter this secret in Cable Node before it expires. It cannot be retrieved again.</p><div className="flex gap-2"><input aria-label="Enrollment token" readOnly value={enrollment.data.secret} className="h-10 min-w-0 flex-1 rounded border border-border bg-background px-3 font-mono text-xs" /><Button variant="secondary" onClick={() => void navigator.clipboard.writeText(enrollment.data.secret)}>Copy</Button></div><time className="text-xs text-muted-foreground" dateTime={enrollment.data.expiresAt}>Expires {new Date(enrollment.data.expiresAt).toLocaleString()}</time></CardContent></Card>}
     <SearchBox value={search.search ?? ""} onChange={setSearch} label="Search displays" />
-    {data.items.length ? <PreviewMosaic label="Fleet displays" columns={2}>{data.items.map((node, index) => <ResolvedNodeVisual key={node.id} node={node} report={reports[index]?.data} />)}</PreviewMosaic> : <EmptyState title="No matching displays" description="Try a different name or register a node." />}
+    {data.items.length ? <><FleetSelectionToolbar nodes={items.map((node) => ({ node, report: undefined }))} selectedNodeIds={visibleSelection} onSelectionChange={(ids) => setSelectedNodeIds(ids)} /><PreviewMosaic label="Fleet displays" columns={2}>{data.items.map((node, index) => <ResolvedNodeVisual key={node.id} node={node} report={reports[index]?.data} selected={visibleSelection.includes(node.id)} onSelectedChange={(selected) => setSelectedNodeIds((previous) => selected ? [...new Set([...previous, node.id])] : previous.filter((id) => id !== node.id))} />)}</PreviewMosaic></> : <EmptyState title="No matching displays" description="Try a different name or register a node." />}
     <Pagination page={data.page} onPrevious={() => navigate({ search: (previous) => ({ ...previous, cursor: data.page.previousCursor ?? undefined }) })} onNext={() => navigate({ search: (previous) => ({ ...previous, cursor: data.page.nextCursor ?? undefined }) })} />
   </PageFrame>;
 }

@@ -178,6 +178,27 @@ export class RendererServer {
       }
       return this.json(response, 201, { id });
     }
+    const screenshotMatch = url.pathname.match(/^\/v1\/windows\/([^/]+)\/screenshot$/);
+    const screenshotWindowID = screenshotMatch?.[1];
+    if (screenshotWindowID && request.method === "GET") {
+      if (this.output?.id !== decodeURIComponent(screenshotWindowID) || !this.view || this.view.webContents.isDestroyed()) {
+        return this.problem(response, 404, "renderer window not found");
+      }
+      try {
+        const png = (await this.view.webContents.capturePage()).toPNG();
+        if (png.length === 0) return this.problem(response, 502, "renderer produced an empty screenshot");
+        if (png.length > 16 * 1024 * 1024) return this.problem(response, 413, "renderer screenshot is too large");
+        response.writeHead(200, {
+          "Content-Type": "image/png",
+          "Content-Length": String(png.length),
+          "Cache-Control": "no-store",
+        });
+        response.end(png);
+        return;
+      } catch (error) {
+        return this.problem(response, 502, error instanceof Error ? error.message : "renderer screenshot failed");
+      }
+    }
     const match = url.pathname.match(/^\/v1\/windows\/([^/]+)$/);
     const windowID = match?.[1];
     if (windowID && request.method === "GET") {

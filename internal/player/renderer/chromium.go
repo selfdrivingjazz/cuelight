@@ -20,6 +20,7 @@ import (
 	"time"
 
 	playerclient "github.com/jmill/cable/internal/player/client"
+	"github.com/jmill/cable/internal/player/screenshot"
 	"github.com/jmill/cable/internal/release"
 )
 
@@ -385,6 +386,28 @@ func (c *Chromium) Current(ctx context.Context) (Status, error) {
 		return Status{}, nil
 	}
 	return c.Health(ctx, current.candidate)
+}
+
+func (c *Chromium) Capture(ctx context.Context) ([]byte, error) {
+	c.mu.Lock()
+	session := c.session
+	current := c.current
+	c.mu.Unlock()
+	if session == nil || current == nil {
+		return nil, screenshot.ErrUnsupported
+	}
+	capture, ok := session.(BrowserScreenshotSession)
+	if !ok {
+		return nil, screenshot.ErrUnsupported
+	}
+	data, err := capture.Screenshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) == 0 {
+		return nil, screenshot.ErrInvalidPNG
+	}
+	return data, nil
 }
 
 func (c *Chromium) servePresentation(w http.ResponseWriter, r *http.Request, state *chromiumState) {

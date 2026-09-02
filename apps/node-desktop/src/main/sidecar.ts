@@ -68,6 +68,7 @@ export class SidecarManager {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
       CABLE_PLAYER_CONTROL_URL: this.node.controlUrl,
+      CABLE_PLAYER_NODE_ID: this.node.nodeId,
       CABLE_PLAYER_SERVER_CA_PATH: this.node.caPath,
       CABLE_PLAYER_NODE_CERT_PATH: this.node.certificatePath,
       CABLE_PLAYER_NODE_KEY_PATH: this.node.privateKeyPath,

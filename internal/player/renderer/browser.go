@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/jmill/cable/internal/player/screenshot"
 )
 
 type BrowserLauncher interface {
@@ -25,6 +27,12 @@ type BrowserLauncher interface {
 type BrowserSession interface {
 	Alive(context.Context) (bool, error)
 	Stop(context.Context) error
+}
+
+// BrowserScreenshotSession is optional so existing lightweight launchers remain
+// valid; production Chromium/desktop sessions implement it.
+type BrowserScreenshotSession interface {
+	Screenshot(context.Context) ([]byte, error)
 }
 
 type ExecBrowserLauncher struct {
@@ -168,6 +176,28 @@ func (s *httpBrowserSession) Alive(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return value.Alive, nil
+}
+
+func (s *httpBrowserSession) Screenshot(ctx context.Context) ([]byte, error) {
+	response, err := s.launcher.request(ctx, http.MethodGet, path.Join("/v1/windows", url.PathEscape(s.id), "screenshot"), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return nil, screenshot.ErrUnsupported
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("desktop renderer screenshot returned HTTP %d", response.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, screenshot.DefaultMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > screenshot.DefaultMaxBytes {
+		return nil, screenshot.ErrCaptureTooLarge
+	}
+	return data, nil
 }
 
 func (s *httpBrowserSession) Stop(ctx context.Context) error {

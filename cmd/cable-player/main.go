@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -148,7 +149,7 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		rendererAdapter = composite
 	}
 	reconciler, err := playerruntime.New(config.runtimeConfig(publisherKey), playerruntime.Dependencies{
-		Controller: controller, Journal: journal, CAS: cache, Capacity: filesystemCapacity{path: config.CASPath}, Streamer: streamer, Renderer: rendererAdapter,
+		Controller: controller, Journal: journal, CAS: cache, ScreenshotCache: screenshotCache{store: cache}, Capacity: filesystemCapacity{path: config.CASPath}, Streamer: streamer, Renderer: rendererAdapter,
 	})
 	if err != nil {
 		listener.Close()
@@ -249,4 +250,13 @@ func (s *loopbackStreamer) Renew(_ context.Context, source string, ttl time.Dura
 		return errors.New("stream source does not belong to loopback proxy")
 	}
 	return s.proxy.Renew(parsed.Path, ttl)
+}
+
+type screenshotCache struct{ store *localcas.Store }
+
+func (c screenshotCache) Put(reader io.Reader, digest string) (localcas.Object, error) {
+	return c.store.Put(reader, digest)
+}
+func (c screenshotCache) Open(digest string) (io.ReadCloser, error) {
+	return c.store.Open(digest)
 }

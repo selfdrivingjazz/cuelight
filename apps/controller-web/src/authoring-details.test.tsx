@@ -7,6 +7,7 @@ import {
   ChannelInspector,
   PlaylistInspector,
   ProfileInspector,
+  authoringIfMatch,
   authoringLinks,
   formatDuration,
   formatTimestamp,
@@ -81,6 +82,7 @@ const profile: Profile = {
   createdAt: "2026-09-01T08:00:00Z",
   updatedAt: "2026-09-01T09:00:00Z",
 };
+const catalogMedia = [{ assetId: "asset-3", title: "Gallery reel" } as components["schemas"]["Media"]];
 
 describe("Cable authoring detail workflows", () => {
   it("builds stable cross-links with encoded resource IDs", () => {
@@ -116,10 +118,25 @@ describe("Cable authoring detail workflows", () => {
     expect(markup).not.toContain("Move up");
   });
 
+  it("surfaces the Media picker and item mutations without exposing an ID workflow", () => {
+    const markup = renderToStaticMarkup(<PlaylistInspector playlist={playlist} mediaOptions={catalogMedia} onAdd={() => undefined} onRemove={() => undefined} onDurationChange={() => undefined} onMove={() => undefined} />);
+
+    expect(markup).toContain("Choose playable Media from the catalog");
+    expect(markup).toContain("Gallery reel");
+    expect(markup).toContain("Add media");
+    expect(markup).toContain("Remove");
+    expect(markup).toContain("Duration for City walk");
+  });
+
+  it("uses version ETags as the conflict boundary for every authored replacement", () => {
+    expect(authoringIfMatch(12)).toBe('"v12"');
+  });
+
   it("keeps block source and timing ahead of an honest compiled-data gap", () => {
-    const markup = renderToStaticMarkup(<BlockInspector block={currentBlock} playlist={playlist} visualState="Visual enrichment is not connected on this route." />);
+    const markup = renderToStaticMarkup(<BlockInspector block={currentBlock} playlist={playlist} visualState="Visual enrichment is not connected on this route." action={<button type="button">Edit block</button>} />);
 
     expect(markup).toContain("Schedule window");
+    expect(markup).toContain("Edit block");
     expect(markup).toContain("1h 0m");
     expect(markup).toContain("Compiled media sequence");
     expect(markup).toContain("Showing the authored playlist order instead");
@@ -129,6 +146,7 @@ describe("Cable authoring detail workflows", () => {
 
   it("shows current, next, and proportional channel schedule hierarchy responsively", () => {
     const markup = renderToStaticMarkup(<ChannelInspector channel={channel} blocks={[nextBlock, currentBlock]} now={new Date("2026-09-02T09:30:00Z")} />);
+    expect(markup).toContain("Open full block schedule");
 
     expect(markup).toContain("Scheduled now");
     expect(markup).toContain("Current and next");

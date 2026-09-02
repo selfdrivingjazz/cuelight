@@ -8,13 +8,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jmill/cable/internal/control/preview"
+	"github.com/jmill/cable/internal/media/localcas"
+	"io"
 	"strings"
 	"time"
-
-	"github.com/jmill/cable/internal/control/preview"
 )
 
-type PreviewRepository struct{ *Store }
+type PreviewRepository struct {
+	*Store
+	CAS *localcas.Store
+}
 
 func NewPreviewRepository(s *Store) *PreviewRepository {
 	if s == nil {
@@ -309,6 +313,69 @@ func (s *PreviewRepository) insertScreenshotAudit(ctx context.Context, tx *sql.T
 		return wrap("record screenshot audit", err)
 	}
 	return nil
+}
+func (s *PreviewRepository) Next(ctx context.Context, nodeID string, now time.Time) (preview.ScreenshotJob, bool, error) {
+	var id string
+	err := s.q(ctx).QueryRowContext(ctx, `
+		SELECT id::text FROM screenshot_jobs
+		WHERE node_id = $1::uuid AND status = 'queued' AND expires_at > $2
+		ORDER BY requested_at, id LIMIT 1`, nodeID, now.UTC()).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return preview.ScreenshotJob{}, false, nil
+	}
+	if err != nil {
+		return preview.ScreenshotJob{}, false, wrap("discover screenshot job", err)
+	}
+	job, err := s.screenshotJob(ctx, s.q(ctx), id, false)
+	return job, err == nil, err
+}
+
+func (s *PreviewRepository) StoreScreenshotArtifact(ctx context.Context, digest, mediaType string, size int64, body io.Reader) error {
+	if s.CAS == nil || body == nil || size <= 0 || mediaType != "image/png" {
+		return errors.New("screenshot artifact sink is not configured")
+	}
+	object, err := s.CAS.Put(body, digest)
+	if err != nil {
+		return wrap("store screenshot bytes", err)
+	}
+	if object.Size != size || object.Digest != digest {
+		return preview.ErrArtifactMismatch
+	}
+	_, err = s.q(ctx).ExecContext(ctx, `
+		INSERT INTO artifacts (digest, size_bytes, media_type, state)
+		VALUES ($1, $2, $3, 'ready')
+		ON CONFLICT (digest) DO UPDATE SET
+		  size_bytes = EXCLUDED.size_bytes, media_type = EXCLUDED.media_type, state = 'ready'
+		WHERE artifacts.size_bytes = EXCLUDED.size_bytes AND artifacts.media_type = EXCLUDED.media_type`,
+		digest, size, mediaType)
+	if err != nil {
+		return wrap("register screenshot artifact", err)
+	}
+	return nil
+}
+
+func (s *PreviewRepository) Open(ctx context.Context, digest string) (io.ReadCloser, error) {
+	if s.CAS == nil {
+		return nil, errors.New("screenshot artifact reader is not configured")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.CAS.Open(digest)
+}
+
+func (s *PreviewRepository) Stat(ctx context.Context, digest string) (preview.ArtifactStat, error) {
+	if s.CAS == nil {
+		return preview.ArtifactStat{}, errors.New("screenshot artifact reader is not configured")
+	}
+	if err := ctx.Err(); err != nil {
+		return preview.ArtifactStat{}, err
+	}
+	object, err := s.CAS.Stat(digest)
+	if err != nil {
+		return preview.ArtifactStat{}, err
+	}
+	return preview.ArtifactStat{Digest: object.Digest, Size: object.Size}, nil
 }
 
 func (s *PreviewRepository) LookupArtifact(ctx context.Context, digest string) (preview.ArtifactRecord, error) {

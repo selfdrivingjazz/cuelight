@@ -126,4 +126,18 @@ describe("fleet visual playback surfaces", () => {
     expect(markup).toContain("Weather");
     expect(markup).not.toContain("Actual capture from Lobby display");
   });
+  it("labels expected, reported, and captured evidence independently", () => {
+    const markup = renderToStaticMarkup(<FleetNodeList nodes={[{
+      node: node("lobby", "Lobby display"),
+      report: report("playing"),
+      observedNow: { title: "Reported title" },
+      expectedNow: { title: "Expected title" },
+      capture: { url: "blob:actual", capturedAt: "2026-09-02T12:00:00Z", provenance: "node-renderer" },
+    }]} />);
+    expect(markup).toContain("Expected preview");
+    expect(markup).toContain("Reported media");
+    expect(markup).toContain("Actual node capture");
+    expect(markup).toContain("node-renderer");
+    expect(markup).not.toContain("Reported identity · not a screenshot");
+  });
 });

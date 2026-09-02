@@ -774,6 +774,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/screenshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createScreenshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screenshots/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getScreenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screenshots/{jobId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getScreenshotContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/screenshots/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getNextScreenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/screenshots/{jobId}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["claimScreenshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/screenshots/{jobId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["completeScreenshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/player/enroll": {
         parameters: {
             query?: never;
@@ -976,6 +1080,46 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ScreenshotExpected: {
+            expected?: boolean;
+            releaseDigest?: string;
+            revisionDigest?: string;
+            channelId?: string;
+            blockId?: string;
+            itemId?: string;
+            /** Format: date-time */
+            effectiveAt?: string;
+        };
+        ScreenshotCompletion: {
+            /** @enum {string} */
+            status: "completed" | "failed" | "unsupported";
+            artifactDigest?: string;
+            mediaType?: string;
+            errorReason?: string;
+        };
+        ScreenshotJob: {
+            id: components["schemas"]["Id"];
+            nodeId: components["schemas"]["Id"];
+            expected: components["schemas"]["ScreenshotExpected"];
+            /** Format: date-time */
+            requestedAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: date-time */
+            claimedAt?: string;
+            /** Format: date-time */
+            completionAt?: string;
+            /** @enum {string} */
+            status: "queued" | "claimed" | "completed" | "failed" | "unsupported" | "expired";
+            resultArtifactDigest?: string;
+            resultMediaType?: string;
+            errorReason?: string;
+            retentionPolicy: string;
+            /** Format: date-time */
+            retentionUntil: string;
+            /** Format: date-time */
+            artifactRetentionUntil: string;
+        };
         /** Format: uuid */
         Id: string;
         Health: {
@@ -3653,6 +3797,176 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CableRevision"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createScreenshot: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    nodeId: components["schemas"]["Id"];
+                    /** Format: int64 */
+                    ttlSeconds?: number;
+                    expected?: components["schemas"]["ScreenshotExpected"];
+                };
+            };
+        };
+        responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotJob"];
+                };
+            };
+            /** @description Screenshot queued */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Screenshot job status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getScreenshotContent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exact captured PNG bytes. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getNextScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Own queued screenshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotJob"];
+                };
+            };
+            /** @description No queued screenshot */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    claimScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Claimed screenshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    completeScreenshot: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Artifact-Digest"?: string;
+            };
+            path: {
+                jobId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/png": string;
+                "application/json": components["schemas"]["ScreenshotCompletion"];
+            };
+        };
+        responses: {
+            /** @description Terminal screenshot job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotJob"];
                 };
             };
             default: components["responses"]["Problem"];

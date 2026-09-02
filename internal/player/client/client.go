@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jmill/cable/internal/control/preview"
+	"github.com/jmill/cable/internal/release"
 	"io"
 	"mime"
 	"net"
@@ -17,8 +19,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/jmill/cable/internal/release"
 )
 
 const (
@@ -26,6 +26,7 @@ const (
 	defaultRetryBackoff   = 100 * time.Millisecond
 	defaultMaxAttempts    = 3
 	maxJSONBody           = 4 << 20
+	maxScreenshotBody     = 16 << 20
 )
 
 type Config struct {
@@ -181,6 +182,86 @@ func (c *Client) GetAssignment(ctx context.Context, etag string, wait time.Durat
 		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid presentation kind"}
 	}
 	return AssignmentResult{Assignment: assignment, ETag: responseETag}, nil
+}
+
+// Next discovers at most one queued screenshot job for this authenticated
+// node. A 204 response means there is currently no work.
+func (c *Client) Next(ctx context.Context) (preview.ScreenshotJob, bool, error) {
+	response, cancel, err := c.do(ctx, http.MethodGet, "/player/screenshots/next", nil, nil, nil, "", 0)
+	if err != nil {
+		return preview.ScreenshotJob{}, false, err
+	}
+	defer cancel()
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNoContent {
+		return preview.ScreenshotJob{}, false, nil
+	}
+	if response.StatusCode != http.StatusOK {
+		return preview.ScreenshotJob{}, false, responseError(response, http.MethodGet, "/player/screenshots/next")
+	}
+	var job preview.ScreenshotJob
+	if err := decodeJSON(response.Body, &job); err != nil {
+		return preview.ScreenshotJob{}, false, &ProtocolError{Method: http.MethodGet, Path: "/player/screenshots/next", Reason: "invalid JSON body"}
+	}
+	return job, true, nil
+}
+
+func (c *Client) Claim(ctx context.Context, id string) (preview.ScreenshotJob, error) {
+	if strings.TrimSpace(id) == "" {
+		return preview.ScreenshotJob{}, errors.New("screenshot job ID is required")
+	}
+	path := "/player/screenshots/" + url.PathEscape(id) + "/claim"
+	var job preview.ScreenshotJob
+	if err := c.jsonOperation(ctx, http.MethodPost, path, nil, nil, "", []int{http.StatusOK}, &job, 0); err != nil {
+		return preview.ScreenshotJob{}, err
+	}
+	return job, nil
+}
+
+// CompletePNG uploads the exact PNG bytes and atomically completes the
+// controller job. The body is bounded by the declared size and maxJSONBody.
+func (c *Client) CompletePNG(ctx context.Context, id, digest, mediaType string, size int64, body io.Reader) (preview.ScreenshotJob, error) {
+	if strings.TrimSpace(id) == "" || len(digest) != 64 || strings.ToLower(digest) != digest || mediaType != "image/png" || size <= 0 || body == nil {
+		return preview.ScreenshotJob{}, errors.New("invalid screenshot completion")
+	}
+	data, err := io.ReadAll(io.LimitReader(body, maxScreenshotBody+1))
+	if err != nil {
+		return preview.ScreenshotJob{}, err
+	}
+	if int64(len(data)) != size || int64(len(data)) > maxScreenshotBody {
+		return preview.ScreenshotJob{}, errors.New("screenshot body size exceeds client limit")
+	}
+	path := "/player/screenshots/" + url.PathEscape(id) + "/complete"
+	headers := make(http.Header)
+	headers.Set("Content-Type", mediaType)
+	headers.Set("X-Artifact-Digest", digest)
+	headers.Set("Content-Length", strconv.FormatInt(size, 10))
+	response, cancel, err := c.do(ctx, http.MethodPost, path, nil, data, headers, "", 0)
+	if err != nil {
+		return preview.ScreenshotJob{}, err
+	}
+	defer cancel()
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return preview.ScreenshotJob{}, responseError(response, http.MethodPost, path)
+	}
+	var job preview.ScreenshotJob
+	if err := decodeJSON(response.Body, &job); err != nil {
+		return preview.ScreenshotJob{}, &ProtocolError{Method: http.MethodPost, Path: path, Reason: "invalid JSON body"}
+	}
+	return job, nil
+}
+
+func (c *Client) Complete(ctx context.Context, id string, completion preview.Completion) (preview.ScreenshotJob, error) {
+	if strings.TrimSpace(id) == "" {
+		return preview.ScreenshotJob{}, errors.New("screenshot job ID is required")
+	}
+	path := "/player/screenshots/" + url.PathEscape(id) + "/complete"
+	var job preview.ScreenshotJob
+	if err := c.jsonOperation(ctx, http.MethodPost, path, nil, completion, "", []int{http.StatusOK}, &job, 0); err != nil {
+		return preview.ScreenshotJob{}, err
+	}
+	return job, nil
 }
 func (c *Client) CreateRemoteSession(ctx context.Context, desiredGeneration int64) (RemoteSession, error) {
 	if desiredGeneration <= 0 {
