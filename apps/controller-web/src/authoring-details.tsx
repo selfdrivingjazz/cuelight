@@ -223,7 +223,38 @@ function AssetDetail({ asset }: { asset: Asset }) {
 export function PlaylistAuthoringListPage() {
   const query = useQuery({ queryKey: ["authoring", "playlists"], queryFn: listPlaylists });
   const playlists = query.data?.items ?? [];
-  return <QueryBoundary query={query}><PageFrame title="Playlists" description="Ordered programs ready to place in a channel block.">{playlists.length ? <PreviewMosaic label="Playlists" columns={3}>{playlists.map((playlist) => <MediaCard key={playlist.id} title={playlist.name} description={playlist.description || "No description"} titleHref={authoringLinks.playlist(playlist.id).href} preview={<EmptyPreview label={`${playlist.name} mosaic`} description={playlist.items.length ? "Open the playlist to resolve its media mosaic." : "This playlist does not contain media yet."} />} metadata={<><span>{playlist.items.length} {playlist.items.length === 1 ? "item" : "items"}</span><span>{formatDuration(playlist.items.reduce((sum, item) => sum + item.durationSeconds, 0))}</span></>} />)}</PreviewMosaic> : <EmptyState title="No playlists" description="Create a playlist before scheduling a block." />}</PageFrame></QueryBoundary>;
+  const assetIds = [...new Set(playlists.flatMap((playlist) => playlist.items.map((item) => item.assetId)))].sort();
+  const mediaQuery = useQuery({
+    queryKey: ["authoring", "playlist-library-media", assetIds],
+    queryFn: async () => readApiResult(await api.GET("/media", {
+      params: { query: { assetId: assetIds, limit: 100, playable: true } },
+    })),
+    enabled: assetIds.length > 0,
+  });
+  const resolved = new Map((mediaQuery.data?.items ?? []).map((media) => [media.assetId, media]));
+
+  return <QueryBoundary query={query}>
+    <PageFrame title="Playlists" description="Ordered programs ready to place in a channel block.">
+      {playlists.length
+        ? <PreviewMosaic label="Playlists" columns={3}>
+            {playlists.map((playlist) => {
+              const first = playlist.items[0];
+              const media = first ? resolved.get(first.assetId) : undefined;
+              return <MediaCard
+                key={playlist.id}
+                title={playlist.name}
+                description={playlist.description || "No description"}
+                titleHref={authoringLinks.playlist(playlist.id).href}
+                preview={media
+                  ? <AuthoringMediaPreview media={media} label={`${playlist.name} preview`} />
+                  : <EmptyPreview label={`${playlist.name} mosaic`} description={playlist.items.length ? "Resolving the first item preview…" : "This playlist does not contain media yet."} />}
+                metadata={<><span>{playlist.items.length} {playlist.items.length === 1 ? "item" : "items"}</span><span>{formatDuration(playlist.items.reduce((sum, item) => sum + item.durationSeconds, 0))}</span></>}
+              />;
+            })}
+          </PreviewMosaic>
+        : <EmptyState title="No playlists" description="Create a playlist to group authored media into a repeatable sequence." />}
+    </PageFrame>
+  </QueryBoundary>;
 }
 
 export interface PlaylistInspectorProps {

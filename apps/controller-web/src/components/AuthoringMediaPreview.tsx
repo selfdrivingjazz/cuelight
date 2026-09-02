@@ -35,18 +35,16 @@ export function AuthoringMediaPreview({ media, label, className, aspectRatio = "
       setPreview({ status: "error", message: "This media type cannot be previewed in the browser." });
       return;
     }
-    if (!token) {
-      setPreview({ status: "error", message: "Sign in as an operator to load this preview." });
-      return;
-    }
 
     const controller = new AbortController();
     let objectUrl: string | undefined;
     setPreview({ status: "loading" });
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
     void fetch(`${controllerBaseUrl}/media/${encodeURIComponent(media.id)}/content`, {
       credentials: "omit",
       cache: "no-store",
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
       signal: controller.signal,
     }).then(async (response) => {
       if (!response.ok) throw new Error(`Preview request failed with status ${response.status}.`);
