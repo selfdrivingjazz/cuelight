@@ -105,10 +105,10 @@ type UploadRange struct {
 }
 
 type Artifact struct {
-	Digest    string
-	Size      int64
-	MediaType string
-	State     ArtifactState
+	Digest    string        `json:"digest"`
+	Size      int64         `json:"size"`
+	MediaType string        `json:"mediaType"`
+	State     ArtifactState `json:"state"`
 }
 
 type Asset struct {
