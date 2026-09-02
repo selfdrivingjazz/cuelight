@@ -406,7 +406,7 @@ export function MediaDetailPage() {
     <PageHeader title={media.title} description={media.artist || media.description}>
       <Button type="button" onClick={() => setAssigning((value) => !value)}>{assigning ? "Close assignment" : "Assign"}</Button>
     </PageHeader>
-    {assigning && <NodeAssignmentComposer fixedAsset={{ id: media.assetId, name: media.title }} title="Assign media" />}
+    {assigning && <NodeAssignmentComposer fixedAsset={{ id: media.assetId, name: media.title, playback: media.playback }} title="Assign media" />}
 
     <AuthenticatedMediaPreview media={media} hero onDimensions={setDimensions} />
 

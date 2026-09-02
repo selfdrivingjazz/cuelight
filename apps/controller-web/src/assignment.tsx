@@ -11,7 +11,7 @@ type SourceKind = "media" | "profile" | "release";
 
 export interface NodeAssignmentComposerProps {
   fixedNodeId?: string;
-  fixedAsset?: Pick<Asset, "id" | "name">;
+  fixedAsset?: Pick<Asset, "id" | "name"> & { playback?: components["schemas"]["MediaPlayback"] };
   fixedReleaseId?: string;
   title?: string;
 }
@@ -30,10 +30,18 @@ async function profiles() {
 async function release(id: string) {
   return readApiResult(await api.GET("/releases/{releaseId}", { params: { path: { releaseId: id } } }));
 }
-async function mediaRelease(assetId: string): Promise<Release> {
+async function mediaRelease(assetId: string, playback?: components["schemas"]["MediaPlayback"]): Promise<Release> {
   return readApiResult(await api.POST("/releases/publish", {
     params: { header: { "Idempotency-Key": crypto.randomUUID() } },
-    body: { playback: { assetId, fit: "fill", loop: true, muted: false, volume: 100, orientation: 0, allowedDeliveryModes: ["stream", "cache_then_play"] } },
+    body: { playback: {
+      assetId,
+      fit: playback?.fit ?? "fill",
+      loop: playback?.loop ?? true,
+      muted: playback?.muted ?? false,
+      volume: playback?.volume ?? 100,
+      orientation: playback?.orientation ?? 0,
+      allowedDeliveryModes: ["stream", "cache_then_play"],
+    } },
   }));
 }
 
@@ -60,7 +68,7 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
       let selectedRelease: Release;
       let deliveryMode: "stream" | "cache_then_play";
       if (kind === "media") {
-        selectedRelease = await mediaRelease(sourceId);
+        selectedRelease = await mediaRelease(sourceId, fixedAsset?.playback);
         deliveryMode = "stream";
       } else if (kind === "profile") {
         const profile = profileQuery.data?.items.find((item: Profile) => item.id === sourceId);
@@ -83,8 +91,9 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedAsset, fixedReleaseId
     },
   });
 
-  const pending = nodeQuery.isPending || assetQuery.isPending || profileQuery.isPending;
-  const queryError = nodeQuery.error ?? assetQuery.error ?? profileQuery.error;
+  const needsCatalog = !fixedAsset && !fixedReleaseId;
+  const pending = nodeQuery.isPending || (needsCatalog && (assetQuery.isPending || profileQuery.isPending));
+  const queryError = nodeQuery.error ?? (needsCatalog ? assetQuery.error ?? profileQuery.error : undefined);
   const options = kind === "media" ? (assetQuery.data?.items ?? []).filter((item) => item.artifact.mediaType.startsWith("video/") || ["image/jpeg", "image/png", "image/webp"].includes(item.artifact.mediaType)) : kind === "profile" ? profileQuery.data?.items ?? [] : [];
   return <Card>{title && <CardHeader><CardTitle>{title}</CardTitle></CardHeader>}<CardContent className={title ? "space-y-4" : "space-y-4 pt-5"}>
     {queryError instanceof Error && <ErrorState title="Assignment options unavailable" description={queryError.message} onRetry={() => { void nodeQuery.refetch(); void assetQuery.refetch(); void profileQuery.refetch(); }} />}

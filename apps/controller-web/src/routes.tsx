@@ -113,10 +113,22 @@ function playbackMetadata(media: Media, previewUrl?: string): PlaybackMetadata {
     mediaPreviewUrl: previewUrl,
   };
 }
+async function resolveObservedMedia(report?: NodeReport) {
+  const content = report?.currentContent;
+  if (content?.mediaId) return getMedia(content.mediaId);
+  if (!content?.assetId) throw new Error("No observed media identity is available.");
+  const page = readApiResult(await api.GET("/media", {
+    params: { query: { assetId: [content.assetId], limit: 1, playable: true } },
+  }));
+  const media = page.items[0];
+  if (!media) throw new Error("Observed media is not registered in the Media Library.");
+  return { media, etag: `"media:${media.id}:${media.version}"` };
+}
+
 
 function ResolvedNodeVisual({ node, report, detail = false }: { node: Node; report?: NodeReport; detail?: boolean }) {
-  const mediaId = report?.currentContent?.mediaId || report?.currentContent?.assetId || "";
-  const media = useQuery({ queryKey: ["controller", "node-current-media", mediaId], queryFn: () => getMedia(mediaId), enabled: Boolean(mediaId) });
+  const mediaIdentity = report?.currentContent?.mediaId || report?.currentContent?.assetId || "";
+  const media = useQuery({ queryKey: ["controller", "node-current-media", mediaIdentity], queryFn: () => resolveObservedMedia(report), enabled: Boolean(mediaIdentity) });
   if (media.data) return <ResolvedNodeVisualWithMedia node={node} report={report} media={media.data.media} detail={detail} />;
   const props = { node, report, lastContactAt: report?.reportedAt, nodeHref: `/nodes/${node.id}` };
   return detail ? <NodePlaybackView {...props} /> : <FleetNodeCard {...props} />;
