@@ -290,7 +290,7 @@ async function resolveExpectedContent(nodeId: string): Promise<PlaybackMetadata 
   try {
     release = await getRelease(assignment.releaseId);
   } catch {
-    return { title: `Release ${assignment.releaseId}`, subtitle: `Expected digest ${assignment.releaseDigest}` };
+    return { title: "Assigned content", subtitle: "Release details are unavailable." };
   }
   const presentation = release.payload.presentation;
   const assetId = release.payload.playback?.assetId ?? presentation?.media?.playback.assetId;
@@ -303,10 +303,9 @@ async function resolveExpectedContent(nodeId: string): Promise<PlaybackMetadata 
       // Keep the release identity visible when its media is not available to this operator.
     }
   }
-  return {
-    title: `Release ${release.id}`,
-    subtitle: `Expected digest ${release.digest}`,
-  };
+  return presentation?.kind === "cable"
+    ? { title: "Cable schedule", subtitle: "Published channel lineup" }
+    : { title: "Assigned content", subtitle: "Media preview unavailable" };
 }
 
 function NodeActions({ nodeId, onCapture }: { nodeId: string; onCapture: (capture: NodeCapture) => void }) {
