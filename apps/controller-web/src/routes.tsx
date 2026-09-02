@@ -7,6 +7,7 @@ import "@cable/controller-ui/styles.css";
 import { api, ApiRequestError, getControllerHealth, readApiResult } from "./api";
 import { AccessScreen, useAuth } from "./auth";
 import { CableChannelDetail, CableDeploymentsPage, CableDeploymentDetail, CableReleaseAssignmentPage, CableProgramDetailPage, RevisionDetailPage, ShellBuildsPage } from "./cable";
+import { ThemeControl } from "./theme";
 import { NodeAssignmentComposer } from "./assignment";
 import { BlockAuthoringDetailPage, BlockAuthoringListPage, PlaylistAuthoringDetailPage, PlaylistAuthoringListPage, ProfileAuthoringDetailPage, ProfileAuthoringListPage } from "./authoring-details";
 import { MediaDropzone } from "./components/MediaDropzone";
@@ -60,7 +61,7 @@ function Shell() {
   if (pathname.startsWith("/remote/")) return <Outlet />;
   if (auth.state === "signedOut" || auth.state === "invalid") return <AccessScreen />;
   if (auth.state === "checking" || !auth.operator) return <RoutePending />;
-  return <div className="min-h-screen bg-background text-foreground"><div className="flex min-h-screen"><Sidebar items={navigation} currentPath={pathname} linkComponent={RouterLink} /><div className="min-w-0 flex-1"><header className="flex h-16 items-center justify-between border-b border-border px-4 md:px-8"><MobileNav><MobileSidebar items={navigation} currentPath={pathname} linkComponent={RouterLink} /></MobileNav><span className="text-sm text-muted-foreground">{auth.operator.id}</span>{auth.token && <Button variant="secondary" size="sm" onClick={auth.signOut}>Log out</Button>}</header><Outlet /></div></div></div>;
+  return <div className="min-h-screen bg-background text-foreground"><div className="flex min-h-screen"><Sidebar items={navigation} currentPath={pathname} linkComponent={RouterLink} /><div className="min-w-0 flex-1"><header className="flex h-16 items-center border-b border-border px-4 md:px-8"><MobileNav><MobileSidebar items={navigation} currentPath={pathname} linkComponent={RouterLink} /></MobileNav><div className="ml-auto flex items-center gap-2"><span className="hidden text-sm text-muted-foreground sm:inline">{auth.operator.id}</span><ThemeControl />{auth.token && <Button variant="secondary" size="sm" onClick={auth.signOut}>Log out</Button>}</div></header><Outlet /></div></div></div>;
 }
 
 const RouterLink = Link as unknown as NavigationLink;

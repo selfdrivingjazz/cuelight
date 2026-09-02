@@ -89,6 +89,33 @@ type Condition struct {
 	Reason  string `json:"reason"`
 	Message string `json:"message,omitempty"`
 }
+
+// CurrentContent is the content the node renderer is actually presenting.
+// It is intentionally independent of assignment intent; an off-air or stale
+// observation may still identify the release that supplied the renderer.
+type CurrentContent struct {
+	ReleaseDigest    string                   `json:"releaseDigest"`
+	PresentationKind release.PresentationKind `json:"presentationKind"`
+	State            string                   `json:"state"`
+	ChannelID        string                   `json:"channelId,omitempty"`
+	BlockID          string                   `json:"blockId,omitempty"`
+	ItemID           string                   `json:"itemId,omitempty"`
+	MediaID          string                   `json:"mediaId,omitempty"`
+	AssetID          string                   `json:"assetId,omitempty"`
+	StartedAt        *time.Time               `json:"startedAt,omitempty"`
+	TransitionedAt   time.Time                `json:"transitionedAt"`
+	PositionMs       *int64                   `json:"positionMs,omitempty"`
+	Width            *int32                   `json:"width,omitempty"`
+	Height           *int32                   `json:"height,omitempty"`
+}
+
+const (
+	ContentStatePlaying = "playing"
+	ContentStatePaused  = "paused"
+	ContentStateOffAir  = "off_air"
+	ContentStateStale   = "stale"
+)
+
 type NodeReport struct {
 	EventEpoch                 string                   `json:"eventEpoch"`
 	Sequence                   int64                    `json:"sequence"`
@@ -99,6 +126,7 @@ type NodeReport struct {
 	CandidateReleaseDigest     *string                  `json:"candidateReleaseDigest"`
 	HealthyReleaseDigest       *string                  `json:"healthyReleaseDigest"`
 	LastKnownGoodReleaseDigest *string                  `json:"lastKnownGoodReleaseDigest"`
+	CurrentContent             *CurrentContent          `json:"currentContent,omitempty"`
 	Conditions                 []Condition              `json:"conditions"`
 }
 

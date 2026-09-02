@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -113,6 +114,7 @@ func (r *Reconciler) Recover(ctx context.Context) error {
 		r.event("renderer_inspection_failed", 0, map[string]any{"reason": "current renderer unavailable"})
 		return nil
 	}
+	r.snapshot.CurrentContent = status.Current
 	if status.Healthy && status.ReleaseDigest != "" && status.Path != "" {
 		r.lkg = status.Candidate
 		if r.lkg.ReleaseDigest != status.ReleaseDigest {
@@ -330,6 +332,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, assignment playerclient.Assi
 		previousRevoke()
 	}
 	r.restoreHealthy(generation, candidate)
+	r.snapshot.CurrentContent = status.Current
 	r.condition("PlaybackHealthy", true, "CandidateCommitted", "")
 	r.event("release_healthy", generation, map[string]any{"releaseDigest": candidate.ReleaseDigest})
 	return nil
@@ -378,6 +381,8 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 		if !ok || len(envelope.Payload.Artifacts) == 0 {
 			return candidate, nil, ErrIncompatibleRelease
 		}
+		candidate.AssetID = playback.AssetID
+		candidate.MediaID = wireString(playback, "mediaId")
 		candidate.Fit, candidate.Loop, candidate.Muted, candidate.Volume = playback.Fit, playback.Loop, playback.Muted, playback.Volume
 		candidate.ImageDurationSecond, candidate.Orientation = playback.ImageDurationSecond, playback.Orientation
 		artifact := envelope.Payload.Artifacts[0]
@@ -435,7 +440,7 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 			if parseErr != nil {
 				return candidate, nil, parseErr
 			}
-			resolved := renderer.ScheduleItem{ID: item.ID, StartsAt: start, EndsAt: end, MediaType: item.MediaType, Fit: item.Fit, Loop: item.Loop, Muted: item.Muted, Volume: item.Volume, ImageDurationSecond: item.ImageDurationSecond, Orientation: item.Orientation}
+			resolved := renderer.ScheduleItem{ID: item.ID, AssetID: wireString(item, "assetId"), MediaID: wireString(item, "mediaId"), StartsAt: start, EndsAt: end, MediaType: item.MediaType, Fit: item.Fit, Loop: item.Loop, Muted: item.Muted, Volume: item.Volume, ImageDurationSecond: item.ImageDurationSecond, Orientation: item.Orientation}
 			if mode == DeliveryStream {
 				if r.deps.Streamer == nil {
 					return candidate, nil, ErrUnsafeStreamSource
@@ -706,6 +711,7 @@ func (r *Reconciler) stopActive(ctx context.Context) {
 	r.snapshot.HealthyDigest = ""
 	r.snapshot.PresentationKind = ""
 	r.snapshot.Safe = true
+	r.snapshot.CurrentContent = nil
 }
 
 func (r *Reconciler) inspectActive(ctx context.Context) {
@@ -718,6 +724,7 @@ func (r *Reconciler) inspectActive(ctx context.Context) {
 	} else {
 		r.condition("PlaybackHealthy", true, "ActiveRendererHealthy", "")
 	}
+	r.snapshot.CurrentContent = status.Current
 }
 
 func (r *Reconciler) controllerLost(err error) {
@@ -769,6 +776,14 @@ func (r *Reconciler) flush(ctx context.Context) error {
 	if err := r.deps.Journal.SetEventProgress(r.epoch, r.reportSeq, r.watermark); err != nil {
 		return err
 	}
+	if status, err := r.deps.Renderer.Current(ctx); err == nil {
+		r.snapshot.CurrentContent = status.Current
+	} else if r.snapshot.CurrentContent != nil {
+		stale := *r.snapshot.CurrentContent
+		stale.State = playerclient.ContentStateStale
+		stale.TransitionedAt = r.deps.Clock.Now().UTC()
+		r.snapshot.CurrentContent = &stale
+	}
 	conditions := make([]playerclient.Condition, 0, len(r.conditions))
 	keys := make([]string, 0, len(r.conditions))
 	for key := range r.conditions {
@@ -786,7 +801,8 @@ func (r *Reconciler) flush(ctx context.Context) error {
 		DesiredGenerationSeen: int64(r.snapshot.DesiredGenerationSeen), ObservedGeneration: int64(r.snapshot.ObservedGeneration),
 		PresentationKind:       r.snapshot.PresentationKind,
 		RenderingReleaseDigest: stringPointer(r.snapshot.RenderingDigest), CandidateReleaseDigest: stringPointer(r.snapshot.CandidateDigest),
-		HealthyReleaseDigest: stringPointer(r.snapshot.HealthyDigest), LastKnownGoodReleaseDigest: stringPointer(r.snapshot.LastKnownGoodDigest), Conditions: conditions,
+		HealthyReleaseDigest: stringPointer(r.snapshot.HealthyDigest), LastKnownGoodReleaseDigest: stringPointer(r.snapshot.LastKnownGoodDigest),
+		CurrentContent: r.snapshot.CurrentContent, Conditions: conditions,
 	}
 	if _, err := r.deps.Controller.Report(ctx, report, stableKey(r.epoch, "report", r.reportSeq)); err != nil {
 		return err
@@ -840,6 +856,21 @@ func stringPointer(value string) *string {
 	}
 	result := value
 	return &result
+}
+func wireString(value any, key string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return ""
+	}
+	var result string
+	if err := json.Unmarshal(fields[key], &result); err != nil {
+		return ""
+	}
+	return result
 }
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {

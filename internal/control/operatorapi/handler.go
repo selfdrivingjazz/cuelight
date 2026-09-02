@@ -128,8 +128,14 @@ func NewHandler(deps Dependencies) http.Handler {
 // context. It is useful when a caller wants one authentication boundary around
 // several composed handlers; NewHandler applies the equivalent per operation.
 func (d Dependencies) Middleware(next http.Handler) http.Handler {
+	return d.MiddlewareForScope("", next)
+}
+
+// MiddlewareForScope authenticates a composed operator handler and requires
+// the same token scope used by built-in routes.
+func (d Dependencies) MiddlewareForScope(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		actor, err := d.authenticate(r, "")
+		actor, err := d.authenticate(r, scope)
 		if err != nil {
 			writeError(w, err)
 			return

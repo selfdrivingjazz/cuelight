@@ -119,3 +119,48 @@ func TestScreenshotJobExpiresAndCannotCompleteAfterTTL(t *testing.T) {
 		t.Fatalf("expired job=%#v", job)
 	}
 }
+
+type artifactCatalogStub struct {
+	record ArtifactRecord
+	err    error
+}
+
+func (c artifactCatalogStub) LookupArtifact(context.Context, string) (ArtifactRecord, error) {
+	return c.record, c.err
+}
+
+func TestScreenshotCompletionValidatesCatalogMetadata(t *testing.T) {
+	clock := &fixedClock{now: testTime}
+	service, _ := testService(clock)
+	created, err := service.Create(context.Background(), Mutation{ActorID: "operator", IdempotencyKey: "catalog"}, CreateInput{NodeID: "node-a", Expected: testExpected()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Claim(context.Background(), "node-a", created.Job.ID); err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("c", 64)
+	_, err = service.Complete(context.Background(), "node-a", created.Job.ID, Completion{Status: StatusCompleted, ArtifactDigest: digest, MediaType: "image/png"})
+	if !errors.Is(err, ErrArtifactUnavailable) {
+		t.Fatalf("without catalog error=%v, want unavailable", err)
+	}
+	service.Artifacts = artifactCatalogStub{record: ArtifactRecord{Digest: digest, MediaType: "image/jpeg", State: "ready"}}
+	_, err = service.Complete(context.Background(), "node-a", created.Job.ID, Completion{Status: StatusCompleted, ArtifactDigest: digest, MediaType: "image/png"})
+	if !errors.Is(err, ErrArtifactMismatch) {
+		t.Fatalf("mismatched catalog error=%v, want mismatch", err)
+	}
+	service.Artifacts = artifactCatalogStub{record: ArtifactRecord{Digest: digest, MediaType: "image/png", State: "missing"}}
+	_, err = service.Complete(context.Background(), "node-a", created.Job.ID, Completion{Status: StatusCompleted, ArtifactDigest: digest, MediaType: "image/png"})
+	if !errors.Is(err, ErrArtifactMismatch) {
+		t.Fatalf("missing artifact error=%v, want mismatch", err)
+	}
+	service.Artifacts = artifactCatalogStub{record: ArtifactRecord{Digest: digest, MediaType: "image/png", State: "ready"}}
+	_, err = service.Complete(context.Background(), "node-b", created.Job.ID, Completion{Status: StatusCompleted, ArtifactDigest: digest, MediaType: "image/png"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("cross-node completion error=%v, want forbidden", err)
+	}
+	completed, err := service.Complete(context.Background(), "node-a", created.Job.ID, Completion{Status: StatusCompleted, ArtifactDigest: digest, MediaType: "image/png"})
+	if err != nil || completed.Status != StatusCompleted || completed.ResultArtifactDigest != digest {
+		t.Fatalf("completed=(%#v,%v)", completed, err)
+	}
+}

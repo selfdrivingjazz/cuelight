@@ -176,7 +176,7 @@ func statusFor(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, ErrExpired):
 		return http.StatusGone
-	case errors.Is(err, ErrInvalidArgument):
+	case errors.Is(err, ErrInvalidArgument), errors.Is(err, ErrArtifactUnavailable), errors.Is(err, ErrArtifactMismatch):
 		return http.StatusBadRequest
 	default:
 		return http.StatusInternalServerError

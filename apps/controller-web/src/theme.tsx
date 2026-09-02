@@ -72,8 +72,7 @@ export function ControllerThemeProvider({ children }: { children: React.ReactNod
   }, []);
 
   const value = React.useMemo(() => ({ preference, setPreference }), [preference]);
-  const showControl = typeof window === "undefined" || !window.location.pathname.startsWith("/remote/");
-  return <ControllerThemeContext.Provider value={value}>{children}{showControl && <ThemeControl />}</ControllerThemeContext.Provider>;
+  return <ControllerThemeContext.Provider value={value}>{children}</ControllerThemeContext.Provider>;
 }
 
 export function useControllerTheme(): ControllerThemeContextValue {
@@ -82,13 +81,20 @@ export function useControllerTheme(): ControllerThemeContextValue {
   return value;
 }
 
-function ThemeControl() {
+export interface ThemeControlProps {
+  id?: string;
+  label?: string;
+  className?: string;
+}
+
+export function ThemeControl({ id, label = "Theme", className }: ThemeControlProps) {
   const { preference, setPreference } = useControllerTheme();
-  return <div className="fixed bottom-4 right-4 z-30 flex items-center gap-2 rounded-md border border-border bg-card p-1.5 text-card-foreground shadow-sm">
-    <label className="pl-1 text-xs font-medium text-muted-foreground" htmlFor="controller-theme">Theme</label>
+  const generatedId = React.useId();
+  const controlId = id ?? generatedId;
+  return <div className={["inline-flex items-center gap-2 rounded-md border border-border bg-card p-1.5 text-card-foreground", className].filter(Boolean).join(" ")}>
+    <label className="pl-1 text-xs font-medium text-muted-foreground" htmlFor={controlId}>{label}</label>
     <select
-      id="controller-theme"
-      aria-label="Controller color theme"
+      id={controlId}
       className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       value={preference}
       onChange={(event) => setPreference(event.currentTarget.value as ControllerThemePreference)}

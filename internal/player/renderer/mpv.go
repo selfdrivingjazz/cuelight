@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	playerclient "github.com/jmill/cable/internal/player/client"
 	"github.com/jmill/cable/internal/release"
 )
 
@@ -25,6 +26,8 @@ type RemoteDescriptor struct {
 
 type ScheduleItem struct {
 	ID                  string
+	AssetID             string
+	MediaID             string
 	StartsAt            time.Time
 	EndsAt              time.Time
 	Source              string
@@ -37,9 +40,21 @@ type ScheduleItem struct {
 	Orientation         int
 }
 
+type CableOccurrence struct {
+	ID        string
+	ChannelID string
+	BlockID   string
+	ItemID    string
+	AssetID   string
+	StartsAt  time.Time
+	EndsAt    time.Time
+}
+
 type Candidate struct {
 	Kind                release.PresentationKind
 	ReleaseDigest       string
+	MediaID             string
+	AssetID             string
 	Source              string
 	MediaType           string
 	Fit                 string
@@ -52,6 +67,7 @@ type Candidate struct {
 	WindowStart         time.Time
 	WindowEnd           time.Time
 	Schedule            []ScheduleItem
+	CableOccurrences    []CableOccurrence
 
 	// Cable candidates are materialized by the Chromium adapter. Keeping the
 	// immutable closure on the candidate lets the composite renderer dispatch
@@ -74,6 +90,7 @@ type Status struct {
 	Healthy       bool
 	Path          string
 	Candidate     Candidate
+	Current       *playerclient.CurrentContent
 }
 
 type Adapter interface {
@@ -86,17 +103,18 @@ type Adapter interface {
 }
 
 type MPV struct {
-	SocketPath   string
-	Timeout      time.Duration
-	Now          func() time.Time
-	requestID    atomic.Uint64
-	current      atomic.Pointer[Candidate]
-	scheduleMu   sync.Mutex
-	scheduleStop context.CancelFunc
-	scheduleErr  error
-	scheduleItem string
+	SocketPath     string
+	Timeout        time.Duration
+	Now            func() time.Time
+	requestID      atomic.Uint64
+	current        atomic.Pointer[Candidate]
+	scheduleMu     sync.Mutex
+	scheduleStop   context.CancelFunc
+	scheduleErr    error
+	scheduleItem   string
+	startedAt      time.Time
+	transitionedAt time.Time
 }
-
 type mpvResponse struct {
 	Error     string          `json:"error"`
 	Data      json.RawMessage `json:"data"`
@@ -208,14 +226,23 @@ func (m *MPV) Start(ctx context.Context, candidate Candidate) error {
 		}
 		scheduleCtx, cancel := context.WithCancel(context.Background())
 		m.scheduleMu.Lock()
-		m.scheduleStop = cancel
+		m.scheduleStop, m.scheduleErr, m.scheduleItem = cancel, nil, ""
+		m.startedAt, m.transitionedAt = now.UTC(), now.UTC()
+		if active {
+			m.scheduleItem, m.transitionedAt = item.ID, now.UTC()
+		}
 		m.scheduleMu.Unlock()
 		go m.runSchedule(scheduleCtx, candidate)
-	} else if err := m.playItem(ctx, ScheduleItem{Source: candidate.Source, Fit: candidate.Fit, Loop: candidate.Loop, Muted: candidate.Muted, Volume: candidate.Volume, ImageDurationSecond: candidate.ImageDurationSecond, Orientation: candidate.Orientation}); err != nil {
+	} else if err := m.playItem(ctx, ScheduleItem{AssetID: candidate.AssetID, MediaID: candidate.MediaID, Source: candidate.Source, Fit: candidate.Fit, Loop: candidate.Loop, Muted: candidate.Muted, Volume: candidate.Volume, ImageDurationSecond: candidate.ImageDurationSecond, Orientation: candidate.Orientation}); err != nil {
 		return err
 	}
 	copy := candidate
 	m.current.Store(&copy)
+	if candidate.Kind != release.PresentationMediaSchedule {
+		m.scheduleMu.Lock()
+		m.startedAt, m.transitionedAt = m.now().UTC(), m.now().UTC()
+		m.scheduleMu.Unlock()
+	}
 	return nil
 }
 
@@ -285,6 +312,9 @@ func waitFor(ctx context.Context, duration time.Duration) bool {
 func (m *MPV) setScheduleState(itemID string, err error) {
 	m.scheduleMu.Lock()
 	defer m.scheduleMu.Unlock()
+	if itemID != "" && itemID != m.scheduleItem {
+		m.transitionedAt = m.now().UTC()
+	}
 	m.scheduleItem, m.scheduleErr = itemID, err
 }
 
@@ -295,14 +325,15 @@ func (m *MPV) scheduleState() (string, error) {
 }
 
 func (m *MPV) Health(ctx context.Context, candidate Candidate) (Status, error) {
+	now := m.now().UTC()
 	if candidate.Kind == release.PresentationMediaSchedule {
-		now := m.now()
 		if now.Before(candidate.WindowStart) || !now.Before(candidate.WindowEnd) {
 			_, scheduleErr := m.scheduleState()
-			return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: scheduleErr == nil, Candidate: candidate}, scheduleErr
+			healthy := scheduleErr == nil
+			return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: healthy, Candidate: candidate, Current: m.currentContent(candidate, healthy, "", now)}, scheduleErr
 		}
 		if _, scheduleErr := m.scheduleState(); scheduleErr != nil {
-			return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: false, Candidate: candidate}, scheduleErr
+			return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: false, Candidate: candidate, Current: m.currentContent(candidate, false, "", now)}, scheduleErr
 		}
 	}
 	response, err := m.command(ctx, []any{"get_property", "path"})
@@ -313,11 +344,11 @@ func (m *MPV) Health(ctx context.Context, candidate Candidate) (Status, error) {
 	if err := json.Unmarshal(response.Data, &path); err != nil {
 		return Status{}, fmt.Errorf("decode mpv path: %w", err)
 	}
-	expected := ScheduleItem{Source: candidate.Source, Fit: candidate.Fit, Loop: candidate.Loop, Muted: candidate.Muted, Volume: candidate.Volume, ImageDurationSecond: candidate.ImageDurationSecond, Orientation: candidate.Orientation}
+	expected := ScheduleItem{AssetID: candidate.AssetID, MediaID: candidate.MediaID, Source: candidate.Source, Fit: candidate.Fit, Loop: candidate.Loop, Muted: candidate.Muted, Volume: candidate.Volume, ImageDurationSecond: candidate.ImageDurationSecond, Orientation: candidate.Orientation}
 	if candidate.Kind == release.PresentationMediaSchedule {
-		item, ok := SelectScheduleItem(candidate.Schedule, m.now())
+		item, ok := SelectScheduleItem(candidate.Schedule, now)
 		if !ok {
-			return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: false, Path: path, Candidate: candidate}, nil
+			return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: false, Path: path, Candidate: candidate, Current: m.currentContent(candidate, false, path, now)}, nil
 		}
 		expected = item
 	}
@@ -331,7 +362,59 @@ func (m *MPV) Health(ctx context.Context, candidate Candidate) (Status, error) {
 			healthy = false
 		}
 	}
-	return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: healthy, Path: path, Candidate: candidate}, nil
+	var paused bool
+	if response, err := m.command(ctx, []any{"get_property", "pause"}); err == nil && len(response.Data) > 0 {
+		_ = json.Unmarshal(response.Data, &paused)
+	}
+	return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: healthy, Path: path, Candidate: candidate, Current: m.currentContent(candidate, healthy, path, now, paused)}, nil
+}
+
+func (m *MPV) currentContent(candidate Candidate, healthy bool, path string, now time.Time, paused ...bool) *playerclient.CurrentContent {
+	content := &playerclient.CurrentContent{ReleaseDigest: candidate.ReleaseDigest, PresentationKind: candidate.Kind, State: playerclient.ContentStatePlaying, TransitionedAt: now}
+	if candidate.Kind == release.PresentationMediaSchedule {
+		itemID, _ := m.scheduleState()
+		var item *ScheduleItem
+		for index := range candidate.Schedule {
+			if candidate.Schedule[index].ID == itemID {
+				item = &candidate.Schedule[index]
+				break
+			}
+		}
+		if item == nil {
+			content.State = playerclient.ContentStateOffAir
+			if !healthy {
+				content.State = playerclient.ContentStateStale
+			}
+			return content
+		}
+		content.ItemID, content.AssetID, content.MediaID = item.ID, item.AssetID, item.MediaID
+		start := item.StartsAt.UTC()
+		content.StartedAt = &start
+		m.scheduleMu.Lock()
+		if !m.transitionedAt.IsZero() {
+			content.TransitionedAt = m.transitionedAt
+		}
+		m.scheduleMu.Unlock()
+	} else {
+		content.AssetID, content.MediaID = candidate.AssetID, candidate.MediaID
+		m.scheduleMu.Lock()
+		started, transitioned := m.startedAt, m.transitionedAt
+		m.scheduleMu.Unlock()
+		if !started.IsZero() {
+			started = started.UTC()
+			content.StartedAt = &started
+		}
+		if !transitioned.IsZero() {
+			content.TransitionedAt = transitioned.UTC()
+		}
+	}
+	if !healthy {
+		content.State = playerclient.ContentStateStale
+	} else if len(paused) > 0 && paused[0] {
+		content.State = playerclient.ContentStatePaused
+	}
+	_ = path
+	return content
 }
 
 func (m *MPV) Commit(_ context.Context, candidate Candidate) error {

@@ -124,6 +124,7 @@ type Snapshot struct {
 	CandidateDigest       string
 	HealthyDigest         string
 	LastKnownGoodDigest   string
+	CurrentContent        *playerclient.CurrentContent
 	Safe                  bool
 	ControllerAvailable   bool
 }

@@ -133,11 +133,24 @@ func (s *Service) Report(ctx context.Context, nodeID string, report client.NodeR
 	if err := s.configured(); err != nil {
 		return false, err
 	}
+
 	if report.EventEpoch == "" || report.Sequence <= 0 || report.ObservedGeneration < 0 || report.DesiredGenerationSeen < 0 {
 		return false, fmt.Errorf("%w: invalid report sequence or epoch", ErrInvalidRequest)
 	}
 	if report.PresentationKind != "" && !validPresentationKind(report.PresentationKind) {
 		return false, fmt.Errorf("%w: invalid presentationKind", ErrInvalidRequest)
+	}
+	if content := report.CurrentContent; content != nil {
+		if content.State != client.ContentStatePlaying && content.State != client.ContentStatePaused &&
+			content.State != client.ContentStateOffAir && content.State != client.ContentStateStale {
+			return false, fmt.Errorf("%w: invalid currentContent state", ErrInvalidRequest)
+		}
+		if content.PresentationKind != "" && !validPresentationKind(content.PresentationKind) {
+			return false, fmt.Errorf("%w: invalid currentContent presentationKind", ErrInvalidRequest)
+		}
+		if content.TransitionedAt.IsZero() {
+			return false, fmt.Errorf("%w: currentContent transitionedAt is required", ErrInvalidRequest)
+		}
 	}
 	return s.Repository.RecordReport(ctx, nodeID, report)
 }

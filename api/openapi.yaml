@@ -396,6 +396,154 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Asset"}
         default: {$ref: "#/components/responses/Problem"}
+  /media:
+    get:
+      tags: [operator]
+      operationId: listMedia
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_read]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageSearch"
+        - $ref: "#/components/parameters/PageSort"
+        - $ref: "#/components/parameters/PageOrder"
+        - name: playable
+          in: query
+          schema: {type: boolean, default: true}
+      responses:
+        "200":
+          description: Authored playable media.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MediaPage"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator]
+      operationId: createMedia
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_write]
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MediaInput"}
+      responses:
+        "201":
+          description: Authored media created.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Media"}
+        default: {$ref: "#/components/responses/Problem"}
+  /media/{mediaId}:
+    parameters:
+      - name: mediaId
+        in: path
+        required: true
+        schema: {$ref: "#/components/schemas/Id"}
+    get:
+      tags: [operator]
+      operationId: getMedia
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_read]
+      responses:
+        "200":
+          description: Authored media.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Media"}
+        default: {$ref: "#/components/responses/Problem"}
+    patch:
+      tags: [operator]
+      operationId: updateMedia
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_write]
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MediaPatch"}
+      responses:
+        "200":
+          description: Authored media updated.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Media"}
+        default: {$ref: "#/components/responses/Problem"}
+  /media/{mediaId}/usage:
+    get:
+      tags: [operator]
+      operationId: getMediaUsage
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_read]
+      parameters:
+        - name: mediaId
+          in: path
+          required: true
+          schema: {$ref: "#/components/schemas/Id"}
+      responses:
+        "200":
+          description: Direct authored-media usage summary.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MediaUsage"}
+        default: {$ref: "#/components/responses/Problem"}
+  /media/{mediaId}/content:
+    parameters:
+      - name: mediaId
+        in: path
+        required: true
+        schema: {$ref: "#/components/schemas/Id"}
+    head:
+      tags: [operator]
+      operationId: headMediaContent
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_read]
+      responses:
+        "200":
+          description: Authored-media preview metadata.
+          headers:
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+            Content-Length: {schema: {type: integer, format: int64, minimum: 0}}
+            ETag: {$ref: "#/components/headers/ETag"}
+        default: {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [operator]
+      operationId: getMediaContent
+      security: [{operatorToken: []}]
+      x-required-scopes: [media_read]
+      parameters:
+        - name: Range
+          in: header
+          schema: {type: string}
+        - name: If-Range
+          in: header
+          schema: {type: string}
+      responses:
+        "200":
+          description: Complete authored-media preview bytes.
+          headers:
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "206":
+          description: Partial authored-media preview bytes.
+          headers:
+            Content-Range: {schema: {type: string}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        default: {$ref: "#/components/responses/Problem"}
   /assignments:
     get:
       tags: [operator]
@@ -1951,6 +2099,73 @@ components:
         id: {$ref: "#/components/schemas/Id"}
         name: {type: string}
         artifact: {$ref: "#/components/schemas/Artifact"}
+    MediaPlayback:
+      type: object
+      additionalProperties: false
+      required: [fit, loop, muted, volume, orientation]
+      properties:
+        fit: {type: string, enum: [fit, fill]}
+        loop: {type: boolean}
+        muted: {type: boolean}
+        volume: {type: integer, minimum: 0, maximum: 100}
+        orientation: {type: integer, enum: [0, 90, 180, 270]}
+    MediaInput:
+      type: object
+      additionalProperties: false
+      required: [assetId, title, tags, playback]
+      properties:
+        assetId: {$ref: "#/components/schemas/Id"}
+        title: {type: string, minLength: 1, maxLength: 255}
+        description: {type: string, maxLength: 4096}
+        artist: {type: string, maxLength: 255}
+        tags: {type: array, maxItems: 64, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
+        artworkAssetId: {$ref: "#/components/schemas/Id"}
+        playback: {$ref: "#/components/schemas/MediaPlayback"}
+    MediaPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: {type: string, minLength: 1, maxLength: 255}
+        description: {type: string, maxLength: 4096}
+        artist: {type: string, maxLength: 255}
+        tags: {type: array, maxItems: 64, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
+        artworkAssetId: {$ref: "#/components/schemas/Id"}
+        playback: {$ref: "#/components/schemas/MediaPlayback"}
+    Media:
+      type: object
+      additionalProperties: false
+      required: [id, assetId, title, tags, playback, artifact, version, createdBy, updatedBy, createdAt, updatedAt]
+      properties:
+        id: {$ref: "#/components/schemas/Id"}
+        assetId: {$ref: "#/components/schemas/Id"}
+        title: {type: string}
+        description: {type: string}
+        artist: {type: string}
+        tags: {type: array, items: {type: string}}
+        artworkAssetId: {$ref: "#/components/schemas/Id"}
+        playback: {$ref: "#/components/schemas/MediaPlayback"}
+        artifact: {$ref: "#/components/schemas/Artifact"}
+        version: {type: integer, format: int64, minimum: 1}
+        createdBy: {$ref: "#/components/schemas/Id"}
+        updatedBy: {$ref: "#/components/schemas/Id"}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    MediaUsage:
+      type: object
+      additionalProperties: false
+      required: [mediaId, releaseCount, scheduleCount]
+      properties:
+        mediaId: {$ref: "#/components/schemas/Id"}
+        releaseCount: {type: integer, format: int64, minimum: 0}
+        scheduleCount: {type: integer, format: int64, minimum: 0}
+    MediaPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Media"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
     PlaybackPayload:
       type: object
       required: [assetId, fit, loop, muted, volume, orientation, allowedDeliveryModes]
@@ -2172,6 +2387,24 @@ components:
         freeBytes: {type: integer, format: int64, minimum: 0}
         outputReady: {type: boolean}
         clockReliable: {type: boolean}
+    CurrentContent:
+      type: object
+      additionalProperties: false
+      required: [releaseDigest, presentationKind, state, transitionedAt]
+      properties:
+        releaseDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
+        presentationKind: {type: string, enum: [media, media-schedule, cable]}
+        state: {type: string, enum: [playing, paused, off_air, stale]}
+        channelId: {$ref: "#/components/schemas/Id"}
+        blockId: {$ref: "#/components/schemas/Id"}
+        itemId: {$ref: "#/components/schemas/Id"}
+        mediaId: {$ref: "#/components/schemas/Id"}
+        assetId: {$ref: "#/components/schemas/Id"}
+        startedAt: {type: string, format: date-time}
+        transitionedAt: {type: string, format: date-time}
+        positionMs: {type: integer, format: int64, minimum: 0}
+        width: {type: integer, format: int32, minimum: 1}
+        height: {type: integer, format: int32, minimum: 1}
     NodeReport:
       type: object
       required: [eventEpoch, sequence, desiredGenerationSeen, observedGeneration, presentationKind, conditions]
@@ -2185,6 +2418,7 @@ components:
         candidateReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         healthyReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         lastKnownGoodReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
+        currentContent: {$ref: "#/components/schemas/CurrentContent"}
         conditions: {type: array, items: {$ref: "#/components/schemas/Condition"}}
     Condition:
       type: object

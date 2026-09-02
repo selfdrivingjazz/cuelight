@@ -121,6 +121,7 @@ func (c *Chromium) Prepare(_ context.Context, candidate Candidate) error {
 	if err != nil {
 		return err
 	}
+	candidate.CableOccurrences = cableOccurrences(rawRevision)
 	root, err := os.MkdirTemp(c.RuntimeRoot, "cable-")
 	if err != nil {
 		return fmt.Errorf("create Chromium runtime root: %w", err)
@@ -478,7 +479,6 @@ func (c *Chromium) serveStatic(w http.ResponseWriter, r *http.Request, state *ch
 	}
 	http.ServeContent(w, r, filepath.Base(relative), info.ModTime(), file)
 }
-
 func (c *Chromium) Health(ctx context.Context, candidate Candidate) (Status, error) {
 	c.mu.Lock()
 	state := c.current
@@ -489,7 +489,7 @@ func (c *Chromium) Health(ctx context.Context, candidate Candidate) (Status, err
 	ready := state != nil && state.ready
 	c.mu.Unlock()
 	if state == nil || listener == nil || !ready {
-		return Status{ReleaseDigest: candidate.ReleaseDigest, Candidate: candidate}, nil
+		return Status{ReleaseDigest: candidate.ReleaseDigest, Candidate: candidate, Current: staleContent(candidate)}, nil
 	}
 	if session != nil {
 		alive, err := session.Alive(ctx)
@@ -497,7 +497,7 @@ func (c *Chromium) Health(ctx context.Context, candidate Candidate) (Status, err
 			return Status{}, err
 		}
 		if !alive {
-			return Status{ReleaseDigest: candidate.ReleaseDigest, Path: listener.Addr().String(), Candidate: candidate}, nil
+			return Status{ReleaseDigest: candidate.ReleaseDigest, Path: listener.Addr().String(), Candidate: candidate, Current: staleContent(candidate)}, nil
 		}
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+listener.Addr().String()+state.healthPath, nil)
@@ -509,7 +509,42 @@ func (c *Chromium) Health(ctx context.Context, candidate Candidate) (Status, err
 		return Status{}, err
 	}
 	defer response.Body.Close()
-	return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: response.StatusCode == http.StatusOK, Path: listener.Addr().String(), Candidate: candidate}, nil
+	healthy := response.StatusCode == http.StatusOK
+	current := observedContent(candidate, healthy, time.Now())
+	return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: healthy, Path: listener.Addr().String(), Candidate: candidate, Current: current}, nil
+}
+
+func staleContent(candidate Candidate) *playerclient.CurrentContent {
+	now := time.Now().UTC()
+	return &playerclient.CurrentContent{ReleaseDigest: candidate.ReleaseDigest, PresentationKind: candidate.Kind, State: playerclient.ContentStateStale, TransitionedAt: now}
+}
+
+func observedContent(candidate Candidate, healthy bool, now time.Time) *playerclient.CurrentContent {
+	now = now.UTC()
+	content := &playerclient.CurrentContent{ReleaseDigest: candidate.ReleaseDigest, PresentationKind: candidate.Kind, State: playerclient.ContentStatePlaying, TransitionedAt: now}
+	if !healthy {
+		content.State = playerclient.ContentStateStale
+		return content
+	}
+	if candidate.Kind == release.PresentationCable {
+		for _, occurrence := range candidate.CableOccurrences {
+			if !now.Before(occurrence.StartsAt) && now.Before(occurrence.EndsAt) {
+				start := occurrence.StartsAt.UTC()
+				content.ChannelID, content.BlockID, content.ItemID, content.AssetID = occurrence.ChannelID, occurrence.BlockID, occurrence.ItemID, occurrence.AssetID
+				content.StartedAt, content.TransitionedAt = &start, start
+				return content
+			}
+		}
+		content.State = playerclient.ContentStateOffAir
+		return content
+	}
+	start := now
+	content.StartedAt = &start
+	if candidate.MediaID != "" {
+		content.MediaID = candidate.MediaID
+	}
+	content.AssetID = candidate.AssetID
+	return content
 }
 
 func (c *Chromium) serveReady(w http.ResponseWriter, r *http.Request, state *chromiumState) {
@@ -633,6 +668,7 @@ type revisionBlock struct {
 	AssetID    string    `json:"assetId"`
 	Title      string    `json:"title"`
 }
+
 type revisionProgram struct {
 	ID             string    `json:"id"`
 	BlockID        string    `json:"blockId"`
@@ -641,6 +677,7 @@ type revisionProgram struct {
 	Occurrence     int       `json:"occurrence"`
 	StartsAt       time.Time `json:"startsAt"`
 	EndsAt         time.Time `json:"endsAt"`
+	AssetID        string    `json:"assetId"`
 	ArtifactDigest string    `json:"artifactDigest"`
 	MediaType      string    `json:"mediaType"`
 	Title          string    `json:"title"`
@@ -650,6 +687,24 @@ type revisionProgram struct {
 	Loop           bool      `json:"loop"`
 	Mute           bool      `json:"mute"`
 	Volume         float64   `json:"volume"`
+}
+
+func cableOccurrences(data []byte) []CableOccurrence {
+	var doc revisionDocument
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	var result []CableOccurrence
+	for _, channel := range doc.Channels {
+		for _, program := range channel.Programs {
+			result = append(result, CableOccurrence{
+				ID: program.ID, ChannelID: channel.ID, BlockID: program.BlockID,
+				ItemID: program.ItemID, AssetID: program.AssetID,
+				StartsAt: program.StartsAt, EndsAt: program.EndsAt,
+			})
+		}
+	}
+	return result
 }
 
 func transformRevision(data []byte, candidate Candidate) ([]byte, error) {

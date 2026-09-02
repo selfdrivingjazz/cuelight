@@ -112,10 +112,29 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		MinimumProtocolVersion: config.ProtocolVersion,
 	}
 	playerService, err := playerapi.NewService(repository, repository, store.NewLocalCASReader(cas), playerapi.Limits{MaxBodyBytes: config.MaxBodyBytes, MaxEvents: config.MaxEvents, MaxWait: config.MaxWait})
+	if err != nil {
+		return nil, fmt.Errorf("construct player service: %w", err)
+	}
 
 	remoteService := &remote.Service{Policies: repository, PublicURL: config.PublicURL, TTL: 12 * time.Hour}
 	operatorRepository := store.NewOperatorAdapter(repository)
-	operator := operatorapi.NewHandler(operatorapi.Dependencies{
+	authoredMediaService, err := media.NewAuthoredService(operatorRepository, randomID)
+	if err != nil {
+		return nil, fmt.Errorf("construct authored media service: %w", err)
+	}
+	mediaScopeAuthorizer := operatorapi.ScopeAuthorizer{Scopes: map[string]string{
+		operatorapi.ScopeMediaRead:  operatorapi.ScopeMediaRead,
+		operatorapi.ScopeMediaWrite: operatorapi.ScopeMediaWrite,
+	}}
+	authoredMediaHandler := media.NewOperatorHandler(media.OperatorDependencies{
+		Service: authoredMediaService,
+		Content: media.NewLocalCASContent(cas),
+		Authorize: func(actor auth.Actor, action, resourceType, resourceID string) error {
+			return mediaScopeAuthorizer.Authorize(actor, action, resourceType, resourceID)
+		},
+		MaxJSONBytes: config.MaxBodyBytes,
+	})
+	operatorDependencies := operatorapi.Dependencies{
 		Auth:            authService,
 		PKI:             pkiService,
 		Nodes:           operatorRepository,
@@ -134,7 +153,8 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		MaxJSONBytes:    config.MaxBodyBytes,
 		MaxChunkBytes:   config.MaxChunkBytes,
 		Idempotency:     operatorapi.NewIdempotencyCache(),
-	})
+	}
+	operator := operatorapi.NewHandler(operatorDependencies)
 	api := http.NewServeMux()
 	pkiHandler := newPKIHandler(pkiService, config.MaxBodyBytes)
 	api.Handle("/player/enroll", pkiHandler)
@@ -145,6 +165,8 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	api.Handle("/player/remote-sessions", remoteHandler)
 	api.Handle("/player/remote-sessions/", remoteHandler)
 	api.Handle("/remote/", remoteHandler)
+	api.Handle("/media", operatorDependencies.Middleware(authoredMediaHandler))
+	api.Handle("/media/", operatorDependencies.Middleware(authoredMediaHandler))
 	playerHandler := playerapi.NewHandler(playerService)
 	api.Handle("/player/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerHandler.ServeHTTP(w, r)

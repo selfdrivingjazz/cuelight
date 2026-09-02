@@ -30,6 +30,8 @@ var (
 	ErrTerminal            = errors.New("screenshot job is terminal")
 	ErrNotClaimed          = errors.New("screenshot job is not claimed")
 	ErrIdempotencyConflict = errors.New("idempotency key was already used with a different request")
+	ErrArtifactUnavailable = errors.New("preview result artifact is unavailable")
+	ErrArtifactMismatch    = errors.New("preview result artifact metadata does not match")
 )
 
 // ExpectedPreview is a deterministic, explicitly expected (not observed)
@@ -217,6 +219,19 @@ type Completion struct {
 	MediaType      string `json:"mediaType,omitempty"`
 	ErrorReason    string `json:"errorReason,omitempty"`
 }
+
+// ArtifactRecord is the immutable catalog metadata for a result object. A
+// screenshot completion is accepted only when the catalog confirms this exact
+// digest and media type is currently ready.
+type ArtifactRecord struct {
+	Digest    string
+	MediaType string
+	State     string
+}
+
+type ArtifactCatalog interface {
+	LookupArtifact(context.Context, string) (ArtifactRecord, error)
+}
 type CreateResult struct {
 	Job      ScreenshotJob
 	Replayed bool
@@ -263,6 +278,7 @@ type Config struct{ DefaultTTL, MaxTTL, RetentionTTL, ArtifactRetentionTTL time.
 type Service struct {
 	Repository Repository
 	Authorizer Authorizer
+	Artifacts  ArtifactCatalog
 	Clock      Clock
 	IDs        IDGenerator
 	Config     Config
@@ -379,6 +395,18 @@ func (s Service) Complete(ctx context.Context, nodeID, id string, completion Com
 	}
 	if err := validateCompletion(completion); err != nil {
 		return ScreenshotJob{}, err
+	}
+	if completion.Status == StatusCompleted {
+		if s.Artifacts == nil {
+			return ScreenshotJob{}, fmt.Errorf("%w: artifact catalog is not configured", ErrArtifactUnavailable)
+		}
+		artifact, err := s.Artifacts.LookupArtifact(ctx, completion.ArtifactDigest)
+		if err != nil {
+			return ScreenshotJob{}, fmt.Errorf("%w: %v", ErrArtifactUnavailable, err)
+		}
+		if artifact.Digest != completion.ArtifactDigest || artifact.MediaType != completion.MediaType || !strings.EqualFold(artifact.State, "ready") {
+			return ScreenshotJob{}, fmt.Errorf("%w: digest %s", ErrArtifactMismatch, completion.ArtifactDigest)
+		}
 	}
 	now := s.now()
 	action := "screenshot." + string(completion.Status)

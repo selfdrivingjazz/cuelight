@@ -292,6 +292,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMedia"];
+        put?: never;
+        post: operations["createMedia"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/{mediaId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateMedia"];
+        trace?: never;
+    };
+    "/media/{mediaId}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getMediaUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/media/{mediaId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getMediaContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head: operations["headMediaContent"];
+        patch?: never;
+        trace?: never;
+    };
     "/assignments": {
         parameters: {
             query?: never;
@@ -1368,6 +1436,62 @@ export interface components {
             name: string;
             artifact: components["schemas"]["Artifact"];
         };
+        MediaPlayback: {
+            /** @enum {string} */
+            fit: "fit" | "fill";
+            loop: boolean;
+            muted: boolean;
+            volume: number;
+            /** @enum {integer} */
+            orientation: 0 | 90 | 180 | 270;
+        };
+        MediaInput: {
+            assetId: components["schemas"]["Id"];
+            title: string;
+            description?: string;
+            artist?: string;
+            tags: string[];
+            artworkAssetId?: components["schemas"]["Id"];
+            playback: components["schemas"]["MediaPlayback"];
+        };
+        MediaPatch: {
+            title?: string;
+            description?: string;
+            artist?: string;
+            tags?: string[];
+            artworkAssetId?: components["schemas"]["Id"];
+            playback?: components["schemas"]["MediaPlayback"];
+        };
+        Media: {
+            id: components["schemas"]["Id"];
+            assetId: components["schemas"]["Id"];
+            title: string;
+            description?: string;
+            artist?: string;
+            tags: string[];
+            artworkAssetId?: components["schemas"]["Id"];
+            playback: components["schemas"]["MediaPlayback"];
+            artifact: components["schemas"]["Artifact"];
+            /** Format: int64 */
+            version: number;
+            createdBy: components["schemas"]["Id"];
+            updatedBy: components["schemas"]["Id"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        MediaUsage: {
+            mediaId: components["schemas"]["Id"];
+            /** Format: int64 */
+            releaseCount: number;
+            /** Format: int64 */
+            scheduleCount: number;
+        };
+        MediaPage: {
+            items: components["schemas"]["Media"][];
+            page: components["schemas"]["PageInfo"];
+        };
         PlaybackPayload: {
             assetId: components["schemas"]["Id"];
             /** @enum {string} */
@@ -1539,6 +1663,28 @@ export interface components {
             outputReady?: boolean;
             clockReliable?: boolean;
         };
+        CurrentContent: {
+            releaseDigest: string;
+            /** @enum {string} */
+            presentationKind: "media" | "media-schedule" | "cable";
+            /** @enum {string} */
+            state: "playing" | "paused" | "off_air" | "stale";
+            channelId?: components["schemas"]["Id"];
+            blockId?: components["schemas"]["Id"];
+            itemId?: components["schemas"]["Id"];
+            mediaId?: components["schemas"]["Id"];
+            assetId?: components["schemas"]["Id"];
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            transitionedAt: string;
+            /** Format: int64 */
+            positionMs?: number;
+            /** Format: int32 */
+            width?: number;
+            /** Format: int32 */
+            height?: number;
+        };
         NodeReport: {
             /** Format: uuid */
             eventEpoch: string;
@@ -1554,6 +1700,7 @@ export interface components {
             candidateReleaseDigest?: string | null;
             healthyReleaseDigest?: string | null;
             lastKnownGoodReleaseDigest?: string | null;
+            currentContent?: components["schemas"]["CurrentContent"];
             conditions: components["schemas"]["Condition"][];
         };
         Condition: {
@@ -2198,6 +2345,204 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Asset"];
                 };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listMedia: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+                search?: components["parameters"]["PageSearch"];
+                sort?: components["parameters"]["PageSort"];
+                order?: components["parameters"]["PageOrder"];
+                playable?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authored playable media. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createMedia: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaInput"];
+            };
+        };
+        responses: {
+            /** @description Authored media created. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Media"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authored media. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Media"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateMedia: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaPatch"];
+            };
+        };
+        responses: {
+            /** @description Authored media updated. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Media"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getMediaUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Direct authored-media usage summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUsage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getMediaContent: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+                "If-Range"?: string;
+            };
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete authored-media preview bytes. */
+            200: {
+                headers: {
+                    "Accept-Ranges"?: "bytes";
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Partial authored-media preview bytes. */
+            206: {
+                headers: {
+                    "Content-Range"?: string;
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    headMediaContent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authored-media preview metadata. */
+            200: {
+                headers: {
+                    "Accept-Ranges"?: "bytes";
+                    "Content-Length"?: number;
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Problem"];
         };

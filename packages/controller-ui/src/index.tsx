@@ -49,3 +49,381 @@ export function MobileSidebar({ items, currentPath, linkComponent: LinkComponent
 }
 
 export function MobileNav({ children }: { children: React.ReactNode }) { return <Dialog.Root><Dialog.Trigger asChild><Button variant="secondary" size="sm" className="md:hidden">Menu</Button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-overlay" /><Dialog.Content className="fixed inset-y-0 left-0 z-50 w-72 bg-sidebar p-5 text-sidebar-foreground shadow-xl"><Dialog.Title className="sr-only">Navigation</Dialog.Title>{children}<Dialog.Close asChild><Button variant="secondary" className="mt-6 w-full">Close</Button></Dialog.Close></Dialog.Content></Dialog.Portal></Dialog.Root>; }
+
+export interface PixelDimensions {
+  width: number;
+  height: number;
+}
+
+function formatPixels(dimensions: PixelDimensions): string | null {
+  if (!Number.isFinite(dimensions.width) || !Number.isFinite(dimensions.height) || dimensions.width <= 0 || dimensions.height <= 0) return null;
+  return `${Math.round(dimensions.width).toLocaleString()} × ${Math.round(dimensions.height).toLocaleString()} px`;
+}
+
+export function humanizeStatus(status: string): string {
+  const words = status
+    .trim()
+    .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase();
+  return words ? `${words.charAt(0).toLocaleUpperCase()}${words.slice(1)}` : "Unknown";
+}
+
+function inferStatusTone(status: string): StatusTone {
+  const normalized = humanizeStatus(status).toLocaleLowerCase();
+  if (/\b(error|errored|failed|failure|offline|disconnected|unhealthy|invalid|blocked)\b/.test(normalized)) return "danger";
+  if (/\b(warning|degraded|stale|pending|buffering|retrying|paused|not ready)\b/.test(normalized)) return "warning";
+  if (/\b(online|playing|ready|healthy|complete|completed|active|connected|synced)\b/.test(normalized)) return "success";
+  if (/\b(loading|starting|processing|syncing)\b/.test(normalized)) return "info";
+  return "neutral";
+}
+
+const statusDotStyles: Record<StatusTone, string> = {
+  success: "bg-status-success",
+  warning: "bg-status-warning",
+  danger: "bg-status-danger",
+  neutral: "bg-muted-foreground",
+  info: "bg-status-info",
+};
+
+export interface StatusSummaryProps {
+  status: string;
+  label?: string;
+  detail?: React.ReactNode;
+  tone?: StatusTone;
+  className?: string;
+  ariaLive?: "off" | "polite" | "assertive";
+}
+
+export function StatusSummary({ status, label, detail, tone = inferStatusTone(status), className, ariaLive = "off" }: StatusSummaryProps) {
+  return <span className={cn("inline-flex min-w-0 items-center gap-2 text-sm", className)} aria-live={ariaLive}>
+    <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-full", statusDotStyles[tone])} />
+    <span className="font-medium text-foreground">{label ?? humanizeStatus(status)}</span>
+    {detail && <span className="truncate text-muted-foreground">{detail}</span>}
+  </span>;
+}
+
+export type PreviewMedia =
+  | {
+      kind: "image";
+      src: string;
+      alt: string;
+      srcSet?: string;
+      sizes?: string;
+      loading?: "eager" | "lazy";
+      onLoad?: () => void;
+      onError?: (event: React.SyntheticEvent<HTMLImageElement>) => void;
+    }
+  | {
+      kind: "video";
+      src: string;
+      label: string;
+      poster?: string;
+      muted?: boolean;
+      loop?: boolean;
+      autoPlay?: boolean;
+      controls?: boolean;
+      onLoad?: () => void;
+      onError?: (event: React.SyntheticEvent<HTMLVideoElement>) => void;
+    };
+
+export interface PreviewSurfaceProps {
+  media?: PreviewMedia;
+  state?: "ready" | "loading" | "empty" | "error";
+  aspectRatio?: React.CSSProperties["aspectRatio"];
+  fit?: "contain" | "cover";
+  className?: string;
+  style?: React.CSSProperties;
+  id?: string;
+  "aria-label"?: string;
+  loadingLabel?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  errorTitle?: string;
+  errorDescription?: string;
+  onRetry?: () => void;
+  overlay?: React.ReactNode;
+}
+
+type ObservedPreviewState = { source: string; state: "loading" | "ready" | "error" };
+
+export function PreviewSurface({
+  media,
+  state: requestedState,
+  aspectRatio = "16 / 9",
+  fit = "contain",
+  className,
+  style,
+  id,
+  "aria-label": ariaLabel,
+  loadingLabel = "Loading preview…",
+  emptyTitle = "No preview",
+  emptyDescription = "A preview is not available for this item.",
+  errorTitle = "Preview unavailable",
+  errorDescription = "The preview could not be loaded.",
+  onRetry,
+  overlay,
+}: PreviewSurfaceProps) {
+  const source = media ? `${media.kind}:${media.src}` : "";
+  const [observed, setObserved] = React.useState<ObservedPreviewState>({ source, state: media ? "loading" : "ready" });
+  const [attempt, setAttempt] = React.useState(0);
+  const observedState = observed.source === source ? observed.state : "loading";
+  const state = requestedState && requestedState !== "ready" ? requestedState : media ? observedState : "empty";
+  const fitClass = fit === "cover" ? "object-cover" : "object-contain";
+  const shouldLoadMedia = Boolean(media) && (requestedState === undefined || requestedState === "ready");
+
+  let mediaContent: React.ReactNode;
+  if (shouldLoadMedia && media?.kind === "image") {
+    mediaContent = <img
+      key={`${source}:${attempt}`}
+      src={media.src}
+      srcSet={media.srcSet}
+      sizes={media.sizes}
+      alt={media.alt}
+      loading={media.loading ?? "lazy"}
+      decoding="async"
+      className={cn("absolute inset-0 h-full w-full", fitClass)}
+      onLoad={() => {
+        setObserved({ source, state: "ready" });
+        media.onLoad?.();
+      }}
+      onError={(event) => {
+        setObserved({ source, state: "error" });
+        media.onError?.(event);
+      }}
+    />;
+  } else if (shouldLoadMedia && media?.kind === "video") {
+    mediaContent = <video
+      key={`${source}:${attempt}`}
+      src={media.src}
+      aria-label={media.label}
+      poster={media.poster}
+      controls={media.controls ?? true}
+      muted={media.autoPlay ? true : media.muted}
+      loop={media.loop}
+      autoPlay={media.autoPlay}
+      playsInline
+      preload="metadata"
+      className={cn("absolute inset-0 h-full w-full", fitClass)}
+      onLoadedData={() => {
+        setObserved({ source, state: "ready" });
+        media.onLoad?.();
+      }}
+      onError={(event) => {
+        setObserved({ source, state: "error" });
+        media.onError?.(event);
+      }}
+    />;
+  }
+
+  let stateContent: React.ReactNode;
+  if (state === "loading") {
+    stateContent = <div role="status" className="absolute inset-0 flex items-center justify-center bg-muted p-6 text-center text-sm text-muted-foreground">
+      <span className="animate-pulse">{loadingLabel}</span>
+    </div>;
+  } else if (state === "error") {
+    stateContent = <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted p-6 text-center">
+      <p className="text-sm font-medium text-foreground">{errorTitle}</p>
+      <p className="max-w-md text-xs text-muted-foreground">{errorDescription}</p>
+      {onRetry && <Button type="button" variant="secondary" size="sm" onClick={() => {
+        setObserved({ source, state: "loading" });
+        setAttempt((current) => current + 1);
+        onRetry();
+      }}>Try again</Button>}
+    </div>;
+  } else if (state === "empty") {
+    stateContent = <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-muted/50 p-6 text-center">
+      <p className="text-sm font-medium text-foreground">{emptyTitle}</p>
+      <p className="max-w-md text-xs text-muted-foreground">{emptyDescription}</p>
+    </div>;
+  }
+
+  return <div
+    id={id}
+    role={ariaLabel ? "group" : undefined}
+    aria-label={ariaLabel}
+    aria-busy={state === "loading" || undefined}
+    className={cn("relative isolate w-full overflow-hidden rounded-md border border-border bg-muted/50", className)}
+    style={{ ...style, aspectRatio }}
+  >
+    {mediaContent}
+    {stateContent}
+    {state === "ready" && overlay && <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-card/95 p-3 text-sm text-card-foreground">{overlay}</div>}
+  </div>;
+}
+
+const mosaicColumns = {
+  2: "sm:grid-cols-2",
+  3: "sm:grid-cols-2 lg:grid-cols-3",
+  4: "sm:grid-cols-2 lg:grid-cols-4",
+} as const;
+
+export interface PreviewMosaicProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "children"> {
+  children: React.ReactNode;
+  label: string;
+  columns?: keyof typeof mosaicColumns;
+}
+
+export function PreviewMosaic({ children, label, columns = 3, className, ...props }: PreviewMosaicProps) {
+  return <div role="list" aria-label={label} className={cn("grid grid-cols-1 gap-3", mosaicColumns[columns], className)} {...props}>
+    {React.Children.map(children, (child) => <div role="listitem" className="min-w-0">{child}</div>)}
+  </div>;
+}
+
+export interface MediaCardProps extends Omit<React.HTMLAttributes<HTMLElement>, "title"> {
+  title: string;
+  description?: string;
+  artist?: string;
+  preview: React.ReactNode;
+  dimensions?: PixelDimensions;
+  metadata?: React.ReactNode;
+  status?: string;
+  statusLabel?: string;
+  statusTone?: StatusTone;
+  titleHref?: string;
+  linkComponent?: NavigationLink;
+  actions?: React.ReactNode;
+}
+
+export function MediaCard({
+  title,
+  description,
+  artist,
+  preview,
+  dimensions,
+  metadata,
+  status,
+  statusLabel,
+  statusTone,
+  titleHref,
+  linkComponent: LinkComponent = AnchorLink,
+  actions,
+  className,
+  ...props
+}: MediaCardProps) {
+  const pixels = dimensions ? formatPixels(dimensions) : null;
+  return <article className={cn("overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm", className)} {...props}>
+    {preview}
+    <div className="space-y-3 p-4">
+      <div className="min-w-0">
+        <h3 className="truncate text-base font-semibold tracking-tight">
+          {titleHref ? <LinkComponent className="rounded-sm hover:text-primary hover:underline" to={titleHref}>{title}</LinkComponent> : title}
+        </h3>
+        {artist && <p className="mt-1 truncate text-sm text-muted-foreground">{artist}</p>}
+        {description && <p className="mt-2 text-sm text-muted-foreground">{description}</p>}
+      </div>
+      {(pixels || metadata || status) && <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+        {pixels && <span className="tabular-nums">{pixels}</span>}
+        {metadata}
+        {status && <StatusSummary className="text-xs" status={status} label={statusLabel} tone={statusTone} />}
+      </div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3" aria-label={`${title} actions`}>{actions}</div>}
+    </div>
+  </article>;
+}
+
+function formatPlaybackTime(milliseconds: number): string {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "0:00";
+  const totalSeconds = Math.floor(milliseconds / 1_000);
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}` : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+export interface NowPlayingCardProps extends Omit<React.HTMLAttributes<HTMLElement>, "title"> {
+  title: string;
+  subtitle?: string;
+  preview?: React.ReactNode;
+  status: string;
+  statusLabel?: string;
+  statusTone?: StatusTone;
+  dimensions?: PixelDimensions;
+  positionMs?: number;
+  durationMs?: number;
+  startedAt?: string;
+  details?: React.ReactNode;
+  actions?: React.ReactNode;
+}
+
+export function NowPlayingCard({
+  title,
+  subtitle,
+  preview,
+  status,
+  statusLabel,
+  statusTone,
+  dimensions,
+  positionMs,
+  durationMs,
+  startedAt,
+  details,
+  actions,
+  className,
+  ...props
+}: NowPlayingCardProps) {
+  const hasProgress = Number.isFinite(positionMs) && Number.isFinite(durationMs) && (durationMs ?? 0) > 0;
+  const progress = hasProgress ? Math.min(Math.max(positionMs ?? 0, 0), durationMs ?? 0) : 0;
+  const pixels = dimensions ? formatPixels(dimensions) : null;
+  const started = startedAt ? new Date(startedAt) : null;
+  const startedLabel = started && !Number.isNaN(started.valueOf())
+    ? started.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : null;
+
+  return <article className={cn("rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm", className)} {...props}>
+    <div className={cn("grid gap-4", preview && "sm:grid-cols-3")}>
+      {preview && <div className="min-w-0">{preview}</div>}
+      <div className={cn("min-w-0 space-y-3", preview && "sm:col-span-2")}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Now playing</p>
+            <h2 className="mt-1 truncate text-xl font-semibold tracking-tight">{title}</h2>
+            {subtitle && <p className="mt-1 truncate text-sm text-muted-foreground">{subtitle}</p>}
+          </div>
+          <StatusSummary className="shrink-0" status={status} label={statusLabel} tone={statusTone} ariaLive="polite" />
+        </div>
+        {(pixels || startedLabel) && <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          {pixels && <span className="tabular-nums">{pixels}</span>}
+          {startedLabel && <time dateTime={startedAt}>Started {startedLabel}</time>}
+        </div>}
+        {hasProgress && <div className="space-y-1">
+          <progress className="h-2 w-full accent-primary" max={durationMs} value={progress} aria-label="Playback position" />
+          <div className="flex justify-between text-xs tabular-nums text-muted-foreground">
+            <span>{formatPlaybackTime(progress)}</span>
+            <span>{formatPlaybackTime(durationMs ?? 0)}</span>
+          </div>
+        </div>}
+        {details}
+        {actions && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3" aria-label={`${title} actions`}>{actions}</div>}
+      </div>
+    </div>
+  </article>;
+}
+
+export interface TechnicalDetail {
+  label: React.ReactNode;
+  value: React.ReactNode;
+}
+
+export interface TechnicalDetailsProps extends React.DetailsHTMLAttributes<HTMLDetailsElement> {
+  summary?: React.ReactNode;
+  items?: readonly TechnicalDetail[];
+}
+
+export function TechnicalDetails({ summary = "Technical details", items, children, className, ...props }: TechnicalDetailsProps) {
+  return <details className={cn("group rounded-md border border-border bg-muted/30 text-sm", className)} {...props}>
+    <summary className="cursor-pointer select-none rounded-md px-4 py-3 font-medium text-foreground marker:text-muted-foreground hover:bg-muted/60">
+      {summary}
+    </summary>
+    <div className="border-t border-border px-4 py-3">
+      {items?.length ? <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        {items.map((item, index) => <div className="min-w-0" key={index}>
+          <dt className="text-xs text-muted-foreground">{item.label}</dt>
+          <dd className="mt-1 break-words text-foreground">{item.value}</dd>
+        </div>)}
+      </dl> : null}
+      {children && <div className={cn(items?.length && "mt-4")}>{children}</div>}
+    </div>
+  </details>;
+}

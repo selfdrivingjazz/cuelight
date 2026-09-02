@@ -183,7 +183,7 @@ func (a ScopeAuthorizer) Authorize(actor auth.Actor, action, resourceType, resou
 		return ErrInvalidRequest
 	}
 	switch resourceType {
-	case "node", "upload", "asset", "release", "token", "enrollment-token", "operator", "assignment", "assignments", "cable", "deployment", "channel", "program", "shell_build", "revision":
+	case "node", "upload", "asset", "media", "release", "token", "enrollment-token", "operator", "assignment", "assignments", "cable", "deployment", "channel", "program", "shell_build", "revision":
 	default:
 		return fmt.Errorf("%w: unknown resource %q", ErrForbidden, resourceType)
 	}
