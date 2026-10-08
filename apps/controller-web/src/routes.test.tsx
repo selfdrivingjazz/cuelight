@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fixturePage, nodeFixtures } from "@cable/api-client";
-import type { NodeSearch } from "./routes";
-import { disposeNodeCapture, requestNodeScreenshot, ScreenshotLifecycleError } from "./routes";
+import type { NodeSearch } from "./kit";
+import { disposeNodeCapture, requestNodeScreenshot, ScreenshotLifecycleError } from "./screens";
 
 describe("controller route fixtures", () => {
   it("keeps node list state in bounded, typed search parameters", () => {

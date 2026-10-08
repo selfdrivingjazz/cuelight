@@ -5,10 +5,12 @@ import (
 	"errors"
 	"io"
 	"mime"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/jmill/cable/internal/control/page"
+	canonical "github.com/jmill/cable/internal/release"
 )
 
 var (
@@ -16,6 +18,19 @@ var (
 	ErrUnauthorized        = errors.New("operator authentication required")
 	ErrForbidden           = errors.New("operator scope is insufficient")
 	ErrPrecondition        = errors.New("If-Match precondition failed")
+	// ErrManaged rejects operator edits of Cable items, which follow their deployment.
+	ErrManaged = errors.New("cable items are managed by their deployment")
+	// ErrWrongKind rejects operations that only apply to the other media kind.
+	ErrWrongKind = errors.New("operation does not apply to this media kind")
+	// ErrCaptureDisabled reports that no server-side web capture is configured.
+	ErrCaptureDisabled = errors.New("server-side web capture is not configured")
+	// ErrInUse rejects deleting media that a playlist still references.
+	ErrInUse = errors.New("media is used by a playlist")
+)
+
+const (
+	KindFile = "file"
+	KindWeb  = "web"
 )
 
 // Playback describes presentation controls for an authored media record. Asset
@@ -28,25 +43,39 @@ type Playback struct {
 	Orientation int    `json:"orientation"`
 }
 
+// Media is one library item. File media wrap an uploaded asset; web media
+// show a live page by URL, or for Cable items the deployment's hosted guide.
 type Media struct {
-	ID             string    `json:"id"`
-	AssetID        string    `json:"assetId"`
-	Title          string    `json:"title"`
-	Description    string    `json:"description,omitempty"`
-	Artist         string    `json:"artist,omitempty"`
-	Tags           []string  `json:"tags"`
-	ArtworkAssetID string    `json:"artworkAssetId,omitempty"`
-	Playback       Playback  `json:"playback"`
-	Artifact       Artifact  `json:"artifact"`
-	Version        int64     `json:"version"`
-	CreatedBy      string    `json:"createdBy"`
-	UpdatedBy      string    `json:"updatedBy"`
+	ID             string   `json:"id"`
+	Kind           string   `json:"kind"`
+	AssetID        string   `json:"assetId,omitempty"`
+	URL            string   `json:"url,omitempty"`
+	DeploymentID   string   `json:"deploymentId,omitempty"`
+	FaviconURL     string   `json:"faviconUrl,omitempty"`
+	Title          string   `json:"title"`
+	Description    string   `json:"description,omitempty"`
+	Artist         string   `json:"artist,omitempty"`
+	Tags           []string `json:"tags"`
+	ArtworkAssetID string   `json:"artworkAssetId,omitempty"`
+	Playback       Playback `json:"playback,omitzero"`
+	Artifact       Artifact `json:"artifact,omitzero"`
+	Version        int64    `json:"version"`
+	CreatedBy      string   `json:"createdBy"`
+	UpdatedBy      string   `json:"updatedBy"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+	Thumbnail      *Thumbnail `json:"thumbnail,omitempty"`
+	// ThumbnailError and ThumbnailAttemptedAt describe the last web capture.
+	ThumbnailError       string     `json:"thumbnailError,omitempty"`
+	ThumbnailAttemptedAt *time.Time `json:"thumbnailAttemptedAt,omitempty"`
 }
 
+// MediaInput creates file media (Kind "" or "file", AssetID) or web media
+// (Kind "web", URL; Title defaults to the URL).
 type MediaInput struct {
-	AssetID        string   `json:"assetId"`
+	Kind           string   `json:"kind,omitempty"`
+	AssetID        string   `json:"assetId,omitempty"`
+	URL            string   `json:"url,omitempty"`
 	Title          string   `json:"title"`
 	Description    string   `json:"description,omitempty"`
 	Artist         string   `json:"artist,omitempty"`
@@ -67,7 +96,9 @@ type MediaPatch struct {
 type MediaListFilter struct {
 	Playable *bool
 	AssetIDs []string
-	Kind     string
+	// Kind is file or web; MediaType narrows file media to image, video, or audio.
+	Kind      string
+	MediaType string
 }
 type MediaUsage struct {
 	MediaID       string `json:"mediaId"`
@@ -77,10 +108,22 @@ type MediaUsage struct {
 
 type MediaRepository interface {
 	CreateMedia(context.Context, Mutation, Media) (Media, error)
+	// CreateWebMedia inserts a web item or returns the existing item for the
+	// URL with created=false.
+	CreateWebMedia(context.Context, Mutation, Media) (Media, bool, error)
 	ListMedia(context.Context, page.PageRequest, MediaListFilter) (page.Response[Media], error)
 	GetMedia(context.Context, string) (Media, error)
 	UpdateMedia(context.Context, Mutation, string, int64, MediaPatch) (Media, error)
+	// DeleteWebMedia removes an operator-added web item.
+	DeleteWebMedia(context.Context, string) error
 	GetMediaUsage(context.Context, string) (MediaUsage, error)
+}
+
+// WebCapture renders web media thumbnails. Capture runs in the background;
+// Refresh captures synchronously.
+type WebCapture interface {
+	Capture(id, url string)
+	Refresh(ctx context.Context, id string) error
 }
 
 type ContentObject struct {
@@ -103,6 +146,21 @@ type ContentHandle interface {
 type AuthoredService struct {
 	Repository MediaRepository
 	NewID      IDGenerator
+	// CableOrigin is the public control-plane origin used to resolve Cable
+	// item URLs; empty leaves them unresolved.
+	CableOrigin string
+}
+
+// CableURL is the hosted guide address of a deployment's Cable item.
+func CableURL(origin, deploymentID string) string {
+	return strings.TrimRight(origin, "/") + "/cable/?deployment=" + url.QueryEscape(deploymentID)
+}
+
+func (s *AuthoredService) resolve(value Media) Media {
+	if value.DeploymentID != "" && s.CableOrigin != "" {
+		value.URL = CableURL(s.CableOrigin, value.DeploymentID)
+	}
+	return value
 }
 
 func NewAuthoredService(repository MediaRepository, newID IDGenerator) (*AuthoredService, error) {
@@ -116,6 +174,9 @@ func (s *AuthoredService) Create(ctx context.Context, mutation Mutation, input M
 	if err := validateMutation(mutation, true); err != nil {
 		return Media{}, err
 	}
+	if input.Kind != "" && input.Kind != KindFile {
+		return Media{}, &ValidationError{Field: "kind", Reason: "must be file; web media are created with CreateWeb"}
+	}
 	if err := validateMediaInput(input); err != nil {
 		return Media{}, err
 	}
@@ -123,18 +184,83 @@ func (s *AuthoredService) Create(ctx context.Context, mutation Mutation, input M
 	if id == "" {
 		return Media{}, errors.New("media ID generator returned an empty ID")
 	}
-	return s.Repository.CreateMedia(ctx, mutation, Media{ID: id, AssetID: strings.TrimSpace(input.AssetID), Title: strings.TrimSpace(input.Title), Description: strings.TrimSpace(input.Description), Artist: strings.TrimSpace(input.Artist), Tags: normalizedTags(input.Tags), ArtworkAssetID: strings.TrimSpace(input.ArtworkAssetID), Playback: input.Playback, Version: 1, CreatedBy: mutation.ActorID, UpdatedBy: mutation.ActorID})
+	return s.Repository.CreateMedia(ctx, mutation, Media{ID: id, Kind: KindFile, AssetID: strings.TrimSpace(input.AssetID), Title: strings.TrimSpace(input.Title), Description: strings.TrimSpace(input.Description), Artist: strings.TrimSpace(input.Artist), Tags: normalizedTags(input.Tags), ArtworkAssetID: strings.TrimSpace(input.ArtworkAssetID), Playback: input.Playback, Version: 1, CreatedBy: mutation.ActorID, UpdatedBy: mutation.ActorID})
+}
+
+// CreateWeb adds a web page to the library. Adding a URL that is already in
+// the library returns the existing item with created=false.
+func (s *AuthoredService) CreateWeb(ctx context.Context, mutation Mutation, input MediaInput) (Media, bool, error) {
+	if err := validateMutation(mutation, false); err != nil {
+		return Media{}, false, err
+	}
+	url := strings.TrimSpace(input.URL)
+	if err := canonical.ValidateWebURL(url); err != nil {
+		return Media{}, false, &ValidationError{Field: "url", Reason: err.Error()}
+	}
+	if strings.TrimSpace(input.AssetID) != "" {
+		return Media{}, false, &ValidationError{Field: "assetId", Reason: "web media do not reference an asset"}
+	}
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		title = truncateText(url, 255)
+	}
+	if err := validateText("title", title, 255); err != nil {
+		return Media{}, false, err
+	}
+	if len([]byte(input.Description)) > 4096 {
+		return Media{}, false, &ValidationError{Field: "description", Reason: "exceeds 4096 bytes"}
+	}
+	if err := validateTags(input.Tags); err != nil {
+		return Media{}, false, err
+	}
+	id := strings.TrimSpace(s.NewID())
+	if id == "" {
+		return Media{}, false, errors.New("media ID generator returned an empty ID")
+	}
+	return s.Repository.CreateWebMedia(ctx, mutation, Media{ID: id, Kind: KindWeb, URL: url, Title: title, Description: strings.TrimSpace(input.Description), Tags: normalizedTags(input.Tags), Version: 1, CreatedBy: mutation.ActorID, UpdatedBy: mutation.ActorID})
+}
+
+// DeleteWeb removes an operator-added web item; file media and Cable items
+// cannot be deleted here.
+func (s *AuthoredService) DeleteWeb(ctx context.Context, id string) error {
+	current, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current.DeploymentID != "" {
+		return ErrManaged
+	}
+	if current.Kind != KindWeb {
+		return ErrWrongKind
+	}
+	return s.Repository.DeleteWebMedia(ctx, current.ID)
+}
+
+func truncateText(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	for len(string(runes)) > limit {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes)
 }
 
 func (s *AuthoredService) List(ctx context.Context, request page.PageRequest, filter MediaListFilter) (page.Response[Media], error) {
-	return s.Repository.ListMedia(ctx, request, filter)
+	result, err := s.Repository.ListMedia(ctx, request, filter)
+	for index := range result.Items {
+		result.Items[index] = s.resolve(result.Items[index])
+	}
+	return result, err
 }
 
 func (s *AuthoredService) Get(ctx context.Context, id string) (Media, error) {
 	if strings.TrimSpace(id) == "" {
 		return Media{}, &ValidationError{Field: "mediaId", Reason: "is required"}
 	}
-	return s.Repository.GetMedia(ctx, strings.TrimSpace(id))
+	value, err := s.Repository.GetMedia(ctx, strings.TrimSpace(id))
+	return s.resolve(value), err
 }
 
 func (s *AuthoredService) Update(ctx context.Context, mutation Mutation, id string, expectedVersion int64, patch MediaPatch) (Media, error) {

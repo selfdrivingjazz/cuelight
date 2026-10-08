@@ -11,10 +11,16 @@ import (
 	"github.com/jmill/cable/internal/protocol"
 )
 
-func NewHandler(service *Service) http.Handler {
+// Identity resolves the requesting node. Nil uses the mTLS node identity.
+type Identity func(*http.Request) (string, error)
+
+func NewHandler(service *Service, identity Identity) http.Handler {
+	if identity == nil {
+		identity = func(r *http.Request) (string, error) { return protocol.NodeIdentity(r, nil) }
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /player/remote-sessions", func(w http.ResponseWriter, r *http.Request) {
-		nodeID, err := protocol.NodeIdentity(r, nil)
+		nodeID, err := identity(r)
 		if err != nil {
 			writeProblem(w, http.StatusUnauthorized, err)
 			return
@@ -34,7 +40,7 @@ func NewHandler(service *Service) http.Handler {
 		writeJSON(w, http.StatusCreated, created)
 	})
 	mux.HandleFunc("GET /player/remote-sessions/{sessionId}/events", func(w http.ResponseWriter, r *http.Request) {
-		nodeID, err := protocol.NodeIdentity(r, nil)
+		nodeID, err := identity(r)
 		if err != nil {
 			writeProblem(w, http.StatusUnauthorized, err)
 			return
@@ -98,7 +104,7 @@ func writeRemoteError(w http.ResponseWriter, err error) {
 		status = http.StatusUnauthorized
 	case errors.Is(err, ErrExpired), errors.Is(err, ErrSessionMissing):
 		status = http.StatusGone
-	case errors.Is(err, ErrInvalid), errors.Is(err, ErrReplay):
+	case errors.Is(err, ErrInvalid):
 		status = http.StatusBadRequest
 	case errors.Is(err, ErrDisabled):
 		status = http.StatusForbidden

@@ -111,37 +111,37 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 			return fmt.Errorf("create Chromium runtime root: %w", err)
 		}
 	}
-	var mediaRenderer, cableRenderer renderer.Adapter
+	var mediaRenderer, webRenderer renderer.Adapter
 	if config.RendererMode == "desktop" {
 		launcher, err := renderer.NewHTTPBrowserLauncher(config.DesktopRendererURL, config.DesktopRendererToken, &http.Client{Timeout: config.ChromiumTimeout})
 		if err != nil {
 			listener.Close()
 			return fmt.Errorf("create desktop browser launcher: %w", err)
 		}
-		browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, Launcher: launcher, Output: os.Stderr, Remote: controller})
+		browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, Launcher: launcher, Output: os.Stderr, Remote: controller, GuideTokens: controller})
 		if err != nil {
 			listener.Close()
 			return fmt.Errorf("create desktop renderer: %w", err)
 		}
-		mediaRenderer, cableRenderer = browserRenderer, browserRenderer
+		mediaRenderer, webRenderer = browserRenderer, browserRenderer
 	} else {
 		mediaRenderer = &renderer.MPV{SocketPath: config.MPVSocketPath, Timeout: config.MPVTimeout}
 		if config.RendererMode == "mpv-only" {
-			cableRenderer = nil
+			webRenderer = nil
 		} else {
-			browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{BinaryPath: config.ChromiumBinaryPath, RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, ExtraArgs: config.ChromiumArgs, Output: os.Stderr, Remote: controller})
+			browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{BinaryPath: config.ChromiumBinaryPath, RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, ExtraArgs: config.ChromiumArgs, Output: os.Stderr, Remote: controller, GuideTokens: controller})
 			if err != nil {
 				listener.Close()
 				return fmt.Errorf("create Chromium renderer: %w", err)
 			}
-			cableRenderer = browserRenderer
+			webRenderer = browserRenderer
 		}
 	}
 	var rendererAdapter renderer.Adapter
 	if config.RendererMode == "mpv-only" {
 		rendererAdapter = mediaRenderer
 	} else {
-		composite, err := renderer.NewComposite(mediaRenderer, cableRenderer)
+		composite, err := renderer.NewComposite(mediaRenderer, webRenderer)
 		if err != nil {
 			listener.Close()
 			return fmt.Errorf("create renderer dispatcher: %w", err)

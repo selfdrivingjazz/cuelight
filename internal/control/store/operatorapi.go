@@ -33,7 +33,7 @@ var _ operatorapi.AssetPageService = (*Store)(nil)
 
 func (a *OperatorAdapter) ListNodes(ctx context.Context) ([]operatorapi.Node, error) {
 	s := a.Store
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT id::text, name, credential_state, desired_generation, observed_generation FROM nodes WHERE credential_state <> 'revoked' ORDER BY created_at, id`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT id::text, name, credential_state, node_class, desired_generation, observed_generation FROM nodes WHERE credential_state <> 'revoked' ORDER BY created_at, id`)
 	if err != nil {
 		return nil, wrap("list nodes", err)
 	}
@@ -41,7 +41,7 @@ func (a *OperatorAdapter) ListNodes(ctx context.Context) ([]operatorapi.Node, er
 	result := make([]operatorapi.Node, 0)
 	for rows.Next() {
 		var node operatorapi.Node
-		if err := rows.Scan(&node.ID, &node.Name, &node.CredentialState, &node.DesiredGeneration, &node.ObservedGeneration); err != nil {
+		if err := rows.Scan(&node.ID, &node.Name, &node.CredentialState, &node.NodeClass, &node.DesiredGeneration, &node.ObservedGeneration); err != nil {
 			return nil, wrap("scan node", err)
 		}
 		result = append(result, node)
@@ -116,7 +116,7 @@ func (a *OperatorAdapter) ListNodesPage(ctx context.Context, request page.PageRe
 		orderBy = "n.name " + order + ", n.id " + order
 	}
 	args = append(args, request.Limit+1)
-	query := "SELECT n.id::text, n.name, n.credential_state, n.desired_generation, n.observed_generation, n.created_at FROM nodes n WHERE " + strings.Join(clauses, " AND ") + " ORDER BY " + orderBy + " LIMIT $" + strconv.Itoa(len(args))
+	query := "SELECT n.id::text, n.name, n.credential_state, n.node_class, n.desired_generation, n.observed_generation, n.created_at FROM nodes n WHERE " + strings.Join(clauses, " AND ") + " ORDER BY " + orderBy + " LIMIT $" + strconv.Itoa(len(args))
 	rows, err := a.Store.q(ctx).QueryContext(ctx, query, args...)
 	if err != nil {
 		return page.Response[operatorapi.Node]{}, wrap("list nodes page", err)
@@ -128,7 +128,7 @@ func (a *OperatorAdapter) ListNodesPage(ctx context.Context, request page.PageRe
 	for rows.Next() {
 		var item operatorapi.Node
 		var created time.Time
-		if err := rows.Scan(&item.ID, &item.Name, &item.CredentialState, &item.DesiredGeneration, &item.ObservedGeneration, &created); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.CredentialState, &item.NodeClass, &item.DesiredGeneration, &item.ObservedGeneration, &created); err != nil {
 			return page.Response[operatorapi.Node]{}, wrap("scan node page", err)
 		}
 		if len(items) < request.Limit {
@@ -160,7 +160,7 @@ func (a *OperatorAdapter) ListNodesPage(ctx context.Context, request page.PageRe
 func (a *OperatorAdapter) GetNode(ctx context.Context, id string) (operatorapi.Node, error) {
 	s := a.Store
 	var node operatorapi.Node
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT id::text, name, credential_state, desired_generation, observed_generation FROM nodes WHERE id = $1`, id).Scan(&node.ID, &node.Name, &node.CredentialState, &node.DesiredGeneration, &node.ObservedGeneration)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT id::text, name, credential_state, node_class, desired_generation, observed_generation FROM nodes WHERE id = $1`, id).Scan(&node.ID, &node.Name, &node.CredentialState, &node.NodeClass, &node.DesiredGeneration, &node.ObservedGeneration)
 	if errors.Is(err, sql.ErrNoRows) {
 		return operatorapi.Node{}, pkiNotFound()
 	}
@@ -367,10 +367,6 @@ func (s *Store) ListAssetsPage(ctx context.Context, request page.PageRequest) (p
 		next = &value
 	}
 	return page.NewResponse(items, next, previous, hasMore), nil
-}
-
-func (s *Store) PutAssignment(ctx context.Context, nodeID string, mutation assignment.Mutation, input assignment.PutInput) (assignment.PutResult, error) {
-	return (assignment.Service{Assignments: s}).Put(ctx, nodeID, mutation, input)
 }
 
 func (s *Store) ListAssets(ctx context.Context) ([]media.Asset, error) {

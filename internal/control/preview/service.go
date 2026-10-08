@@ -15,9 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/cable"
 )
 
 var (
@@ -51,128 +48,6 @@ type ExpectedPreview struct {
 	BlockWindowEnd     time.Time `json:"blockWindowEnd,omitempty"`
 	ItemWindowStart    time.Time `json:"itemWindowStart,omitempty"`
 	ItemWindowEnd      time.Time `json:"itemWindowEnd,omitempty"`
-}
-
-type ExpectedPreviewInput struct {
-	HealthyReleaseDigest string
-	Revision             cable.CableRevision
-	At                   time.Time
-}
-
-// DeriveExpectedPreviewFromObservation makes the healthy-release provenance
-// explicit at controller call sites that already hold the accepted node report.
-func DeriveExpectedPreviewFromObservation(observation assignment.Observation, revision cable.CableRevision, at time.Time) (ExpectedPreview, error) {
-	return DeriveExpectedPreview(ExpectedPreviewInput{HealthyReleaseDigest: observation.HealthyReleaseDigest, Revision: revision, At: at})
-}
-
-// DeriveExpectedPreview selects the lowest-numbered enabled non-standby
-// channel, then the first active block and item. Ties are resolved by ID. The
-// schedule uses half-open intervals [start,end), matching Cable compilation.
-// A revision with no active block or item is still a valid expected preview and
-// leaves that level's ID empty.
-func DeriveExpectedPreview(input ExpectedPreviewInput) (ExpectedPreview, error) {
-	releaseDigest := strings.TrimSpace(input.HealthyReleaseDigest)
-	if releaseDigest == "" {
-		return ExpectedPreview{}, fmt.Errorf("%w: healthy release digest is required", ErrInvalidArgument)
-	}
-	if input.Revision.Digest == "" {
-		return ExpectedPreview{}, fmt.Errorf("%w: revision digest is required", ErrInvalidArgument)
-	}
-	if input.At.IsZero() {
-		return ExpectedPreview{}, fmt.Errorf("%w: effective time is required", ErrInvalidArgument)
-	}
-	at := input.At.UTC()
-	result := ExpectedPreview{Expected: true, ReleaseDigest: releaseDigest, RevisionDigest: input.Revision.Digest, EffectiveAt: at}
-	channel, ok := effectiveChannel(input.Revision.Channels)
-	if !ok {
-		return result, nil
-	}
-	result.ChannelID = channel.ID
-	result.ChannelWindowStart = input.Revision.Window.StartsAt.UTC()
-	result.ChannelWindowEnd = input.Revision.Window.EndsAt.UTC()
-	if (!input.Revision.Window.StartsAt.IsZero() && at.Before(input.Revision.Window.StartsAt)) || (!input.Revision.Window.EndsAt.IsZero() && !at.Before(input.Revision.Window.EndsAt)) {
-		return result, nil
-	}
-	block, ok := activeBlock(channel.Blocks, at)
-	if !ok {
-		// Older revisions may only contain the materialized Programs projection.
-		item, itemOK := activeProgram(channel.Programs, at)
-		if itemOK {
-			result.ItemID = itemID(item)
-			result.ItemWindowStart, result.ItemWindowEnd = item.StartsAt.UTC(), item.EndsAt.UTC()
-		}
-		return result, nil
-	}
-	result.BlockID = block.ID
-	result.BlockWindowStart, result.BlockWindowEnd = block.StartsAt.UTC(), block.EndsAt.UTC()
-	item, ok := activeProgram(block.Items, at)
-	if !ok {
-		return result, nil
-	}
-	result.ItemID = itemID(item)
-	result.ItemWindowStart, result.ItemWindowEnd = item.StartsAt.UTC(), item.EndsAt.UTC()
-	return result, nil
-}
-
-func effectiveChannel(channels []cable.RevisionChannel) (cable.RevisionChannel, bool) {
-	for pass := range 3 {
-		var selected cable.RevisionChannel
-		found := false
-		for _, ch := range channels {
-			switch pass {
-			case 0:
-				if !ch.Enabled || ch.Standby {
-					continue
-				}
-			case 1:
-				if !ch.Enabled {
-					continue
-				}
-			}
-			if !found || ch.Number < selected.Number || (ch.Number == selected.Number && ch.ID < selected.ID) {
-				selected, found = ch, true
-			}
-		}
-		if found {
-			return selected, true
-		}
-	}
-	return cable.RevisionChannel{}, false
-}
-
-func activeBlock(blocks []cable.RevisionBlock, at time.Time) (cable.RevisionBlock, bool) {
-	var selected cable.RevisionBlock
-	found := false
-	for _, block := range blocks {
-		if at.Before(block.StartsAt) || !at.Before(block.EndsAt) {
-			continue
-		}
-		if !found || block.StartsAt.Before(selected.StartsAt) || (block.StartsAt.Equal(selected.StartsAt) && block.ID < selected.ID) {
-			selected, found = block, true
-		}
-	}
-	return selected, found
-}
-
-func activeProgram(items []cable.RevisionProgram, at time.Time) (cable.RevisionProgram, bool) {
-	var selected cable.RevisionProgram
-	found := false
-	for _, item := range items {
-		if at.Before(item.StartsAt) || !at.Before(item.EndsAt) {
-			continue
-		}
-		if !found || item.StartsAt.Before(selected.StartsAt) || (item.StartsAt.Equal(selected.StartsAt) && item.ID < selected.ID) {
-			selected, found = item, true
-		}
-	}
-	return selected, found
-}
-
-func itemID(item cable.RevisionProgram) string {
-	if item.ItemID != "" {
-		return item.ItemID
-	}
-	return item.ID
 }
 
 type Status string

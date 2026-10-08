@@ -164,6 +164,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/remote-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mint a phone link for the node's active remote-input session. */
+        post: operations["createNodeRemoteLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/nodes/{nodeId}/assignment": {
         parameters: {
             query?: never;
@@ -301,6 +318,7 @@ export interface paths {
         };
         get: operations["listMedia"];
         put?: never;
+        /** @description Creates file media from an asset, or web media from a URL (kind web). Web media start a background viewport capture; adding a URL that is already in the library returns that item with 200. The Idempotency-Key header is required for file media. */
         post: operations["createMedia"];
         delete?: never;
         options?: never;
@@ -320,10 +338,30 @@ export interface paths {
         get: operations["getMedia"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** @description Removes an operator-added web page. File media and Cable items cannot be deleted (409); web media used by a playlist return 409. */
+        delete: operations["deleteMedia"];
         options?: never;
         head?: never;
         patch: operations["updateMedia"];
+        trace?: never;
+    };
+    "/media/{mediaId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Recaptures a web media viewport now (1920x1080). 409 for file media and Cable items; 503 when the controller has no headless browser. */
+        post: operations["refreshMedia"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/media/{mediaId}/usage": {
@@ -360,6 +398,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/media/{mediaId}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        /** @description Persisted poster (file media, JPEG) or viewport capture (web media, PNG or JPEG). Pass `v={thumbnail.digest}` so the immutable response can be cached for a year. */
+        get: operations["getMediaThumbnail"];
+        /** @description Stores an operator-captured poster frame for media whose format the controller cannot decode (for example video). The image is re-encoded and downscaled server-side. */
+        put: operations["putMediaThumbnail"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/usage/{kind}/{id}": {
         parameters: {
             query?: never;
@@ -386,6 +444,73 @@ export interface paths {
         get: operations["listAssignments"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listProfiles"];
+        put?: never;
+        post: operations["createProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/profiles/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The most recently activated profile across the fleet and whether any of its screens drifted since. */
+        get: operations["getActiveProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/profiles/{profileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getProfile"];
+        /** @description Replaces the profile's name, description, and screens. If-Match carries the profile ETag (`"version:N"`) or bare version. */
+        put: operations["updateProfile"];
+        post?: never;
+        delete: operations["deleteProfile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/profiles/{profileId}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Assigns every screen of the profile; nodes outside the profile are untouched. Per-node failures are reported in results and do not stop other nodes. */
+        post: operations["activateProfile"];
         delete?: never;
         options?: never;
         head?: never;
@@ -614,164 +739,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["updateCableBlock"];
-        trace?: never;
-    };
-    "/cable/profiles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["listCableProfiles"];
-        put?: never;
-        post: operations["createCableProfile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/profiles/{profileId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        get: operations["getCableProfile"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["updateCableProfile"];
-        trace?: never;
-    };
-    "/cable/shell-builds": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["listCableShellBuilds"];
-        put?: never;
-        post: operations["registerCableShellBuild"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/shell-builds/{shellBuildId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                shellBuildId: components["parameters"]["CableShellBuildId"];
-            };
-            cookie?: never;
-        };
-        get: operations["getCableShellBuild"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/deployments/{deploymentId}/revisions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        get: operations["listCableRevisions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/revisions/{revisionId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                revisionId: components["parameters"]["CableRevisionId"];
-            };
-            cookie?: never;
-        };
-        get: operations["getCableRevision"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/revisions/{revisionId}/release": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                revisionId: components["parameters"]["CableRevisionId"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["publishCableRelease"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/deployments/{deploymentId}/compile-preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["previewCableCompile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/deployments/{deploymentId}/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["publishCableRevision"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/screenshots": {
@@ -1076,6 +1043,190 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/player/cable-guide-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Mints a 24h guide token for the hosted Cable guide of one deployment. Also served at /browser-node/player/cable-guide-tokens with browserNodeToken. Refused with 403 unless the node's current assignment targets that deployment's Cable media item. */
+        post: operations["createCableGuideToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable-guide/presentation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getCableGuidePresentation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable-guide/media/{assetId}": {
+        parameters: {
+            query?: {
+                /** @description Guide token for media elements that cannot send headers. */
+                access_token?: string;
+            };
+            header?: never;
+            path: {
+                assetId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCableGuideMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable-guide/remote/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["pollCableGuideRemoteEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cable-guide/token:renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["renewCableGuideToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/browser-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listBrowserNodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/browser-nodes/claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Redeems the code shown on a browser node's pairing screen and creates a node of class browser. */
+        post: operations["claimBrowserNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/browser-nodes/{nodeId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["revokeBrowserNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/browser-node/claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["startBrowserNodeClaim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/browser-node/claims/{claimId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Authorization is `Bearer <pollToken>`. The credential is returned exactly once; later polls return 410. */
+        get: operations["pollBrowserNodeClaim"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/browser-node/credentials:renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["renewBrowserNodeCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1122,6 +1273,75 @@ export interface components {
         };
         /** Format: uuid */
         Id: string;
+        /** @description One node's saved assignment. Exactly one of mediaId and playlistId is set. */
+        ProfileScreen: {
+            nodeId: components["schemas"]["Id"];
+            mediaId?: components["schemas"]["Id"];
+            playlistId?: components["schemas"]["Id"];
+            /**
+             * @description Omitted uses the server default for the media.
+             * @enum {string}
+             */
+            deliveryMode?: "stream" | "cache_then_play";
+            remoteInput: boolean;
+            showQr: boolean;
+            /** @description Reserved per-screen settings. */
+            settings?: {
+                [key: string]: unknown;
+            };
+        };
+        ProfileInput: {
+            name: string;
+            description?: string;
+            screens: components["schemas"]["ProfileScreen"][];
+        };
+        Profile: {
+            id: components["schemas"]["Id"];
+            name: string;
+            description: string;
+            /** Format: int64 */
+            version: number;
+            screens: components["schemas"]["ProfileScreen"][];
+            createdBy: components["schemas"]["Id"];
+            updatedBy: components["schemas"]["Id"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            lastActivatedAt?: string;
+            /** @description Whether this is the most recently activated profile. */
+            active: boolean;
+        };
+        ProfileList: {
+            items: components["schemas"]["Profile"][];
+        };
+        ProfileActivationResult: {
+            nodeId: components["schemas"]["Id"];
+            assignmentId?: components["schemas"]["Id"];
+            error?: string;
+        };
+        ProfileActivation: {
+            id: components["schemas"]["Id"];
+            profileId: components["schemas"]["Id"];
+            /** Format: date-time */
+            activatedAt: string;
+            activatedBy: components["schemas"]["Id"];
+            results: components["schemas"]["ProfileActivationResult"][];
+        };
+        ProfileDrift: {
+            nodeId: components["schemas"]["Id"];
+            /** @enum {string} */
+            reason: "assignment_changed" | "unassigned" | "node_missing";
+        };
+        ActiveProfile: {
+            profileId?: components["schemas"]["Id"];
+            profileName?: string;
+            /** Format: date-time */
+            activatedAt?: string;
+            drifted: boolean;
+            drift: components["schemas"]["ProfileDrift"][];
+        };
         Health: {
             /** @constant */
             status: "ok";
@@ -1273,8 +1493,10 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        /** @description Exactly one of assetId (file) or mediaId (web media) is required. */
         CablePlaylistItemInput: {
-            assetId: components["schemas"]["Id"];
+            assetId?: components["schemas"]["Id"];
+            mediaId?: components["schemas"]["Id"];
             position: number;
             durationSeconds: number;
             title?: string;
@@ -1288,7 +1510,9 @@ export interface components {
         CablePlaylistItem: {
             id: components["schemas"]["Id"];
             playlistId: components["schemas"]["Id"];
-            assetId: components["schemas"]["Id"];
+            assetId?: components["schemas"]["Id"];
+            /** @description Web media shown for durationSeconds when the item is not a file asset. */
+            mediaId?: components["schemas"]["Id"];
             position: number;
             durationSeconds: number;
             title: string;
@@ -1332,155 +1556,100 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         } & (unknown | unknown);
-        CableProfileInput: {
-            name: string;
-            description?: string;
+        CableGuideTokenRequest: {
             deploymentId: components["schemas"]["Id"];
-            shellBuildId: components["schemas"]["Id"];
-            releaseId?: components["schemas"]["Id"];
         };
-        CableProfile: {
+        CableGuideToken: {
+            token: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        CableGuideRemote: {
+            /** Format: uri */
+            url: string;
+            showQr: boolean;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        CableGuideChannel: {
             id: components["schemas"]["Id"];
+            number: number;
             name: string;
-            description: string;
-            deploymentId: components["schemas"]["Id"];
-            shellBuildId: components["schemas"]["Id"];
-            releaseId?: components["schemas"]["Id"];
-            /** Format: int64 */
-            version: number;
-            createdBy: components["schemas"]["Id"];
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
+            callsign: string;
+            accent: string;
+            enabled: boolean;
+            standbyMessage?: string;
         };
-        CableShellBuildInput: {
-            digest: string;
-            entrypoint: string;
-            artifactDigests: string[];
-            versionMetadata?: {
-                [key: string]: string;
-            };
-            bridgeProtocol: string;
-        };
-        CableShellBuild: {
+        CableGuideBlock: {
             id: components["schemas"]["Id"];
-            digest: string;
-            entrypoint: string;
-            artifactDigests: string[];
-            versionMetadata?: {
-                [key: string]: string;
-            };
-            bridgeProtocol: string;
-            createdBy: components["schemas"]["Id"];
-            /** Format: date-time */
-            createdAt: string;
-        };
-        CableRevisionWindow: {
+            channelId: components["schemas"]["Id"];
             /** Format: date-time */
             startsAt: string;
             /** Format: date-time */
             endsAt: string;
+            title: string;
+            /** @enum {string} */
+            source: "playlist" | "asset";
         };
-        CableRevisionProgram: {
-            id: components["schemas"]["Id"];
+        CableGuideOccurrence: {
+            id: string;
             blockId?: components["schemas"]["Id"];
             itemId?: components["schemas"]["Id"];
             itemPosition?: number;
             occurrence?: number;
+            channelId: components["schemas"]["Id"];
             /** Format: date-time */
             startsAt: string;
             /** Format: date-time */
             endsAt: string;
-            assetId: components["schemas"]["Id"];
-            artifactDigest: string;
-            mediaType: string;
-            title?: string;
+            title: string;
             subtitle?: string;
-            tag?: string;
-            artist?: string;
-            description?: string;
-            artworkDigest?: string;
-            fit?: string;
-            placardPolicy?: string;
-            availabilityPolicy?: string;
+            media: {
+                /** @enum {string} */
+                kind: "video" | "image";
+                /** @description Guide media URL, /api/v1/cable-guide/media/{assetId}. */
+                reference: string;
+                /** @enum {string} */
+                mime: "video/mp4" | "image/jpeg" | "image/png" | "image/webp";
+            };
+            /** @enum {string} */
+            placard: "always" | "start" | "never";
+            /** @enum {string} */
+            fit: "fit" | "fill";
             loop: boolean;
-            mute: boolean;
-            /** Format: double */
+            muted: boolean;
             volume: number;
         };
-        CableRevisionBlock: {
-            id: components["schemas"]["Id"];
-            /** Format: date-time */
-            startsAt: string;
-            /** Format: date-time */
-            endsAt: string;
-            playlistId?: components["schemas"]["Id"];
-            assetId?: components["schemas"]["Id"];
-            title?: string;
-            loop: boolean;
-            items: components["schemas"]["CableRevisionProgram"][];
-        } & (unknown | unknown);
-        CableRevisionChannel: {
-            id: components["schemas"]["Id"];
-            number: number;
-            name: string;
-            callsign?: string;
-            description?: string;
-            accent?: string;
-            artworkDigest?: string;
-            enabled: boolean;
-            standby: boolean;
-            blocks: components["schemas"]["CableRevisionBlock"][];
-            programs: components["schemas"]["CableRevisionProgram"][];
-        };
-        CableRevisionDocument: {
-            /** @constant */
-            schema: "cable.revision.v1";
-            deploymentId: components["schemas"]["Id"];
-            /** Format: int64 */
-            deploymentVersion: number;
+        /** @description Live guide document computed from the deployment's channels, blocks and playlists for now-1h through the guide horizon. */
+        CableGuidePresentation: {
+            revision: {
+                /** @description Content digest of the authored schedule; changes only when the schedule changes. */
+                id: string;
+                digest: string;
+                /** Format: date-time */
+                generatedAt: string;
+                timezone: string;
+                stale: boolean;
+                /** @enum {string} */
+                guideDensity: "quarter-hour" | "half-hour" | "hour";
+            };
+            channels: components["schemas"]["CableGuideChannel"][];
+            blocks: components["schemas"]["CableGuideBlock"][];
+            occurrences: components["schemas"]["CableGuideOccurrence"][];
+            bridge: {
+                protocolVersion: string;
+                /** @enum {string} */
+                state: "online";
+            };
             /** @enum {string} */
             theme: "nebula" | "gallery" | "noir";
-            /** @enum {string} */
-            guideDensity: "quarter-hour" | "half-hour" | "hour";
-            /** Format: date-time */
-            generatedAt: string;
-            shellBuildId: components["schemas"]["Id"];
-            shellBuildDigest: string;
-            entrypoint: string;
-            bridgeProtocol: string;
-            timezone: string;
-            window: components["schemas"]["CableRevisionWindow"];
-            channels: components["schemas"]["CableRevisionChannel"][];
-            artifactDigests: string[];
+            remote?: components["schemas"]["CableGuideRemote"];
         };
-        CableRevision: {
-            id: components["schemas"]["Id"];
-            deploymentId: components["schemas"]["Id"];
+        CableGuideRemoteEvents: {
+            events: components["schemas"]["RemoteEvent"][];
             /** Format: int64 */
-            deploymentVersion: number;
-            /** @enum {string} */
-            theme: "nebula" | "gallery" | "noir";
-            /** @enum {string} */
-            guideDensity: "quarter-hour" | "half-hour" | "hour";
-            /** Format: date-time */
-            generatedAt: string;
-            shellBuildId: components["schemas"]["Id"];
-            digest: string;
-            shellBuildDigest: string;
-            entrypoint: string;
-            bridgeProtocol: string;
-            timezone: string;
-            window: components["schemas"]["CableRevisionWindow"];
-            channels: components["schemas"]["CableRevisionChannel"][];
-            artifactDigests: string[];
-            json?: string;
-            errors?: string[];
-            warnings?: string[];
-            createdBy: components["schemas"]["Id"];
-            /** Format: date-time */
-            createdAt: string;
+            next: number;
+            remote?: components["schemas"]["CableGuideRemote"];
         };
         CableDeploymentPage: {
             items: components["schemas"]["CableDeployment"][];
@@ -1501,22 +1670,6 @@ export interface components {
         CableBlockPage: {
             items: components["schemas"]["CableBlock"][];
             page: components["schemas"]["PageInfo"];
-        };
-        CableProfilePage: {
-            items: components["schemas"]["CableProfile"][];
-            page: components["schemas"]["PageInfo"];
-        };
-        CableShellBuildPage: {
-            items: components["schemas"]["CableShellBuild"][];
-            page: components["schemas"]["PageInfo"];
-        };
-        CableRevisionPage: {
-            items: components["schemas"]["CableRevision"][];
-            page: components["schemas"]["PageInfo"];
-        };
-        CableCompileRequest: {
-            shellBuildId: components["schemas"]["Id"];
-            window: components["schemas"]["CableRevisionWindow"];
         };
         NodePage: {
             items: components["schemas"]["Node"][];
@@ -1555,15 +1708,71 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
         };
+        RemoteLink: {
+            sessionId: string;
+            /** Format: uri */
+            remoteUrl: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
         Node: {
             id: components["schemas"]["Id"];
             name: string;
             /** @enum {string} */
             credentialState: "active" | "revoked" | "expired";
+            /** @enum {string} */
+            nodeClass?: "native" | "browser";
             /** Format: int64 */
             desiredGeneration?: number;
             /** Format: int64 */
             observedGeneration?: number;
+        };
+        BrowserNode: {
+            id: components["schemas"]["Id"];
+            name: string;
+            /** @enum {string} */
+            nodeClass: "browser";
+            /** @enum {string} */
+            credentialState: "active" | "revoked" | "expired";
+            /** Format: date-time */
+            credentialExpiresAt?: string;
+            /** Format: date-time */
+            lastSeenAt?: string;
+            userAgent?: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        BrowserNodeClaim: {
+            claimId: components["schemas"]["Id"];
+            code: string;
+            /** @description Code formatted for display, e.g. K7QM-4XPD. */
+            displayCode: string;
+            pollToken: string;
+            /** Format: date-time */
+            expiresAt: string;
+            pollIntervalSeconds: number;
+            /**
+             * Format: uri
+             * @description Operator console pair page with the code prefilled (QR target).
+             */
+            pairUrl?: string;
+        };
+        BrowserCredential: {
+            nodeId: components["schemas"]["Id"];
+            token: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: date-time */
+            renewAfter: string;
+            /** @description Report/event epoch for player reports. */
+            eventEpoch: string;
+        };
+        BrowserNodeClaimStatus: {
+            /** @enum {string} */
+            status: "pending" | "claimed";
+            /** Format: date-time */
+            expiresAt?: string;
+            credential?: components["schemas"]["BrowserCredential"];
         };
         UploadCreate: {
             name: string;
@@ -1605,14 +1814,25 @@ export interface components {
             /** @enum {integer} */
             orientation: 0 | 90 | 180 | 270;
         };
+        /** @description File media: assetId, title, tags, playback. Web media: kind web, url, optional title (defaults to the URL). */
         MediaInput: {
-            assetId: components["schemas"]["Id"];
-            title: string;
+            /**
+             * @default file
+             * @enum {string}
+             */
+            kind: "file" | "web";
+            assetId?: components["schemas"]["Id"];
+            /**
+             * Format: uri
+             * @description Absolute http or https URL without userinfo (web media).
+             */
+            url?: string;
+            title?: string;
             description?: string;
             artist?: string;
-            tags: string[];
+            tags?: string[];
             artworkAssetId?: components["schemas"]["Id"];
-            playback: components["schemas"]["MediaPlayback"];
+            playback?: components["schemas"]["MediaPlayback"];
         };
         MediaPatch: {
             title?: string;
@@ -1624,14 +1844,32 @@ export interface components {
         };
         Media: {
             id: components["schemas"]["Id"];
-            assetId: components["schemas"]["Id"];
+            /** @enum {string} */
+            kind: "file" | "web";
+            /** @description File media only. */
+            assetId?: components["schemas"]["Id"];
+            /**
+             * Format: uri
+             * @description Web media: the page URL; for Cable items the resolved hosted guide URL.
+             */
+            url?: string;
+            /** @description Read-only; set on the Cable item maintained for a deployment. Operators cannot edit or delete these. */
+            deploymentId?: components["schemas"]["Id"];
+            /** Format: uri */
+            faviconUrl?: string;
+            /** @description Last web capture failure. */
+            thumbnailError?: string;
+            /** Format: date-time */
+            thumbnailAttemptedAt?: string;
             title: string;
             description?: string;
             artist?: string;
             tags: string[];
             artworkAssetId?: components["schemas"]["Id"];
-            playback: components["schemas"]["MediaPlayback"];
-            artifact: components["schemas"]["Artifact"];
+            /** @description File media only. */
+            playback?: components["schemas"]["MediaPlayback"];
+            /** @description File media only. */
+            artifact?: components["schemas"]["Artifact"];
             /** Format: int64 */
             version: number;
             createdBy: components["schemas"]["Id"];
@@ -1640,6 +1878,21 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            thumbnail?: components["schemas"]["MediaThumbnail"];
+        };
+        MediaThumbnail: {
+            digest: string;
+            /** @enum {string} */
+            mediaType: "image/jpeg" | "image/png";
+            width: number;
+            height: number;
+            /**
+             * @description Web media: server is a headless capture on the controller; node is a screenshot from a screen showing the page.
+             * @enum {string}
+             */
+            source?: "server" | "node";
+            /** Format: date-time */
+            capturedAt?: string;
         };
         MediaUsage: {
             mediaId: components["schemas"]["Id"];
@@ -1686,22 +1939,27 @@ export interface components {
             /** Format: date-time */
             endsAt: string;
         };
+        /** @description A file item (artifactDigest, mediaType, playback fields) or a web item (web.url). Releases with web items require the web feature. */
         MediaScheduleItem: {
             id: string;
             /** Format: date-time */
             startsAt: string;
             /** Format: date-time */
             endsAt: string;
-            artifactDigest: string;
-            mediaType: string;
+            web?: {
+                /** Format: uri */
+                url: string;
+            };
+            artifactDigest?: string;
+            mediaType?: string;
             /** @enum {string} */
-            fit: "fit" | "fill";
-            loop: boolean;
-            muted: boolean;
-            volume: number;
+            fit?: "fit" | "fill";
+            loop?: boolean;
+            muted?: boolean;
+            volume?: number;
             imageDurationSeconds?: number;
             /** @enum {integer} */
-            orientation: 0 | 90 | 180 | 270;
+            orientation?: 0 | 90 | 180 | 270;
         };
         MediaSchedulePresentation: {
             timezone: string;
@@ -1717,12 +1975,20 @@ export interface components {
             bridgeProtocol: string;
             artifactClosure: string[];
         };
+        WebPresentation: {
+            /**
+             * Format: uri
+             * @description Absolute http or https URL without userinfo.
+             */
+            url: string;
+        };
         ReleasePresentation: {
             /** @enum {string} */
-            kind: "media" | "media-schedule" | "cable";
+            kind: "media" | "media-schedule" | "cable" | "web";
             media?: components["schemas"]["MediaPresentation"];
             mediaSchedule?: components["schemas"]["MediaSchedulePresentation"];
             cable?: components["schemas"]["CablePresentation"];
+            web?: components["schemas"]["WebPresentation"];
         } & ({
             /** @constant */
             kind: "media";
@@ -1735,6 +2001,10 @@ export interface components {
             /** @constant */
             kind: "cable";
             cable: components["schemas"]["CablePresentation"];
+        } | {
+            /** @constant */
+            kind: "web";
+            web: components["schemas"]["WebPresentation"];
         });
         PublishReleaseInput: {
             playback: components["schemas"]["PlaybackPayload"];
@@ -1755,11 +2025,15 @@ export interface components {
             signature: string;
             payload: components["schemas"]["ReleasePayload"];
         };
+        /** @description Targets exactly one of mediaId or playlistId. The server publishes or reuses the signed release that presents it (file media → media, web media and Cable items → web, playlists → media-schedule). */
         AssignmentInput: {
-            releaseId: components["schemas"]["Id"];
-            releaseDigest: string;
-            /** @enum {string} */
-            deliveryMode: "stream" | "cache_then_play";
+            mediaId?: components["schemas"]["Id"];
+            playlistId?: components["schemas"]["Id"];
+            /**
+             * @description Defaults to cache_then_play when the release allows it, otherwise stream.
+             * @enum {string}
+             */
+            deliveryMode?: "stream" | "cache_then_play";
             /** Format: int64 */
             expectedGeneration: number;
             /** @default false */
@@ -1767,13 +2041,24 @@ export interface components {
             /** @default false */
             showQr: boolean;
         };
-        Assignment: components["schemas"]["AssignmentInput"] & {
+        Assignment: {
             id: components["schemas"]["Id"];
             nodeId: components["schemas"]["Id"];
+            mediaId?: components["schemas"]["Id"];
+            playlistId?: components["schemas"]["Id"];
+            /** @description Read-only audit of the release the server published or reused. */
+            releaseId: components["schemas"]["Id"];
+            releaseDigest: string;
+            /** @enum {string} */
+            deliveryMode: "stream" | "cache_then_play";
+            /** Format: int64 */
+            expectedGeneration: number;
             /** Format: int64 */
             desiredGeneration: number;
+            remoteInput: boolean;
+            showQr: boolean;
             /** @enum {string} */
-            presentationKind?: "media" | "media-schedule" | "cable";
+            presentationKind?: "media" | "media-schedule" | "web";
         };
         RemoteEvent: {
             /** Format: int64 */
@@ -1781,7 +2066,7 @@ export interface components {
             /** @enum {string} */
             type: "key" | "text" | "pointer" | "wheel";
             /** @enum {string} */
-            key?: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Enter" | "Escape" | "Backspace" | "Tab" | "VolumeUp" | "VolumeDown" | "Mute";
+            key?: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Enter" | "Escape" | "Backspace" | "Tab" | "VolumeUp" | "VolumeDown" | "Mute" | "ChannelUp" | "ChannelDown" | "Guide" | "Info" | "Delete" | "Home" | "End" | "PageUp" | "PageDown" | "Space" | "BrowserBack" | "BrowserForward" | "BrowserReload";
             text?: string;
             x?: number;
             y?: number;
@@ -1839,7 +2124,7 @@ export interface components {
         CurrentContent: {
             releaseDigest: string;
             /** @enum {string} */
-            presentationKind: "media" | "media-schedule" | "cable";
+            presentationKind: "media" | "media-schedule" | "cable" | "web";
             /** @enum {string} */
             state: "playing" | "paused" | "off_air" | "stale";
             channelId?: components["schemas"]["Id"];
@@ -1868,7 +2153,7 @@ export interface components {
             /** Format: int64 */
             observedGeneration: number;
             /** @enum {string|null} */
-            presentationKind: "media" | "media-schedule" | "cable" | null;
+            presentationKind: "media" | "media-schedule" | "cable" | "web" | null;
             renderingReleaseDigest?: string | null;
             candidateReleaseDigest?: string | null;
             healthyReleaseDigest?: string | null;
@@ -1923,8 +2208,7 @@ export interface components {
         CableDeploymentId: components["schemas"]["Id"];
         CableChannelId: components["schemas"]["Id"];
         CableProgramId: components["schemas"]["Id"];
-        CableShellBuildId: components["schemas"]["Id"];
-        CableRevisionId: components["schemas"]["Id"];
+        ProfileId: components["schemas"]["Id"];
         /** @description Opaque, server-issued keyset cursor. */
         PageCursor: string;
         PageLimit: number;
@@ -2221,6 +2505,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnrollmentTokenCreated"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createNodeRemoteLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Phone link bound to the active session; valid until the session expires. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteLink"];
+                };
+            };
+            /** @description The node has no active remote-input session. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Remote input is disabled for the node's assignment. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -2531,11 +2856,15 @@ export interface operations {
                 cursor?: components["parameters"]["PageCursor"];
                 limit?: components["parameters"]["PageLimit"];
                 search?: components["parameters"]["PageSearch"];
-                sort?: components["parameters"]["PageSort"];
+                /** @description Sort key. Defaults to createdAt. */
+                sort?: "createdAt" | "title" | "size" | "type";
                 order?: components["parameters"]["PageOrder"];
                 playable?: boolean;
                 assetId?: components["schemas"]["Id"][];
-                kind?: "image" | "video" | "audio";
+                /** @description File media (uploaded assets) or web media (pages and Cable items). */
+                kind?: "file" | "web";
+                /** @description Narrows to file media whose artifact is an image, video, or audio type. */
+                mediaType?: "image" | "video" | "audio";
             };
             header?: never;
             path?: never;
@@ -2543,7 +2872,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Authored playable media. */
+            /** @description Library media. With playable=true, web media are always included. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2558,8 +2887,8 @@ export interface operations {
     createMedia: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            header?: {
+                "Idempotency-Key"?: string;
             };
             path?: never;
             cookie?: never;
@@ -2570,7 +2899,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Authored media created. */
+            /** @description The web URL was already in the library. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Media"];
+                };
+            };
+            /** @description Media created. */
             201: {
                 headers: {
                     ETag: components["headers"]["ETag"];
@@ -2607,6 +2946,27 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    deleteMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     updateMedia: {
         parameters: {
             query?: never;
@@ -2625,7 +2985,31 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Authored media updated. */
+            /** @description Authored media updated. Web media accept title, description, and tags; Cable items cannot be edited (409). */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Media"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    refreshMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Media after the capture attempt; thumbnailError is set when it failed. */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
@@ -2724,6 +3108,69 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    getMediaThumbnail: {
+        parameters: {
+            query?: {
+                v?: string;
+            };
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Thumbnail bytes. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            /** @description Not modified. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    putMediaThumbnail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/png": string;
+                "image/jpeg": string;
+            };
+        };
+        responses: {
+            /** @description Media with its persisted thumbnail. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Media"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     getResourceUsage: {
         parameters: {
             query?: {
@@ -2777,6 +3224,174 @@ export interface operations {
                     "application/json": components["schemas"]["AssignmentPage"];
                 };
             };
+        };
+    };
+    listProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every profile ordered by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Created profile. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getActiveProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active profile status; profile fields are absent when no profile was ever activated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActiveProfile"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileId: components["parameters"]["ProfileId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Profile. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateProfile: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                profileId: components["parameters"]["ProfileId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Updated profile. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileId: components["parameters"]["ProfileId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Profile deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    activateProfile: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                profileId: components["parameters"]["ProfileId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Activation with one result per profile screen. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileActivation"];
+                };
+            };
+            default: components["responses"]["Problem"];
         };
     };
     listReleases: {
@@ -3472,336 +4087,6 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
-    listCableProfiles: {
-        parameters: {
-            query?: {
-                /** @description Opaque, server-issued keyset cursor. */
-                cursor?: components["parameters"]["PageCursor"];
-                limit?: components["parameters"]["PageLimit"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Assignable Cable television profiles. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableProfilePage"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    createCableProfile: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableProfileInput"];
-            };
-        };
-        responses: {
-            /** @description Assignable Cable television profile created. */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableProfile"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    getCableProfile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Assignable Cable television profile. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableProfile"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    updateCableProfile: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                profileId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableProfileInput"];
-            };
-        };
-        responses: {
-            /** @description Cable profile updated. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableProfile"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    listCableShellBuilds: {
-        parameters: {
-            query?: {
-                /** @description Opaque, server-issued keyset cursor. */
-                cursor?: components["parameters"]["PageCursor"];
-                limit?: components["parameters"]["PageLimit"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Registered Cable shell builds. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableShellBuildPage"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    registerCableShellBuild: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableShellBuildInput"];
-            };
-        };
-        responses: {
-            /** @description Cable shell build registered. */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableShellBuild"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    getCableShellBuild: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                shellBuildId: components["parameters"]["CableShellBuildId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Registered Cable shell build. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableShellBuild"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    listCableRevisions: {
-        parameters: {
-            query?: {
-                /** @description Opaque, server-issued keyset cursor. */
-                cursor?: components["parameters"]["PageCursor"];
-                limit?: components["parameters"]["PageLimit"];
-            };
-            header?: never;
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Immutable Cable revisions for the deployment. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableRevisionPage"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    getCableRevision: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                revisionId: components["parameters"]["CableRevisionId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Immutable Cable revision. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableRevision"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    publishCableRelease: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                revisionId: components["parameters"]["CableRevisionId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Previously published signed release returned for an idempotent replay. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReleaseEnvelope"];
-                };
-            };
-            /** @description Signed release published for the Cable revision. */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReleaseEnvelope"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    previewCableCompile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableCompileRequest"];
-            };
-        };
-        responses: {
-            /** @description Preview Cable revision; it is not persisted. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableRevision"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    publishCableRevision: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableCompileRequest"];
-            };
-        };
-        responses: {
-            /** @description Published immutable Cable revision. */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableRevision"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
     createScreenshot: {
         parameters: {
             query?: never;
@@ -4335,6 +4620,282 @@ export interface operations {
                     "application/json": components["schemas"]["RemoteEventPage"];
                 };
             };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createCableGuideToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CableGuideTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Guide token for the node and deployment. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableGuideToken"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableGuidePresentation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Live presentation of the token's deployment, with the node's active remote session. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableGuidePresentation"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCableGuideMedia: {
+        parameters: {
+            query?: {
+                /** @description Guide token for media elements that cannot send headers. */
+                access_token?: string;
+            };
+            header?: never;
+            path: {
+                assetId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Asset content; only assets scheduled by the token's deployment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Requested byte range. */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    pollCableGuideRemoteEvents: {
+        parameters: {
+            query?: {
+                after?: number;
+                wait?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Remote events of the node's active remote session newer than after; long-polls up to wait seconds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableGuideRemoteEvents"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    renewCableGuideToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successor guide token; refused once the node is no longer assigned the deployment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CableGuideToken"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listBrowserNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unrevoked browser nodes with credential and presence details. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["BrowserNode"][];
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    claimBrowserNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Claim code; case, spaces, and dashes are ignored. */
+                    code: string;
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Browser node created; the browser collects its credential on its next poll. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserNode"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeBrowserNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Browser node and all its credentials revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    startBrowserNodeClaim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    userAgent?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Pending claim; display code/QR and poll with pollToken. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserNodeClaim"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    pollBrowserNodeClaim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                claimId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Claim status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserNodeClaimStatus"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            410: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    renewBrowserNodeCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replacement credential; the presented token stops working. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserCredential"];
+                };
+            };
+            401: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };

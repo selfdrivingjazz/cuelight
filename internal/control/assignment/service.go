@@ -32,6 +32,8 @@ var (
 	ErrGenerationConflict  = errors.New("expected generation does not match current generation")
 	ErrGenerationExhausted = errors.New("desired generation is exhausted")
 	ErrIdempotencyConflict = errors.New("idempotency key was already used with a different request")
+	// ErrTargetNotFound reports an unknown media item or playlist.
+	ErrTargetNotFound = errors.New("assignment target not found")
 )
 
 type Mutation struct {
@@ -39,18 +41,31 @@ type Mutation struct {
 	IdempotencyKey string
 }
 
-type PutInput struct {
-	ReleaseID          string
-	ReleaseDigest      string
+// Target is what an operator assigns: exactly one media item or playlist.
+// An empty DeliveryMode selects cache_then_play when the published release
+// allows it and stream otherwise. A nil ExpectedGeneration assigns over
+// whatever generation is current.
+type Target struct {
+	MediaID            string
+	PlaylistID         string
 	DeliveryMode       string
-	ExpectedGeneration int64
 	RemoteInput        bool
 	ShowQR             bool
+	ExpectedGeneration *int64
+}
+
+// Publisher publishes, or reuses by digest, the signed release presenting a
+// target. Exactly one of mediaID and playlistID is set. The idempotency key
+// scopes replay of the publication itself.
+type Publisher interface {
+	PublishTarget(ctx context.Context, actorID, idempotencyKey, mediaID, playlistID string) (canonical.EnvelopeV1, error)
 }
 
 type Assignment struct {
 	ID                 string
 	NodeID             string
+	MediaID            string
+	PlaylistID         string
 	ReleaseID          string
 	ReleaseDigest      string
 	DeliveryMode       string
@@ -113,21 +128,35 @@ type Transaction interface {
 
 type Service struct {
 	Assignments Repository
+	Releases    Publisher
 }
 
-func (s Service) Put(ctx context.Context, nodeID string, mutation Mutation, input PutInput) (PutResult, error) {
-	if s.Assignments == nil {
+// AssignTarget publishes or reuses the release for target and makes it the
+// node's desired assignment.
+func (s Service) AssignTarget(ctx context.Context, mutation Mutation, nodeID string, target Target) (PutResult, error) {
+	if s.Assignments == nil || s.Releases == nil {
 		return PutResult{}, errors.New("assignment service is not configured")
 	}
 	if mutation.ActorID == "" || mutation.IdempotencyKey == "" {
 		return PutResult{}, ErrInvalidMutation
 	}
-	if err := validateInput(nodeID, input); err != nil {
+	if err := validateTarget(nodeID, target); err != nil {
 		return PutResult{}, err
 	}
-	requestDigest, err := RequestDigest(nodeID, input)
+	requestDigest, err := RequestDigest(nodeID, target)
 	if err != nil {
 		return PutResult{}, err
+	}
+	envelope, err := s.Releases.PublishTarget(ctx, mutation.ActorID, "assignment:"+nodeID+":"+mutation.IdempotencyKey, target.MediaID, target.PlaylistID)
+	if err != nil {
+		return PutResult{}, err
+	}
+	mode := target.DeliveryMode
+	if mode == "" {
+		mode = DeliveryStream
+		if envelope.Payload.AllowsDeliveryMode(DeliveryCacheThenPlay) {
+			mode = DeliveryCacheThenPlay
+		}
 	}
 
 	var result PutResult
@@ -148,25 +177,29 @@ func (s Service) Put(ctx context.Context, nodeID string, mutation Mutation, inpu
 		if err != nil {
 			return err
 		}
-		if input.ExpectedGeneration != currentGeneration {
-			return &GenerationConflictError{Expected: input.ExpectedGeneration, Actual: currentGeneration}
+		expected := currentGeneration
+		if target.ExpectedGeneration != nil {
+			expected = *target.ExpectedGeneration
+		}
+		if expected != currentGeneration {
+			return &GenerationConflictError{Expected: expected, Actual: currentGeneration}
 		}
 		if currentGeneration == math.MaxInt64 {
 			return ErrGenerationExhausted
 		}
 
-		envelope, found, err := tx.ReleaseByID(input.ReleaseID)
+		stored, found, err := tx.ReleaseByID(envelope.ID)
 		if err != nil {
 			return err
 		}
 		if !found {
 			return ErrReleaseNotFound
 		}
-		if err := validateReleaseBinding(envelope, input.ReleaseID, input.ReleaseDigest); err != nil {
+		if err := validateReleaseBinding(stored, envelope.ID, envelope.Digest); err != nil {
 			return err
 		}
-		if !envelope.Payload.AllowsDeliveryMode(input.DeliveryMode) {
-			return fmt.Errorf("%w: %q", ErrDeliveryMode, input.DeliveryMode)
+		if !stored.Payload.AllowsDeliveryMode(mode) {
+			return fmt.Errorf("%w: %q", ErrDeliveryMode, mode)
 		}
 
 		assignmentID, err := tx.NewAssignmentID()
@@ -179,13 +212,15 @@ func (s Service) Put(ctx context.Context, nodeID string, mutation Mutation, inpu
 		created := Assignment{
 			ID:                 assignmentID,
 			NodeID:             nodeID,
-			ReleaseID:          input.ReleaseID,
-			ReleaseDigest:      input.ReleaseDigest,
-			DeliveryMode:       input.DeliveryMode,
-			ExpectedGeneration: input.ExpectedGeneration,
+			MediaID:            target.MediaID,
+			PlaylistID:         target.PlaylistID,
+			ReleaseID:          envelope.ID,
+			ReleaseDigest:      envelope.Digest,
+			DeliveryMode:       mode,
+			ExpectedGeneration: expected,
 			DesiredGeneration:  currentGeneration + 1,
-			RemoteInput:        input.RemoteInput,
-			ShowQR:             input.ShowQR,
+			RemoteInput:        target.RemoteInput,
+			ShowQR:             target.ShowQR,
 			CreatedBy:          mutation.ActorID,
 		}
 		if err := tx.InsertAssignment(created); err != nil {
@@ -231,11 +266,11 @@ func (s Service) RecomputeAuthorizations(ctx context.Context, nodeID string) err
 	})
 }
 
-func RequestDigest(nodeID string, input PutInput) (string, error) {
+func RequestDigest(nodeID string, target Target) (string, error) {
 	body, err := json.Marshal(struct {
 		NodeID string
-		PutInput
-	}{NodeID: nodeID, PutInput: input})
+		Target
+	}{NodeID: nodeID, Target: target})
 	if err != nil {
 		return "", fmt.Errorf("encode assignment request: %w", err)
 	}
@@ -254,17 +289,17 @@ func (e *GenerationConflictError) Error() string {
 
 func (e *GenerationConflictError) Unwrap() error { return ErrGenerationConflict }
 
-func validateInput(nodeID string, input PutInput) error {
-	if nodeID == "" || input.ReleaseID == "" || input.ExpectedGeneration < 0 {
+func validateTarget(nodeID string, target Target) error {
+	if nodeID == "" || (target.ExpectedGeneration != nil && *target.ExpectedGeneration < 0) {
 		return ErrInvalidAssignment
 	}
-	if err := canonical.ValidateDigest(input.ReleaseDigest); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidAssignment, err)
+	if (target.MediaID == "") == (target.PlaylistID == "") {
+		return fmt.Errorf("%w: exactly one of mediaId and playlistId is required", ErrInvalidAssignment)
 	}
-	if input.DeliveryMode != DeliveryStream && input.DeliveryMode != DeliveryCacheThenPlay {
-		return fmt.Errorf("%w: %q", ErrDeliveryMode, input.DeliveryMode)
+	if target.DeliveryMode != "" && target.DeliveryMode != DeliveryStream && target.DeliveryMode != DeliveryCacheThenPlay {
+		return fmt.Errorf("%w: %q", ErrDeliveryMode, target.DeliveryMode)
 	}
-	if input.ShowQR && !input.RemoteInput {
+	if target.ShowQR && !target.RemoteInput {
 		return fmt.Errorf("%w: QR requires remote input", ErrInvalidAssignment)
 	}
 	return nil

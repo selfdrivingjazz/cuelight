@@ -156,7 +156,7 @@ func (s *Service) Report(ctx context.Context, nodeID string, report client.NodeR
 }
 
 func validPresentationKind(kind canonical.PresentationKind) bool {
-	return kind == canonical.PresentationMedia || kind == canonical.PresentationCable || kind == canonical.PresentationMediaSchedule
+	return kind == canonical.PresentationMedia || kind == canonical.PresentationMediaSchedule || kind == canonical.PresentationWeb
 }
 
 func (s *Service) AppendEvents(ctx context.Context, nodeID string, batch client.EventBatch) (client.EventAcknowledgement, error) {

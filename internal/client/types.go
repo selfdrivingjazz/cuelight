@@ -89,6 +89,12 @@ type OneTimeToken struct {
 	ExpiresAt string `json:"expiresAt"`
 }
 
+type RemoteLink struct {
+	SessionID string `json:"sessionId"`
+	RemoteURL string `json:"remoteUrl"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
 type Node struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`
@@ -116,16 +122,23 @@ type Asset struct {
 	Artifact Artifact `json:"artifact"`
 }
 
+// AssignmentInput targets exactly one media item or playlist; control
+// publishes or reuses the release that presents it.
 type AssignmentInput struct {
-	ReleaseID          string `json:"releaseId"`
-	ReleaseDigest      string `json:"releaseDigest"`
-	DeliveryMode       string `json:"deliveryMode"`
+	MediaID            string `json:"mediaId,omitempty"`
+	PlaylistID         string `json:"playlistId,omitempty"`
+	DeliveryMode       string `json:"deliveryMode,omitempty"`
 	ExpectedGeneration int64  `json:"expectedGeneration"`
+	RemoteInput        bool   `json:"remoteInput"`
+	ShowQR             bool   `json:"showQr"`
 }
 
 type Assignment struct {
 	AssignmentInput
-	DesiredGeneration int64 `json:"desiredGeneration"`
+	ID                string `json:"id"`
+	ReleaseID         string `json:"releaseId"`
+	ReleaseDigest     string `json:"releaseDigest"`
+	DesiredGeneration int64  `json:"desiredGeneration"`
 }
 
 // PageRequest is the common list query contract. Cursor remains opaque to the

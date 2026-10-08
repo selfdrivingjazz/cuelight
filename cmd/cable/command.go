@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -367,7 +368,7 @@ func runRecovery(ctx context.Context, args []string, options globalOptions, stre
 
 func runNode(ctx context.Context, args []string, options globalOptions, streams commandIO) int {
 	if len(args) == 0 {
-		return usageError(streams.stderr, "usage: cable node <list|show>")
+		return usageError(streams.stderr, "usage: cable node <list|show|remote-link>")
 	}
 	api, code := configuredClient(options, streams)
 	if code != exitOK {
@@ -413,14 +414,28 @@ func runNode(ctx context.Context, args []string, options globalOptions, streams 
 			fmt.Fprintf(streams.stdout, "ID: %s\nName: %s\nCredential: %s\nDesired generation: %d\nObserved generation: %d\n", node.ID, node.Name, node.CredentialState, node.DesiredGeneration, node.ObservedGeneration)
 		}
 		return exitOK
+	case "remote-link":
+		if len(args) != 2 {
+			return usageError(streams.stderr, "usage: cable node remote-link NODE_ID")
+		}
+		link, err := api.CreateNodeRemoteLink(ctx, args[1])
+		if err != nil {
+			return renderAPIError(streams, options.json, err)
+		}
+		if options.json {
+			writeJSON(streams.stdout, link)
+		} else {
+			fmt.Fprintln(streams.stdout, link.RemoteURL)
+		}
+		return exitOK
 	default:
-		return usageError(streams.stderr, "usage: cable node <list|show>")
+		return usageError(streams.stderr, "usage: cable node <list|show|remote-link>")
 	}
 }
 
 func runMedia(ctx context.Context, args []string, options globalOptions, streams commandIO) int {
 	if len(args) == 0 {
-		return usageError(streams.stderr, "usage: cable media <upload|register-local>")
+		return usageError(streams.stderr, "usage: cable media <upload|register-local|add-web>")
 	}
 	api, code := configuredClient(options, streams)
 	if code != exitOK {
@@ -491,8 +506,29 @@ func runMedia(ctx context.Context, args []string, options globalOptions, streams
 		}
 		printAsset(streams.stdout, options.output, asset)
 		return exitOK
+	case "add-web":
+		const usage = "usage: cable media add-web --url URL [--title TITLE]"
+		flags := commandFlags("media add-web")
+		webURL := flags.String("url", "", "absolute http(s) URL of the page")
+		title := flags.String("title", "", "library title (defaults to the URL)")
+		if code := parseCommand(flags, args[1:], streams.stderr); code != exitOK || slices.ContainsFunc(args[1:], isHelpFlag) {
+			return code
+		}
+		if flags.NArg() != 0 || *webURL == "" {
+			return usageError(streams.stderr, usage)
+		}
+		item, err := api.CreateMedia(ctx, map[string]any{"kind": "web", "url": *webURL, "title": *title}, "")
+		if err != nil {
+			return renderAPIError(streams, options.json, err)
+		}
+		if options.json {
+			writeJSON(streams.stdout, item)
+		} else {
+			printDocument(streams.stdout, item)
+		}
+		return exitOK
 	default:
-		return usageError(streams.stderr, "usage: cable media <upload|register-local>")
+		return usageError(streams.stderr, "usage: cable media <upload|register-local|add-web>")
 	}
 }
 
@@ -547,22 +583,28 @@ func runRelease(ctx context.Context, args []string, options globalOptions, strea
 	return exitOK
 }
 
+func isHelpFlag(arg string) bool {
+	return arg == "-h" || arg == "--h" || arg == "-help" || arg == "--help"
+}
+
 func runAssignment(ctx context.Context, args []string, options globalOptions, streams commandIO) int {
 	if len(args) == 0 || (args[0] != "set" && args[0] != "assign") {
 		return usageError(streams.stderr, "usage: cable assignment set [flags] NODE_ID")
 	}
 	flags := commandFlags("assignment set")
-	releaseID := flags.String("release-id", "", "release ID")
-	digest := flags.String("release-digest", "", "release digest")
-	mode := flags.String("delivery-mode", "stream", "stream or cache_then_play")
+	mediaID := flags.String("media-id", "", "media item to show")
+	playlistID := flags.String("playlist-id", "", "playlist to loop")
+	mode := flags.String("delivery-mode", "", "stream or cache_then_play (defaults from the release)")
+	remoteInput := flags.Bool("remote-input", false, "accept remote input")
+	showQR := flags.Bool("show-qr", false, "show the remote QR code (requires --remote-input)")
 	generation := flags.Int64("expected-generation", -1, "expected assignment generation")
 	ifMatch := flags.String("if-match", "", "current assignment ETag")
 	key := flags.String("idempotency-key", "", "idempotency key")
 	if code := parseCommand(flags, args[1:], streams.stderr); code != exitOK {
 		return code
 	}
-	if flags.NArg() != 1 || *releaseID == "" || *digest == "" || *generation < 0 || *ifMatch == "" || (*mode != "stream" && *mode != "cache_then_play") {
-		return usageError(streams.stderr, "usage: cable assignment set --release-id ID --release-digest DIGEST --expected-generation N --if-match ETAG [flags] NODE_ID")
+	if flags.NArg() != 1 || (*mediaID == "") == (*playlistID == "") || *generation < 0 || *ifMatch == "" || (*mode != "" && *mode != "stream" && *mode != "cache_then_play") {
+		return usageError(streams.stderr, "usage: cable assignment set (--media-id ID|--playlist-id ID) --expected-generation N --if-match ETAG [flags] NODE_ID")
 	}
 	api, code := configuredClient(options, streams)
 	if code != exitOK {
@@ -573,10 +615,12 @@ func runAssignment(ctx context.Context, args []string, options globalOptions, st
 		return renderFailure(streams, options.json, exitIO, err)
 	}
 	assignment, err := api.PutAssignment(ctx, flags.Arg(0), *ifMatch, resolvedKey, operator.AssignmentInput{
-		ReleaseID:          *releaseID,
-		ReleaseDigest:      *digest,
+		MediaID:            *mediaID,
+		PlaylistID:         *playlistID,
 		DeliveryMode:       *mode,
 		ExpectedGeneration: *generation,
+		RemoteInput:        *remoteInput,
+		ShowQR:             *showQR,
 	})
 	if err != nil {
 		return renderAPIError(streams, options.json, err)
@@ -646,13 +690,15 @@ func runEvents(ctx context.Context, args []string, options globalOptions, stream
 }
 
 func runPlay(ctx context.Context, args []string, options globalOptions, streams commandIO) int {
+	const usage = "usage: cable play [--file FILE|--asset ASSET_ID|--media MEDIA_ID|--url URL] NODE_ID"
 	flags := commandFlags("play")
 	filePath := flags.String("file", "", "media file to upload")
 	assetID := flags.String("asset", "", "existing asset ID")
-	releaseFile := flags.String("release-file", "", "publish input JSON file")
+	mediaID := flags.String("media", "", "existing media ID")
+	webURL := flags.String("url", "", "web page URL to add to the library and show")
 	name := flags.String("name", "", "asset name")
 	mediaType := flags.String("media-type", "", "media type")
-	mode := flags.String("delivery-mode", "stream", "stream or cache_then_play")
+	mode := flags.String("delivery-mode", "", "stream or cache_then_play (defaults from the release)")
 	timeout := flags.Duration("timeout", 30*time.Second, "wait timeout")
 	interval := flags.Duration("interval", 250*time.Millisecond, "poll interval")
 	noWait := flags.Bool("no-wait", false, "do not wait for convergence")
@@ -660,11 +706,16 @@ func runPlay(ctx context.Context, args []string, options globalOptions, streams 
 	if code := parseCommand(flags, args, streams.stderr); code != exitOK {
 		return code
 	}
-	if flags.NArg() != 1 || (*filePath == "" && *assetID == "" && *releaseFile == "") ||
-		(*filePath != "" && *assetID != "") || *timeout < 0 || *interval <= 0 {
-		return usageError(streams.stderr, "usage: cable play [--file FILE|--asset ASSET_ID|--release-file FILE] NODE_ID")
+	sources := 0
+	for _, source := range []string{*filePath, *assetID, *mediaID, *webURL} {
+		if source != "" {
+			sources++
+		}
 	}
-	if *mode != "stream" && *mode != "cache_then_play" {
+	if flags.NArg() != 1 || sources != 1 || *timeout < 0 || *interval <= 0 {
+		return usageError(streams.stderr, usage)
+	}
+	if *mode != "" && *mode != "stream" && *mode != "cache_then_play" {
 		return usageError(streams.stderr, "play --delivery-mode must be stream or cache_then_play")
 	}
 	resolvedKey, err := mutationKey(*key)
@@ -676,71 +727,67 @@ func runPlay(ctx context.Context, args []string, options globalOptions, streams 
 		return code
 	}
 	nodeID := flags.Arg(0)
-	var asset operator.Asset
-	if *filePath != "" {
-		file, err := os.Open(*filePath)
+	target := *mediaID
+	switch {
+	case *webURL != "":
+		item, err := api.CreateMedia(ctx, map[string]any{"kind": "web", "url": *webURL}, "")
 		if err != nil {
-			return renderFailure(streams, options.json, exitIO, fmt.Errorf("open play media: %w", err))
+			return renderAPIError(streams, options.json, err)
 		}
-		defer file.Close()
-		info, err := file.Stat()
-		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
-			if err == nil {
-				err = errors.New("play media must be a non-empty regular file")
+		target, _ = item["id"].(string)
+	case *filePath != "" || *assetID != "":
+		asset := operator.Asset{ID: *assetID, Name: *assetID}
+		if *filePath != "" {
+			file, err := os.Open(*filePath)
+			if err != nil {
+				return renderFailure(streams, options.json, exitIO, fmt.Errorf("open play media: %w", err))
 			}
-			return renderFailure(streams, options.json, exitIO, err)
-		}
-		resolvedName := *name
-		if resolvedName == "" {
-			resolvedName = filepath.Base(*filePath)
-		}
-		resolvedType := *mediaType
-		if resolvedType == "" {
-			resolvedType = mime.TypeByExtension(strings.ToLower(filepath.Ext(*filePath)))
+			defer file.Close()
+			info, err := file.Stat()
+			if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+				if err == nil {
+					err = errors.New("play media must be a non-empty regular file")
+				}
+				return renderFailure(streams, options.json, exitIO, err)
+			}
+			resolvedName := *name
+			if resolvedName == "" {
+				resolvedName = filepath.Base(*filePath)
+			}
+			resolvedType := *mediaType
 			if resolvedType == "" {
-				resolvedType = "application/octet-stream"
+				resolvedType = mime.TypeByExtension(strings.ToLower(filepath.Ext(*filePath)))
+				if resolvedType == "" {
+					resolvedType = "application/octet-stream"
+				}
+			}
+			asset, err = api.UploadAsset(ctx, resolvedName, resolvedType, info.Size(), file, resolvedKey)
+			if err != nil {
+				return renderAPIError(streams, options.json, err)
 			}
 		}
-		asset, err = api.UploadAsset(ctx, resolvedName, resolvedType, info.Size(), file, resolvedKey)
+		item, found, err := api.MediaForAsset(ctx, asset.ID)
 		if err != nil {
 			return renderAPIError(streams, options.json, err)
 		}
-	} else if *assetID != "" {
-		asset.ID = *assetID
-	} else {
-		input, err := os.ReadFile(*releaseFile)
-		if err != nil {
-			return renderFailure(streams, options.json, exitIO, fmt.Errorf("read play release: %w", err))
+		if !found {
+			item, err = api.CreateMedia(ctx, map[string]any{
+				"assetId": asset.ID, "title": asset.Name, "tags": []string{},
+				"playback": map[string]any{"fit": "fit", "loop": false, "muted": false, "volume": 100, "orientation": 0},
+			}, resolvedKey+"-media")
+			if err != nil {
+				return renderAPIError(streams, options.json, err)
+			}
 		}
-		release, err := api.PublishRelease(ctx, input, resolvedKey)
-		if err != nil {
-			return renderAPIError(streams, options.json, err)
-		}
-		return convergePlay(ctx, api, options, streams, nodeID, release, *mode, resolvedKey, *timeout, *interval, *noWait)
+		target, _ = item["id"].(string)
 	}
-	input := map[string]any{
-		"playback": map[string]any{
-			"assetId": asset.ID, "fit": "fit", "loop": false, "muted": false,
-			"volume": 100, "orientation": 0, "allowedDeliveryModes": []string{*mode},
-		},
+	if target == "" {
+		return renderFailure(streams, options.json, exitAPI, errors.New("media response omitted an id"))
 	}
-	body, err := json.Marshal(input)
-	if err != nil {
-		return renderFailure(streams, options.json, exitIO, err)
-	}
-	release, err := api.PublishRelease(ctx, body, resolvedKey)
-	if err != nil {
-		return renderAPIError(streams, options.json, err)
-	}
-	return convergePlay(ctx, api, options, streams, nodeID, release, *mode, resolvedKey, *timeout, *interval, *noWait)
+	return convergePlay(ctx, api, options, streams, nodeID, target, *mode, resolvedKey, *timeout, *interval, *noWait)
 }
 
-func convergePlay(ctx context.Context, api *operator.Client, options globalOptions, streams commandIO, nodeID string, release operator.Document, mode, key string, timeout, interval time.Duration, noWait bool) int {
-	releaseID, _ := release["id"].(string)
-	digest, _ := release["digest"].(string)
-	if releaseID == "" || digest == "" {
-		return renderFailure(streams, options.json, exitAPI, errors.New("publish response omitted release id or digest"))
-	}
+func convergePlay(ctx context.Context, api *operator.Client, options globalOptions, streams commandIO, nodeID, mediaID, mode, key string, timeout, interval time.Duration, noWait bool) int {
 	current, err := api.GetAssignment(ctx, nodeID)
 	if err != nil {
 		var problem *operator.Problem
@@ -753,7 +800,7 @@ func convergePlay(ctx context.Context, api *operator.Client, options globalOptio
 		expected = current.DesiredGeneration
 	}
 	assignment, err := api.PutAssignment(ctx, nodeID, fmt.Sprintf("\"generation:%d\"", expected), key, operator.AssignmentInput{
-		ReleaseID: releaseID, ReleaseDigest: digest, DeliveryMode: mode, ExpectedGeneration: expected,
+		MediaID: mediaID, DeliveryMode: mode, ExpectedGeneration: expected,
 	})
 	if err != nil {
 		return renderAPIError(streams, options.json, err)
@@ -1168,7 +1215,7 @@ func writeUsage(output io.Writer) {
 func writeCommandUsage(output io.Writer, command string) {
 	switch command {
 	case "play":
-		fmt.Fprintln(output, "usage: cable play [--file FILE|--asset ASSET_ID|--release-file FILE] [--timeout DURATION] NODE_ID")
+		fmt.Fprintln(output, "usage: cable play [--file FILE|--asset ASSET_ID|--media MEDIA_ID|--url URL] [--timeout DURATION] NODE_ID")
 	case "wait":
 		fmt.Fprintln(output, "usage: cable wait [--generation N|--condition CONDITION] [--timeout DURATION] NODE_ID")
 	case "fixture":

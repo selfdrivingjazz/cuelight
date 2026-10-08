@@ -121,6 +121,18 @@ func (p *productionClient) PublishRelease(ctx context.Context, b json.RawMessage
 	}
 	return p.api.PublishRelease(ctx, b, k)
 }
+func (p *productionClient) CreateMedia(ctx context.Context, input any, k string) (client.Document, error) {
+	if err := p.ensure(ctx); err != nil {
+		return nil, err
+	}
+	return p.api.CreateMedia(ctx, input, k)
+}
+func (p *productionClient) MediaForAsset(ctx context.Context, assetID string) (client.Document, bool, error) {
+	if err := p.ensure(ctx); err != nil {
+		return nil, false, err
+	}
+	return p.api.MediaForAsset(ctx, assetID)
+}
 func (p *productionClient) PutAssignment(ctx context.Context, n, match, k string, i client.AssignmentInput) (client.Assignment, error) {
 	if err := p.ensure(ctx); err != nil {
 		return client.Assignment{}, err

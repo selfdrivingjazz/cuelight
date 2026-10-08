@@ -45,20 +45,27 @@ type Config struct {
 	ProtocolVersion         string
 	PlaybackProfile         string
 	PublicURL               string
-	DatabaseTimeout         time.Duration
-	DatabaseMaxConnections  int
-	DatabaseMaxIdle         int
-	DatabaseConnLifetime    time.Duration
-	ReadHeaderTimeout       time.Duration
-	IdleTimeout             time.Duration
-	ShutdownTimeout         time.Duration
-	MaxHeaderBytes          int
-	MaxBodyBytes            int64
-	MaxUploadBytes          int64
-	MaxChunkBytes           int64
-	MaxLocalMediaBytes      int64
-	MaxEvents               int
-	MaxWait                 time.Duration
+	// WebNodeDir is the built website-node app served at /node/; empty disables it.
+	WebNodeDir string
+	// CableWebDir is the built cable-web guide served at /cable/; empty disables it.
+	CableWebDir string
+	// WebCaptureBrowser is a headless Chromium binary used to capture web
+	// library thumbnails; empty auto-detects one on PATH.
+	WebCaptureBrowser      string
+	DatabaseTimeout        time.Duration
+	DatabaseMaxConnections int
+	DatabaseMaxIdle        int
+	DatabaseConnLifetime   time.Duration
+	ReadHeaderTimeout      time.Duration
+	IdleTimeout            time.Duration
+	ShutdownTimeout        time.Duration
+	MaxHeaderBytes         int
+	MaxBodyBytes           int64
+	MaxUploadBytes         int64
+	MaxChunkBytes          int64
+	MaxLocalMediaBytes     int64
+	MaxEvents              int
+	MaxWait                time.Duration
 }
 
 type ConfigError struct {
@@ -87,6 +94,9 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		ProtocolVersion:         envOrDefault(lookup, "CABLE_CONTROL_PROTOCOL_VERSION", "1.0"),
 		PlaybackProfile:         envOrDefault(lookup, "CABLE_CONTROL_PLAYBACK_PROFILE", "default"),
 		PublicURL:               env(lookup, "CABLE_CONTROL_PUBLIC_URL"),
+		WebNodeDir:              env(lookup, "CABLE_CONTROL_WEB_NODE_DIR"),
+		CableWebDir:             env(lookup, "CABLE_CONTROL_CABLE_WEB_DIR"),
+		WebCaptureBrowser:       env(lookup, "CABLE_CONTROL_WEB_CAPTURE_BROWSER"),
 		DatabaseTimeout:         defaultDatabaseTimeout,
 		DatabaseMaxConnections:  defaultDatabaseConnections,
 		DatabaseMaxIdle:         defaultDatabaseIdle,

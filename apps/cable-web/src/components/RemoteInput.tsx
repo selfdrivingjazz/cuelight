@@ -1,5 +1,6 @@
 import * as React from "react";
 import QRCode from "qrcode";
+import { fetchRemoteEvents, GuideAuthError, type GuideAuth } from "../hosted";
 
 export interface RemoteEvent {
   sequence: number;
@@ -31,36 +32,53 @@ export function RemoteQRCode({ url }: { url: string }) {
   return source ? <aside className="qr-card"><span>Remote</span><img src={source} alt="Scan to open this node remote" /></aside> : null;
 }
 
-export function useRemoteInput(remoteURL: string | undefined, onEvent: (event: RemoteEvent) => void) {
-  const handler = React.useRef(onEvent);
-  React.useEffect(() => { handler.current = onEvent; }, [onEvent]);
+export interface RemoteDescriptor {
+  url: string;
+  showQr: boolean;
+  expiresAt: string;
+}
+
+/**
+ * Long-polls the node's remote session through the guide API. When the node
+ * renews its remote session the response carries the new descriptor; `onRemote`
+ * receives it and the cursor carries over (sequences stay monotonic).
+ */
+export function useRemoteInput(auth: GuideAuth | undefined, remoteURL: string | undefined, onEvent: (event: RemoteEvent) => void, onRemote?: (remote: RemoteDescriptor) => void, onAuthError?: (error: GuideAuthError) => void) {
+  const handlers = React.useRef({ onEvent, onRemote, onAuthError });
+  React.useEffect(() => { handlers.current = { onEvent, onRemote, onAuthError }; }, [onEvent, onRemote, onAuthError]);
   React.useEffect(() => {
-    if (!remoteURL) return;
+    if (!auth || !remoteURL) return;
     const controller = new AbortController();
     let after = cursors.get(remoteURL) ?? 0;
     let initialized = cursors.has(remoteURL);
     const poll = async () => {
       while (!controller.signal.aborted) {
         try {
-          const response = await fetch(`/bridge/v1/remote/events?after=${after}&waitSeconds=${initialized ? 25 : 0}`, { cache: "no-store", credentials: "omit", signal: controller.signal });
-          if (!response.ok) { await delay(1_000); continue; }
-          const page = await response.json() as { events?: RemoteEvent[]; nextSequence?: number };
-          after = page.nextSequence ?? after;
+          const page = await fetchRemoteEvents(auth, after, initialized ? 25 : 0, controller.signal);
+          after = page.next;
           cursors.set(remoteURL, after);
+          if (page.remote?.url && page.remote.url !== remoteURL) {
+            cursors.set(page.remote.url, after);
+            handlers.current.onRemote?.(page.remote);
+          }
           if (!initialized) {
             initialized = true;
             continue;
           }
-          for (const event of page.events ?? []) {
-            handler.current(event);
+          for (const event of page.events) {
+            handlers.current.onEvent(event);
             await delay(75);
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof GuideAuthError) {
+            handlers.current.onAuthError?.(error);
+            return;
+          }
           if (!controller.signal.aborted) await delay(1_000);
         }
       }
     };
     void poll();
     return () => controller.abort();
-  }, [remoteURL]);
+  }, [auth, remoteURL]);
 }

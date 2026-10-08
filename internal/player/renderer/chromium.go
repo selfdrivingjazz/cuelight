@@ -1,20 +1,16 @@
 package renderer
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +24,18 @@ type RemoteEventSource interface {
 	PollRemoteEvents(context.Context, string, int64, time.Duration) (playerclient.RemoteEventPage, error)
 }
 
+// RemoteSessionCreator is implemented by remote sources that can replace a
+// session the control plane no longer knows (expired or lost on restart).
+type RemoteSessionCreator interface {
+	CreateRemoteSession(context.Context, int64) (playerclient.RemoteSession, error)
+}
+
+// GuideTokenSource mints tokens for the control-hosted Cable guide
+// (https pages at /cable/?deployment=<id>; see HostedGuideDeployment).
+type GuideTokenSource interface {
+	CreateCableGuideToken(context.Context, string) (playerclient.CableGuideToken, error)
+}
+
 type ChromiumConfig struct {
 	BinaryPath   string
 	RuntimeRoot  string
@@ -37,11 +45,12 @@ type ChromiumConfig struct {
 	Output       io.Writer
 	Launcher     BrowserLauncher
 	Remote       RemoteEventSource
+	GuideTokens  GuideTokenSource
 }
 
-// Chromium owns the local shell server and the browser process. It never
-// forwards control-plane credentials to Chromium; the browser sees only the
-// loopback bridge URL.
+// Chromium owns the local media bridge server and the browser process. It
+// never forwards control-plane credentials to Chromium; bridge pages see only
+// the loopback URL and hosted guide pages see only their scoped guide token.
 type Chromium struct {
 	RuntimeRoot  string
 	LoopbackAddr string
@@ -49,25 +58,37 @@ type Chromium struct {
 	Output       io.Writer
 	launcher     BrowserLauncher
 	Remote       RemoteEventSource
+	GuideTokens  GuideTokenSource
 
 	mu       sync.Mutex
 	server   *http.Server
 	listener net.Listener
 	session  BrowserSession
-	pending  *chromiumState
-	current  *chromiumState
+	// stopWorker cancels the goroutine bound to session: the web remote-input
+	// forwarder or the media-schedule runner.
+	stopWorker context.CancelFunc
+	pending    *chromiumState
+	current    *chromiumState
 }
 
 type chromiumState struct {
-	candidate       Candidate
-	root            string
-	profile         string
-	entrypoint      string
-	healthPath      string
-	presentation    []byte
-	media           map[string]string
-	remoteSessionID string
-	ready           bool
+	candidate  Candidate
+	root       string
+	profile    string
+	entrypoint string
+	healthPath string
+	media      map[string]string
+	ready      bool
+
+	// scheduleItem is the schedule item currently on screen ("" when the
+	// schedule shows its blank page); guarded by Chromium.mu.
+	scheduleItem string
+
+	// remoteMu guards remote and the renewal backoff once the state is serving.
+	remoteMu      sync.Mutex
+	remote        *RemoteDescriptor
+	remoteRetryAt time.Time
+	remoteBackoff time.Duration
 }
 
 func NewChromium(config ChromiumConfig) (*Chromium, error) {
@@ -89,113 +110,68 @@ func NewChromium(config ChromiumConfig) (*Chromium, error) {
 	if host, _, err := net.SplitHostPort(config.LoopbackAddr); err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 		return nil, errors.New("Chromium bridge must bind a loopback IP address")
 	}
-	return &Chromium{RuntimeRoot: config.RuntimeRoot, LoopbackAddr: config.LoopbackAddr, Timeout: config.Timeout, Output: config.Output, Remote: config.Remote, launcher: config.Launcher}, nil
+	return &Chromium{RuntimeRoot: config.RuntimeRoot, LoopbackAddr: config.LoopbackAddr, Timeout: config.Timeout, Output: config.Output, Remote: config.Remote, GuideTokens: config.GuideTokens, launcher: config.Launcher}, nil
 }
 
 func (c *Chromium) Prepare(_ context.Context, candidate Candidate) error {
-	if candidate.Kind == release.PresentationMedia {
+	switch candidate.Kind {
+	case release.PresentationMedia:
 		return c.prepareMedia(candidate)
+	case release.PresentationMediaSchedule:
+		return c.prepareSchedule(candidate)
+	case release.PresentationWeb:
+		return c.prepareWeb(candidate)
+	default:
+		return errors.New("Chromium requires a media, media-schedule, or web candidate")
 	}
-	if candidate.Kind != release.PresentationCable {
-		return errors.New("Chromium requires a media or Cable candidate")
+}
+
+func (c *Chromium) prepareWeb(candidate Candidate) error {
+	if candidate.ReleaseDigest == "" {
+		return errors.New("web candidate is incomplete")
 	}
-	if candidate.ReleaseDigest == "" || candidate.ShellPath == "" || candidate.RevisionPath == "" || candidate.Entrypoint == "" || candidate.BridgeProtocol == "" {
-		return errors.New("cable candidate is incomplete")
-	}
-	if err := release.ValidateDigest(candidate.ShellBuildDigest); err != nil {
-		return fmt.Errorf("shell build digest: %w", err)
-	}
-	if err := release.ValidateDigest(candidate.RevisionArtifactDigest); err != nil {
-		return fmt.Errorf("revision artifact digest: %w", err)
-	}
-	rawRevision, err := os.ReadFile(candidate.RevisionPath)
-	if err != nil {
-		return fmt.Errorf("read revision artifact: %w", err)
-	}
-	if err := verifyBytesDigest(rawRevision, candidate.RevisionArtifactDigest); err != nil {
-		return fmt.Errorf("verify revision artifact: %w", err)
-	}
-	if err := validateRevision(rawRevision, candidate); err != nil {
+	if err := release.ValidateWebURL(candidate.WebURL); err != nil {
 		return err
 	}
-	presentation, err := transformRevision(rawRevision, candidate)
-	if err != nil {
-		return err
-	}
-	candidate.CableOccurrences = cableOccurrences(rawRevision)
-	root, err := os.MkdirTemp(c.RuntimeRoot, "cable-")
-	if err != nil {
-		return fmt.Errorf("create Chromium runtime root: %w", err)
-	}
-	if err := extractArchive(candidate.ShellPath, root); err != nil {
-		_ = os.RemoveAll(root)
-		return err
-	}
-	media := make(map[string]string)
-	for digest, path := range candidate.ArtifactPaths {
-		if !contains(candidate.ArtifactClosure, digest) || digest == candidate.ShellBuildDigest || digest == candidate.RevisionArtifactDigest {
-			continue
-		}
-		if err := release.ValidateDigest(digest); err != nil {
-			_ = os.RemoveAll(root)
-			return err
-		}
-		if info, err := os.Stat(path); err != nil || info.IsDir() {
-			_ = os.RemoveAll(root)
-			return fmt.Errorf("media artifact %s is unavailable", digest)
-		}
-		if err := verifyFileDigest(path, digest); err != nil {
-			_ = os.RemoveAll(root)
-			return fmt.Errorf("verify media artifact %s: %w", digest, err)
-		}
-		media[digest] = path
-	}
-	profile := root + ".profile"
-	if err := os.MkdirAll(profile, 0o700); err != nil {
-		_ = os.RemoveAll(root)
-		return fmt.Errorf("create Chromium profile: %w", err)
+	if _, ok := c.launcher.(WebBrowserLauncher); !ok {
+		return errors.New("web presentations require the desktop renderer")
 	}
 	c.mu.Lock()
 	removeChromiumState(c.pending)
-	remoteSessionID := ""
-	if candidate.Remote != nil {
-		remoteSessionID = candidate.Remote.SessionID
-	}
-	c.pending = &chromiumState{candidate: candidate, root: root, profile: profile, entrypoint: candidate.Entrypoint, healthPath: "/bridge/v1/presentation", presentation: presentation, media: media, remoteSessionID: remoteSessionID}
+	c.pending = &chromiumState{candidate: candidate, remote: copyRemote(candidate.Remote)}
 	c.mu.Unlock()
 	return nil
 }
 
-func (c *Chromium) prepareMedia(candidate Candidate) error {
-	if candidate.ReleaseDigest == "" || candidate.Source == "" {
-		return errors.New("media candidate is incomplete")
+// mediaPage is one bridge page showing a single image or video.
+type mediaPage struct {
+	MediaType   string
+	Source      string
+	Fit         string
+	Loop        bool
+	Muted       bool
+	Volume      int
+	Orientation int
+}
+
+func validateMediaPage(page mediaPage) error {
+	if page.MediaType != "video/mp4" && page.MediaType != "image/jpeg" && page.MediaType != "image/png" && page.MediaType != "image/webp" {
+		return fmt.Errorf("unsupported browser media type %q", page.MediaType)
 	}
-	if candidate.MediaType != "video/mp4" && candidate.MediaType != "image/jpeg" && candidate.MediaType != "image/png" && candidate.MediaType != "image/webp" {
-		return fmt.Errorf("unsupported browser media type %q", candidate.MediaType)
-	}
-	if candidate.Fit != "fit" && candidate.Fit != "fill" {
+	if page.Fit != "fit" && page.Fit != "fill" {
 		return errors.New("media fit must be fit or fill")
 	}
-	if candidate.Volume < 0 || candidate.Volume > 100 {
+	if page.Volume < 0 || page.Volume > 100 {
 		return errors.New("media volume must be between 0 and 100")
 	}
-	root, err := os.MkdirTemp(c.RuntimeRoot, "media-")
-	if err != nil {
-		return fmt.Errorf("create media runtime root: %w", err)
-	}
-	source := candidate.Source
-	media := make(map[string]string)
-	if !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") {
-		info, statErr := os.Stat(source)
-		if statErr != nil || info.IsDir() {
-			_ = os.RemoveAll(root)
-			return errors.New("cached media source is unavailable")
-		}
-		media["current"] = source
-		source = "/bridge/v1/media/current"
-	}
+	return nil
+}
+
+// mediaDocument renders the bridge page for page; servedSource is the URL the
+// page loads (a loopback stream URL or a bridge media path).
+func mediaDocument(page mediaPage, servedSource string) ([]byte, error) {
 	kind := "img"
-	if candidate.MediaType == "video/mp4" {
+	if page.MediaType == "video/mp4" {
 		kind = "video"
 	}
 	config, err := json.Marshal(struct {
@@ -206,13 +182,53 @@ func (c *Chromium) prepareMedia(candidate Candidate) error {
 		Muted       bool   `json:"muted"`
 		Volume      int    `json:"volume"`
 		Orientation int    `json:"orientation"`
-	}{kind, source, candidate.Fit, candidate.Loop, candidate.Muted, candidate.Volume, candidate.Orientation})
+	}{kind, servedSource, page.Fit, page.Loop, page.Muted, page.Volume, page.Orientation})
+	if err != nil {
+		return nil, err
+	}
+	return []byte(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,#root{width:100%;height:100%;margin:0;background:#000;overflow:hidden}#root{display:grid;place-items:center}video,img{width:100%;height:100%;background:#000}</style></head><body><div id="root"></div><script>const c=` + string(config) + `;const m=document.createElement(c.kind);m.src=c.source;m.style.objectFit=c.fit==="fill"?"cover":"contain";m.style.transform="rotate("+c.orientation+"deg)";m.addEventListener(c.kind==="video"?"canplay":"load",()=>fetch("/bridge/v1/ready",{method:"POST"}),{once:true});m.addEventListener("error",()=>document.body.dataset.playerError="true");if(c.kind==="video"){m.autoplay=true;m.playsInline=true;m.loop=c.loop;m.muted=c.muted;m.volume=c.volume/100;m.play().catch(()=>{});}document.getElementById("root").appendChild(m);</script></body></html>`), nil
+}
+
+const blankDocument = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{width:100%;height:100%;margin:0;background:#000}</style></head><body><script>fetch("/bridge/v1/ready",{method:"POST"})</script></body></html>`
+
+// servedMediaSource maps a renderer source to what the bridge page loads:
+// loopback stream URLs are used directly, cached files are served by key.
+func servedMediaSource(source, key string, media map[string]string) (string, error) {
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		return source, nil
+	}
+	info, err := os.Stat(source)
+	if err != nil || info.IsDir() {
+		return "", errors.New("cached media source is unavailable")
+	}
+	media[key] = source
+	return "/bridge/v1/media/" + key, nil
+}
+
+func (c *Chromium) prepareMedia(candidate Candidate) error {
+	if candidate.ReleaseDigest == "" || candidate.Source == "" {
+		return errors.New("media candidate is incomplete")
+	}
+	page := mediaPage{MediaType: candidate.MediaType, Source: candidate.Source, Fit: candidate.Fit, Loop: candidate.Loop, Muted: candidate.Muted, Volume: candidate.Volume, Orientation: candidate.Orientation}
+	if err := validateMediaPage(page); err != nil {
+		return err
+	}
+	root, err := os.MkdirTemp(c.RuntimeRoot, "media-")
+	if err != nil {
+		return fmt.Errorf("create media runtime root: %w", err)
+	}
+	media := make(map[string]string)
+	source, err := servedMediaSource(candidate.Source, "current", media)
 	if err != nil {
 		_ = os.RemoveAll(root)
 		return err
 	}
-	document := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,#root{width:100%;height:100%;margin:0;background:#000;overflow:hidden}#root{display:grid;place-items:center}video,img{width:100%;height:100%;background:#000}</style></head><body><div id="root"></div><script>const c=` + string(config) + `;const m=document.createElement(c.kind);m.src=c.source;m.style.objectFit=c.fit==="fill"?"cover":"contain";m.style.transform="rotate("+c.orientation+"deg)";m.addEventListener(c.kind==="video"?"canplay":"load",()=>fetch("/bridge/v1/ready",{method:"POST"}),{once:true});m.addEventListener("error",()=>document.body.dataset.playerError="true");if(c.kind==="video"){m.autoplay=true;m.playsInline=true;m.loop=c.loop;m.muted=c.muted;m.volume=c.volume/100;m.play().catch(()=>{});}document.getElementById("root").appendChild(m);</script></body></html>`
-	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte(document), 0o600); err != nil {
+	document, err := mediaDocument(page, source)
+	if err != nil {
+		_ = os.RemoveAll(root)
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, "index.html"), document, 0o600); err != nil {
 		_ = os.RemoveAll(root)
 		return err
 	}
@@ -228,30 +244,99 @@ func (c *Chromium) prepareMedia(candidate Candidate) error {
 	return nil
 }
 
+// prepareSchedule writes one bridge page per media item; web items are shown
+// as live pages through the desktop renderer for their scheduled duration.
+func (c *Chromium) prepareSchedule(candidate Candidate) error {
+	if candidate.ReleaseDigest == "" || len(candidate.Schedule) == 0 || !candidate.WindowStart.Before(candidate.WindowEnd) {
+		return errors.New("media schedule candidate is incomplete")
+	}
+	root, err := os.MkdirTemp(c.RuntimeRoot, "schedule-")
+	if err != nil {
+		return fmt.Errorf("create schedule runtime root: %w", err)
+	}
+	fail := func(err error) error {
+		_ = os.RemoveAll(root)
+		return err
+	}
+	if err := os.Mkdir(filepath.Join(root, "items"), 0o700); err != nil {
+		return fail(err)
+	}
+	media := make(map[string]string)
+	for _, item := range candidate.Schedule {
+		if item.ID == "" || strings.ContainsAny(item.ID, `/\`) || !item.StartsAt.Before(item.EndsAt) {
+			return fail(errors.New("schedule item id or window is invalid"))
+		}
+		if item.WebURL != "" {
+			if err := release.ValidateWebURL(item.WebURL); err != nil {
+				return fail(fmt.Errorf("schedule item %q: %w", item.ID, err))
+			}
+			if _, ok := c.launcher.(WebBrowserLauncher); !ok {
+				return fail(errors.New("web schedule items require the desktop renderer"))
+			}
+			continue
+		}
+		page := mediaPage{MediaType: item.MediaType, Source: item.Source, Fit: item.Fit, Loop: item.Loop, Muted: item.Muted, Volume: item.Volume, Orientation: item.Orientation}
+		if item.Source == "" {
+			return fail(fmt.Errorf("schedule item %q has no source", item.ID))
+		}
+		if err := validateMediaPage(page); err != nil {
+			return fail(fmt.Errorf("schedule item %q: %w", item.ID, err))
+		}
+		source, err := servedMediaSource(item.Source, item.ID, media)
+		if err != nil {
+			return fail(fmt.Errorf("schedule item %q: %w", item.ID, err))
+		}
+		document, err := mediaDocument(page, source)
+		if err != nil {
+			return fail(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "items", item.ID+".html"), document, 0o600); err != nil {
+			return fail(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "blank.html"), []byte(blankDocument), 0o600); err != nil {
+		return fail(err)
+	}
+	profile := root + ".profile"
+	if err := os.MkdirAll(profile, 0o700); err != nil {
+		return fail(err)
+	}
+	c.mu.Lock()
+	removeChromiumState(c.pending)
+	c.pending = &chromiumState{candidate: candidate, root: root, profile: profile, entrypoint: "blank.html", healthPath: "/blank.html", media: media}
+	c.mu.Unlock()
+	return nil
+}
+
 func (c *Chromium) Start(ctx context.Context, candidate Candidate) error {
 	c.mu.Lock()
 	state := c.pending
 	if state == nil || state.candidate.ReleaseDigest != candidate.ReleaseDigest {
 		c.mu.Unlock()
-		return errors.New("cable candidate was not prepared")
+		return errors.New("Chromium candidate was not prepared")
 	}
-	if c.server != nil {
-		oldServer, oldSession := c.server, c.session
-		c.server, c.listener, c.session = nil, nil, nil
+	if c.server != nil || c.session != nil {
+		oldServer, oldSession, oldWorker := c.server, c.session, c.stopWorker
+		c.server, c.listener, c.session, c.stopWorker = nil, nil, nil, nil
 		c.mu.Unlock()
+		if oldWorker != nil {
+			oldWorker()
+		}
 		if oldSession != nil {
 			_ = oldSession.Stop(context.Background())
 		}
-		_ = oldServer.Shutdown(context.Background())
+		if oldServer != nil {
+			_ = oldServer.Shutdown(context.Background())
+		}
 		c.mu.Lock()
 	}
+	if state.candidate.Kind == release.PresentationWeb {
+		c.mu.Unlock()
+		return c.startWeb(ctx, state)
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/bridge/v1/presentation", func(w http.ResponseWriter, r *http.Request) { c.servePresentation(w, r, state) })
 	mux.HandleFunc("/bridge/v1/ready", func(w http.ResponseWriter, r *http.Request) { c.serveReady(w, r, state) })
 	mux.HandleFunc("/bridge/v1/media/", func(w http.ResponseWriter, r *http.Request) { c.serveMedia(w, r, state) })
-	if state.remoteSessionID != "" && c.Remote != nil {
-		mux.HandleFunc("/bridge/v1/remote/events", func(w http.ResponseWriter, r *http.Request) { c.serveRemoteEvents(w, r, state) })
-	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { c.serveStatic(w, r, state) })
 	listener, err := net.Listen("tcp", c.LoopbackAddr)
 	if err != nil {
@@ -270,8 +355,10 @@ func (c *Chromium) Start(ctx context.Context, candidate Candidate) error {
 	c.mu.Unlock()
 	go func() { _ = server.Serve(listener) }()
 	base := "http://" + listener.Addr().String()
-	entryURL := base + "/"
-	session, err := c.launcher.Launch(ctx, entryURL, state.profile)
+	if state.candidate.Kind == release.PresentationMediaSchedule {
+		return c.startSchedule(ctx, state, base)
+	}
+	session, err := c.launcher.Launch(ctx, base+"/", state.profile)
 	if err != nil {
 		_ = server.Shutdown(context.Background())
 		c.mu.Lock()
@@ -287,6 +374,325 @@ func (c *Chromium) Start(ctx context.Context, candidate Candidate) error {
 		return err
 	}
 	return nil
+}
+
+// startSchedule shows the item active now, waits for the bridge page (or the
+// web window) to be ready, then hands item boundaries to runSchedule.
+func (c *Chromium) startSchedule(ctx context.Context, state *chromiumState, base string) error {
+	now := time.Now()
+	item, active := SelectScheduleItem(state.candidate.Schedule, now)
+	var selected *ScheduleItem
+	if active {
+		selected = &item
+	}
+	if err := c.showScheduleItem(ctx, state, base, selected); err != nil {
+		_ = c.abortPending(context.Background())
+		return err
+	}
+	if selected == nil || selected.WebURL != "" {
+		c.mu.Lock()
+		state.ready = true
+		c.mu.Unlock()
+	} else if err := c.waitReady(ctx); err != nil {
+		_ = c.abortPending(context.Background())
+		return err
+	}
+	workerCtx, stop := context.WithCancel(context.Background())
+	c.mu.Lock()
+	c.stopWorker = stop
+	c.mu.Unlock()
+	go c.runSchedule(workerCtx, state, base)
+	return nil
+}
+
+func (c *Chromium) runSchedule(ctx context.Context, state *chromiumState, base string) {
+	for {
+		now := time.Now()
+		next := nextScheduleBoundary(state.candidate, now)
+		if next.IsZero() {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(next.Sub(now)):
+		}
+		item, active := SelectScheduleItem(state.candidate.Schedule, time.Now())
+		var selected *ScheduleItem
+		if active {
+			selected = &item
+		}
+		if err := c.showScheduleItem(ctx, state, base, selected); err != nil && ctx.Err() == nil {
+			c.logf("media schedule transition failed: %v\n", err)
+		}
+	}
+}
+
+// nextScheduleBoundary is the first item start or end after now, or zero once
+// the schedule window has ended.
+func nextScheduleBoundary(candidate Candidate, now time.Time) time.Time {
+	var next time.Time
+	consider := func(at time.Time) {
+		if at.After(now) && (next.IsZero() || at.Before(next)) {
+			next = at
+		}
+	}
+	consider(candidate.WindowStart)
+	consider(candidate.WindowEnd)
+	for _, item := range candidate.Schedule {
+		consider(item.StartsAt)
+		consider(item.EndsAt)
+	}
+	return next
+}
+
+// showScheduleItem replaces the on-screen window with item (nil = blank).
+func (c *Chromium) showScheduleItem(ctx context.Context, state *chromiumState, base string, item *ScheduleItem) error {
+	itemID := ""
+	if item != nil {
+		itemID = item.ID
+	}
+	c.mu.Lock()
+	if c.session != nil && state.scheduleItem == itemID {
+		c.mu.Unlock()
+		return nil
+	}
+	c.mu.Unlock()
+	var (
+		session BrowserSession
+		err     error
+	)
+	switch {
+	case item == nil:
+		session, err = c.launcher.Launch(ctx, base+"/blank.html", state.profile)
+	case item.WebURL != "":
+		launcher, ok := c.launcher.(WebBrowserLauncher)
+		if !ok {
+			return errors.New("web schedule items require the desktop renderer")
+		}
+		session, err = launcher.LaunchWeb(ctx, WebLaunch{URL: item.WebURL})
+	default:
+		session, err = c.launcher.Launch(ctx, base+"/items/"+url.PathEscape(item.ID)+".html", state.profile)
+	}
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	if ctx.Err() != nil {
+		// Stopped or replaced while launching: never resurrect a window.
+		c.mu.Unlock()
+		_ = session.Stop(context.Background())
+		return ctx.Err()
+	}
+	previous := c.session
+	c.session, state.scheduleItem = session, itemID
+	c.mu.Unlock()
+	if previous != nil && previous != session {
+		_ = previous.Stop(context.Background())
+	}
+	return nil
+}
+
+// startWeb opens the website directly in the desktop renderer. Readiness is a
+// successful launch of a live window. Plain sites receive remote input as
+// injected native events; the control-hosted Cable guide is loaded with a
+// scoped guide token and consumes the remote session itself.
+func (c *Chromium) startWeb(ctx context.Context, state *chromiumState) error {
+	launcher, ok := c.launcher.(WebBrowserLauncher)
+	if !ok {
+		return errors.New("web presentations require the desktop renderer")
+	}
+	launch := WebLaunch{URL: state.candidate.WebURL, Remote: state.candidate.Remote}
+	guide := false
+	if c.GuideTokens != nil {
+		if deploymentID, ok := HostedGuideDeployment(launch.URL); ok {
+			token, err := c.GuideTokens.CreateCableGuideToken(ctx, deploymentID)
+			if err != nil {
+				return fmt.Errorf("mint Cable guide token: %w", err)
+			}
+			launch.URL, launch.Remote, guide = WithGuideToken(launch.URL, token.Token), nil, true
+		}
+	}
+	session, err := launcher.LaunchWeb(ctx, launch)
+	if err != nil {
+		return err
+	}
+	alive, err := session.Alive(ctx)
+	if err == nil && !alive {
+		err = errors.New("web window exited during startup")
+	}
+	if err != nil {
+		_ = session.Stop(context.Background())
+		return err
+	}
+	var stopWorker context.CancelFunc
+	if state.remote != nil && c.Remote != nil {
+		var workerCtx context.Context
+		if input, ok := session.(BrowserInputSession); ok && !guide {
+			workerCtx, stopWorker = context.WithCancel(context.Background())
+			go c.forwardRemoteInput(workerCtx, state, input)
+		} else if guide {
+			workerCtx, stopWorker = context.WithCancel(context.Background())
+			go c.keepRemoteSession(workerCtx, state)
+		}
+	}
+	c.mu.Lock()
+	c.session, c.stopWorker = session, stopWorker
+	state.ready = true
+	c.mu.Unlock()
+	return nil
+}
+
+// keepRemoteSession replaces the remote session when it expires so the hosted
+// guide, which polls the node's active session itself, keeps a live remote.
+func (c *Chromium) keepRemoteSession(ctx context.Context, state *chromiumState) {
+	for {
+		current := state.currentRemote()
+		if current.ExpiresAt.IsZero() {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(current.ExpiresAt)):
+		}
+		if _, err := c.renewRemote(ctx, state, current.SessionID); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			c.logf("guide remote session renewal failed: %v\n", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+		}
+	}
+}
+
+// HostedGuideDeployment reports the deployment of a control-hosted Cable
+// guide URL: an https page at path /cable/ with a deployment param. The origin
+// is not compared with the player's control URL because players often reach
+// control through a different address (tunnel, LAN name) than the public
+// origin baked into the signed release. Minting the guide token is the
+// authorization step: control only issues one when this node's assignment
+// targets that deployment's Cable media item.
+func HostedGuideDeployment(pageURL string) (string, bool) {
+	page, err := url.Parse(pageURL)
+	if err != nil || !strings.EqualFold(page.Scheme, "https") || page.Path != "/cable/" {
+		return "", false
+	}
+	deploymentID := page.Query().Get("deployment")
+	return deploymentID, deploymentID != ""
+}
+
+// WithGuideToken replaces any fragment of pageURL with #token=<token>.
+func WithGuideToken(pageURL, token string) string {
+	base, _, _ := strings.Cut(pageURL, "#")
+	return base + "#token=" + url.QueryEscape(token)
+}
+
+const remoteInputPollWait = 25 * time.Second
+
+func (c *Chromium) forwardRemoteInput(ctx context.Context, state *chromiumState, input BrowserInputSession) {
+	var after int64
+	for ctx.Err() == nil {
+		current := state.currentRemote()
+		page, err := c.Remote.PollRemoteEvents(ctx, current.SessionID, after, remoteInputPollWait)
+		if errors.Is(err, playerclient.ErrRemoteSessionGone) && ctx.Err() == nil {
+			renewed, renewErr := c.renewRemote(ctx, state, current.SessionID)
+			if renewErr == nil {
+				if updater, ok := input.(BrowserRemoteSession); ok {
+					if err := updater.UpdateRemote(ctx, renewed); err != nil && ctx.Err() == nil {
+						c.logf("remote QR refresh failed: %v\n", err)
+					}
+				}
+				continue
+			}
+			err = renewErr
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			c.logf("remote input poll failed: %v\n", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+			continue
+		}
+		if len(page.Events) > 0 {
+			if err := input.SendInput(ctx, page.Events); err != nil && ctx.Err() == nil {
+				c.logf("remote input delivery failed: %v\n", err)
+			}
+		}
+		if page.NextSequence > after {
+			after = page.NextSequence
+		}
+	}
+}
+
+const (
+	remoteRenewMinBackoff = time.Second
+	remoteRenewMaxBackoff = 30 * time.Second
+)
+
+var errRemoteRenewBackoff = errors.New("remote session renewal backing off")
+
+func copyRemote(remote *RemoteDescriptor) *RemoteDescriptor {
+	if remote == nil || remote.SessionID == "" {
+		return nil
+	}
+	value := *remote
+	return &value
+}
+
+func (s *chromiumState) currentRemote() RemoteDescriptor {
+	s.remoteMu.Lock()
+	defer s.remoteMu.Unlock()
+	return *s.remote
+}
+
+// renewRemote replaces the remote session staleID once: concurrent pollers
+// serialise on remoteMu and reuse the replacement, and failures back off
+// exponentially so a down control plane is not stampeded.
+func (c *Chromium) renewRemote(ctx context.Context, state *chromiumState, staleID string) (RemoteDescriptor, error) {
+	state.remoteMu.Lock()
+	defer state.remoteMu.Unlock()
+	if state.remote.SessionID != staleID {
+		return *state.remote, nil
+	}
+	creator, ok := c.Remote.(RemoteSessionCreator)
+	if !ok {
+		return RemoteDescriptor{}, errors.New("remote source cannot renew sessions")
+	}
+	now := time.Now()
+	if now.Before(state.remoteRetryAt) {
+		return RemoteDescriptor{}, errRemoteRenewBackoff
+	}
+	session, err := creator.CreateRemoteSession(ctx, state.remote.Generation)
+	if err == nil && session.ID == "" {
+		err = errors.New("renewed remote session has no id")
+	}
+	if err != nil {
+		if ctx.Err() == nil {
+			state.remoteBackoff = min(max(2*state.remoteBackoff, remoteRenewMinBackoff), remoteRenewMaxBackoff)
+			state.remoteRetryAt = now.Add(state.remoteBackoff)
+		}
+		return RemoteDescriptor{}, fmt.Errorf("renew remote session: %w", err)
+	}
+	state.remoteBackoff, state.remoteRetryAt = 0, time.Time{}
+	state.remote = &RemoteDescriptor{SessionID: session.ID, Generation: state.remote.Generation, URL: session.RemoteURL, ShowQR: session.ShowQR, ExpiresAt: session.ExpiresAt}
+	c.logf("remote session %s renewed as %s\n", staleID, session.ID)
+	return *state.remote, nil
+}
+
+func (c *Chromium) logf(format string, args ...any) {
+	if c.Output != nil {
+		_, _ = fmt.Fprintf(c.Output, format, args...)
+	}
 }
 
 func (c *Chromium) waitReady(ctx context.Context) error {
@@ -326,9 +732,12 @@ func (c *Chromium) waitReady(ctx context.Context) error {
 
 func (c *Chromium) abortPending(ctx context.Context) error {
 	c.mu.Lock()
-	server, session, pending := c.server, c.session, c.pending
-	c.server, c.listener, c.session, c.pending = nil, nil, nil, nil
+	server, session, pending, stopWorker := c.server, c.session, c.pending, c.stopWorker
+	c.server, c.listener, c.session, c.pending, c.stopWorker = nil, nil, nil, nil, nil
 	c.mu.Unlock()
+	if stopWorker != nil {
+		stopWorker()
+	}
 	if session != nil {
 		_ = session.Stop(ctx)
 	}
@@ -355,9 +764,12 @@ func (c *Chromium) Commit(_ context.Context, candidate Candidate) error {
 
 func (c *Chromium) Stop(ctx context.Context) error {
 	c.mu.Lock()
-	server, session, current, pending := c.server, c.session, c.current, c.pending
-	c.server, c.listener, c.session, c.current, c.pending = nil, nil, nil, nil, nil
+	server, session, current, pending, stopWorker := c.server, c.session, c.current, c.pending, c.stopWorker
+	c.server, c.listener, c.session, c.current, c.pending, c.stopWorker = nil, nil, nil, nil, nil, nil
 	c.mu.Unlock()
+	if stopWorker != nil {
+		stopWorker()
+	}
 	var result error
 	if session != nil {
 		result = errors.Join(result, session.Stop(ctx))
@@ -371,7 +783,7 @@ func (c *Chromium) Stop(ctx context.Context) error {
 }
 
 func removeChromiumState(state *chromiumState) {
-	if state == nil {
+	if state == nil || state.root == "" {
 		return
 	}
 	_ = os.RemoveAll(state.root)
@@ -410,54 +822,15 @@ func (c *Chromium) Capture(ctx context.Context) ([]byte, error) {
 	return data, nil
 }
 
-func (c *Chromium) servePresentation(w http.ResponseWriter, r *http.Request, state *chromiumState) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	if r.Method == http.MethodGet {
-		_, _ = w.Write(state.presentation)
-	}
-}
-func (c *Chromium) serveRemoteEvents(w http.ResponseWriter, r *http.Request, state *chromiumState) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	after, err := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-	if err != nil || after < 0 {
-		http.Error(w, "invalid remote event cursor", http.StatusBadRequest)
-		return
-	}
-	waitSeconds, err := strconv.Atoi(r.URL.Query().Get("waitSeconds"))
-	if err != nil || waitSeconds < 0 || waitSeconds > 30 {
-		http.Error(w, "invalid remote event wait", http.StatusBadRequest)
-		return
-	}
-	page, err := c.Remote.PollRemoteEvents(r.Context(), state.remoteSessionID, after, time.Duration(waitSeconds)*time.Second)
-	if err != nil {
-		http.Error(w, "remote input unavailable", http.StatusBadGateway)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(page)
-}
-
 func (c *Chromium) serveMedia(w http.ResponseWriter, r *http.Request, state *chromiumState) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", 405)
 		return
 	}
-	digest := strings.TrimPrefix(r.URL.Path, "/bridge/v1/media/")
-	path, ok := state.media[digest]
-	if !ok || strings.Contains(digest, "/") {
+	key := strings.TrimPrefix(r.URL.Path, "/bridge/v1/media/")
+	path, ok := state.media[key]
+	if !ok || strings.Contains(key, "/") {
 		http.NotFound(w, r)
 		return
 	}
@@ -472,7 +845,7 @@ func (c *Chromium) serveMedia(w http.ResponseWriter, r *http.Request, state *chr
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeContent(w, r, digest, info.ModTime(), file)
+	http.ServeContent(w, r, key, info.ModTime(), file)
 }
 func (c *Chromium) serveStatic(w http.ResponseWriter, r *http.Request, state *chromiumState) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -505,12 +878,15 @@ func (c *Chromium) serveStatic(w http.ResponseWriter, r *http.Request, state *ch
 func (c *Chromium) Health(ctx context.Context, candidate Candidate) (Status, error) {
 	c.mu.Lock()
 	state := c.current
-	if state == nil {
+	if c.pending != nil && (state == nil || c.pending.candidate.ReleaseDigest == candidate.ReleaseDigest) {
 		state = c.pending
 	}
 	listener, session := c.listener, c.session
 	ready := state != nil && state.ready
 	c.mu.Unlock()
+	if state != nil && state.candidate.Kind == release.PresentationWeb {
+		return webHealth(ctx, candidate, session, ready)
+	}
 	if state == nil || listener == nil || !ready {
 		return Status{ReleaseDigest: candidate.ReleaseDigest, Candidate: candidate, Current: staleContent(candidate)}, nil
 	}
@@ -537,6 +913,17 @@ func (c *Chromium) Health(ctx context.Context, candidate Candidate) (Status, err
 	return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: healthy, Path: listener.Addr().String(), Candidate: candidate, Current: current}, nil
 }
 
+func webHealth(ctx context.Context, candidate Candidate, session BrowserSession, ready bool) (Status, error) {
+	if session == nil || !ready {
+		return Status{ReleaseDigest: candidate.ReleaseDigest, Candidate: candidate, Current: staleContent(candidate)}, nil
+	}
+	alive, err := session.Alive(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	return Status{ReleaseDigest: candidate.ReleaseDigest, Healthy: alive, Candidate: candidate, Current: observedContent(candidate, alive, time.Now())}, nil
+}
+
 func staleContent(candidate Candidate) *playerclient.CurrentContent {
 	now := time.Now().UTC()
 	return &playerclient.CurrentContent{ReleaseDigest: candidate.ReleaseDigest, PresentationKind: candidate.Kind, State: playerclient.ContentStateStale, TransitionedAt: now}
@@ -549,16 +936,15 @@ func observedContent(candidate Candidate, healthy bool, now time.Time) *playercl
 		content.State = playerclient.ContentStateStale
 		return content
 	}
-	if candidate.Kind == release.PresentationCable {
-		for _, occurrence := range candidate.CableOccurrences {
-			if !now.Before(occurrence.StartsAt) && now.Before(occurrence.EndsAt) {
-				start := occurrence.StartsAt.UTC()
-				content.ChannelID, content.BlockID, content.ItemID, content.AssetID = occurrence.ChannelID, occurrence.BlockID, occurrence.ItemID, occurrence.AssetID
-				content.StartedAt, content.TransitionedAt = &start, start
-				return content
-			}
+	if candidate.Kind == release.PresentationMediaSchedule {
+		item, ok := SelectScheduleItem(candidate.Schedule, now)
+		if !ok {
+			content.State = playerclient.ContentStateOffAir
+			return content
 		}
-		content.State = playerclient.ContentStateOffAir
+		start := item.StartsAt.UTC()
+		content.MediaID, content.AssetID = item.MediaID, item.AssetID
+		content.StartedAt, content.TransitionedAt = &start, start
 		return content
 	}
 	start := now
@@ -581,283 +967,7 @@ func (c *Chromium) serveReady(w http.ResponseWriter, r *http.Request, state *chr
 	c.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
-func extractArchive(path, destination string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open shell archive: %w", err)
-	}
-	defer file.Close()
-	var input io.Reader = file
-	magic := make([]byte, 2)
-	if _, err := io.ReadFull(file, magic); err != nil {
-		return fmt.Errorf("read shell archive: %w", err)
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	if magic[0] == 0x1f && magic[1] == 0x8b {
-		gz, err := gzip.NewReader(file)
-		if err != nil {
-			return fmt.Errorf("open shell gzip: %w", err)
-		}
-		defer gz.Close()
-		input = gz
-	}
-	reader := tar.NewReader(input)
-	for {
-		header, err := reader.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("read shell archive: %w", err)
-		}
-		name := filepath.ToSlash(header.Name)
-		if header.Name == "" || strings.HasPrefix(name, "/") || filepath.IsAbs(header.Name) {
-			return errors.New("shell archive contains an absolute path")
-		}
-		if _, err := safeJoin(destination, name); err != nil {
-			return fmt.Errorf("unsafe shell archive path %q: %w", header.Name, err)
-		}
-		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
-			return fmt.Errorf("shell archive contains link %q", header.Name)
-		}
-		target, _ := safeJoin(destination, name)
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY|os.O_EXCL, 0o644)
-			if err != nil {
-				return err
-			}
-			_, copyErr := io.Copy(file, io.LimitReader(reader, header.Size))
-			closeErr := file.Close()
-			if copyErr != nil {
-				return copyErr
-			}
-			if closeErr != nil {
-				return closeErr
-			}
-		default:
-			return fmt.Errorf("unsupported shell archive entry %q", header.Name)
-		}
-	}
-	return nil
-}
 
-type revisionDocument struct {
-	Schema            string    `json:"schema"`
-	ID                string    `json:"id"`
-	Digest            string    `json:"digest"`
-	DeploymentID      string    `json:"deploymentId"`
-	DeploymentVersion int64     `json:"deploymentVersion"`
-	ShellBuildID      string    `json:"shellBuildId"`
-	ShellBuildDigest  string    `json:"shellBuildDigest"`
-	Entrypoint        string    `json:"entrypoint"`
-	BridgeProtocol    string    `json:"bridgeProtocol"`
-	GeneratedAt       time.Time `json:"generatedAt"`
-	Theme             string    `json:"theme"`
-	GuideDensity      string    `json:"guideDensity"`
-	Timezone          string    `json:"timezone"`
-	Window            struct {
-		StartsAt time.Time `json:"startsAt"`
-		EndsAt   time.Time `json:"endsAt"`
-	} `json:"window"`
-	Channels        []revisionChannel `json:"channels"`
-	ArtifactDigests []string          `json:"artifactDigests"`
-}
-type revisionChannel struct {
-	ID       string            `json:"id"`
-	Number   int               `json:"number"`
-	Name     string            `json:"name"`
-	Callsign string            `json:"callsign"`
-	Accent   string            `json:"accent"`
-	Enabled  bool              `json:"enabled"`
-	Standby  bool              `json:"standby"`
-	Blocks   []revisionBlock   `json:"blocks"`
-	Programs []revisionProgram `json:"programs"`
-}
-type revisionBlock struct {
-	ID         string    `json:"id"`
-	StartsAt   time.Time `json:"startsAt"`
-	EndsAt     time.Time `json:"endsAt"`
-	PlaylistID string    `json:"playlistId"`
-	AssetID    string    `json:"assetId"`
-	Title      string    `json:"title"`
-}
-
-type revisionProgram struct {
-	ID             string    `json:"id"`
-	BlockID        string    `json:"blockId"`
-	ItemID         string    `json:"itemId"`
-	ItemPosition   int       `json:"itemPosition"`
-	Occurrence     int       `json:"occurrence"`
-	StartsAt       time.Time `json:"startsAt"`
-	EndsAt         time.Time `json:"endsAt"`
-	AssetID        string    `json:"assetId"`
-	ArtifactDigest string    `json:"artifactDigest"`
-	MediaType      string    `json:"mediaType"`
-	Title          string    `json:"title"`
-	Subtitle       string    `json:"subtitle"`
-	PlacardPolicy  string    `json:"placardPolicy"`
-	Fit            string    `json:"fit"`
-	Loop           bool      `json:"loop"`
-	Mute           bool      `json:"mute"`
-	Volume         float64   `json:"volume"`
-}
-
-func cableOccurrences(data []byte) []CableOccurrence {
-	var doc revisionDocument
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil
-	}
-	var result []CableOccurrence
-	for _, channel := range doc.Channels {
-		for _, program := range channel.Programs {
-			result = append(result, CableOccurrence{
-				ID: program.ID, ChannelID: channel.ID, BlockID: program.BlockID,
-				ItemID: program.ItemID, AssetID: program.AssetID,
-				StartsAt: program.StartsAt, EndsAt: program.EndsAt,
-			})
-		}
-	}
-	return result
-}
-
-func transformRevision(data []byte, candidate Candidate) ([]byte, error) {
-	var doc revisionDocument
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("decode revision artifact: %w", err)
-	}
-	if doc.Schema != "cable.revision.v1" {
-		return nil, errors.New("unsupported cable revision schema")
-	}
-	if doc.Theme == "" {
-		doc.Theme = "nebula"
-	}
-	if doc.Theme != "nebula" && doc.Theme != "gallery" && doc.Theme != "noir" {
-		return nil, errors.New("unsupported cable theme")
-	}
-	id := doc.ID
-	if id == "" {
-		id = candidate.RevisionArtifactDigest
-	}
-	digest := doc.Digest
-	if digest == "" {
-		digest = candidate.RevisionArtifactDigest
-	}
-	type revisionMeta struct {
-		ID           string    `json:"id"`
-		Digest       string    `json:"digest"`
-		GeneratedAt  time.Time `json:"generatedAt"`
-		Timezone     string    `json:"timezone"`
-		Stale        bool      `json:"stale"`
-		GuideDensity string    `json:"guideDensity"`
-	}
-	type outChannel struct {
-		ID             string `json:"id"`
-		Number         int    `json:"number"`
-		Name           string `json:"name"`
-		Callsign       string `json:"callsign"`
-		Accent         string `json:"accent"`
-		Enabled        bool   `json:"enabled"`
-		StandbyMessage string `json:"standbyMessage,omitempty"`
-	}
-	type media struct {
-		Kind      string `json:"kind"`
-		Reference string `json:"reference"`
-		Mime      string `json:"mime"`
-	}
-	type occurrence struct {
-		ID           string    `json:"id"`
-		BlockID      string    `json:"blockId,omitempty"`
-		ItemID       string    `json:"itemId,omitempty"`
-		ItemPosition int       `json:"itemPosition,omitempty"`
-		Occurrence   int       `json:"occurrence,omitempty"`
-		ChannelID    string    `json:"channelId"`
-		StartsAt     time.Time `json:"startsAt"`
-		EndsAt       time.Time `json:"endsAt"`
-		Title        string    `json:"title"`
-		Subtitle     string    `json:"subtitle,omitempty"`
-		Media        media     `json:"media"`
-		Placard      string    `json:"placard"`
-		Fit          string    `json:"fit"`
-		Loop         bool      `json:"loop"`
-		Muted        bool      `json:"muted"`
-		Volume       float64   `json:"volume"`
-	}
-	type block struct {
-		ID        string    `json:"id"`
-		ChannelID string    `json:"channelId"`
-		StartsAt  time.Time `json:"startsAt"`
-		EndsAt    time.Time `json:"endsAt"`
-		Title     string    `json:"title"`
-		Source    string    `json:"source"`
-	}
-	type bridge struct {
-		ProtocolVersion string `json:"protocolVersion"`
-		State           string `json:"state"`
-	}
-	type remoteDescriptor struct {
-		URL       string    `json:"url"`
-		ShowQR    bool      `json:"showQr"`
-		ExpiresAt time.Time `json:"expiresAt"`
-	}
-	type output struct {
-		Revision    revisionMeta      `json:"revision"`
-		Channels    []outChannel      `json:"channels"`
-		Blocks      []block           `json:"blocks"`
-		Occurrences []occurrence      `json:"occurrences"`
-		Bridge      bridge            `json:"bridge"`
-		Theme       string            `json:"theme"`
-		Remote      *remoteDescriptor `json:"remote,omitempty"`
-	}
-	result := output{Revision: revisionMeta{ID: id, Digest: digest, GeneratedAt: doc.GeneratedAt, Timezone: doc.Timezone, GuideDensity: doc.GuideDensity}, Channels: []outChannel{}, Blocks: []block{}, Occurrences: []occurrence{}, Theme: doc.Theme, Bridge: bridge{ProtocolVersion: candidate.BridgeProtocol, State: "online"}}
-	if candidate.Remote != nil {
-		result.Remote = &remoteDescriptor{URL: candidate.Remote.URL, ShowQR: candidate.Remote.ShowQR, ExpiresAt: candidate.Remote.ExpiresAt}
-	}
-	for _, ch := range doc.Channels {
-		oc := outChannel{ID: ch.ID, Number: ch.Number, Name: ch.Name, Callsign: ch.Callsign, Accent: ch.Accent, Enabled: ch.Enabled}
-		if ch.Standby {
-			oc.StandbyMessage = "Standby"
-		}
-		result.Channels = append(result.Channels, oc)
-		for _, scheduled := range ch.Blocks {
-			source := "playlist"
-			if scheduled.AssetID != "" {
-				source = "asset"
-			}
-			result.Blocks = append(result.Blocks, block{ID: scheduled.ID, ChannelID: ch.ID, StartsAt: scheduled.StartsAt, EndsAt: scheduled.EndsAt, Title: scheduled.Title, Source: source})
-		}
-		for _, p := range ch.Programs {
-			if !contains(candidate.ArtifactClosure, p.ArtifactDigest) {
-				return nil, fmt.Errorf("revision references artifact outside closure: %s", p.ArtifactDigest)
-			}
-			kind, mime := "video", p.MediaType
-			if strings.HasPrefix(p.MediaType, "image/") {
-				kind = "image"
-			}
-			if (kind == "video" && mime != "video/mp4") || (kind == "image" && mime != "image/jpeg" && mime != "image/png" && mime != "image/webp") {
-				return nil, fmt.Errorf("unsupported revision media type %q", mime)
-			}
-			placard := p.PlacardPolicy
-			if placard == "" || placard == "default" {
-				placard = "start"
-			}
-			if placard != "always" && placard != "start" && placard != "never" {
-				return nil, fmt.Errorf("unsupported placard policy %q", placard)
-			}
-			result.Occurrences = append(result.Occurrences, occurrence{ID: p.ID, BlockID: p.BlockID, ItemID: p.ItemID, ItemPosition: p.ItemPosition, Occurrence: p.Occurrence, ChannelID: ch.ID, StartsAt: p.StartsAt, EndsAt: p.EndsAt, Title: p.Title, Subtitle: p.Subtitle, Media: media{Kind: kind, Reference: "/bridge/v1/media/" + p.ArtifactDigest, Mime: mime}, Placard: placard, Fit: p.Fit, Loop: p.Loop, Muted: p.Mute, Volume: p.Volume * 100})
-		}
-	}
-	return json.Marshal(result)
-}
 func safeJoin(root, name string) (string, error) {
 	if name == "" || strings.HasPrefix(filepath.ToSlash(name), "/") || filepath.IsAbs(name) {
 		return "", errors.New("absolute path")
@@ -887,60 +997,6 @@ func safeJoin(root, name string) (string, error) {
 		}
 	}
 	return result, nil
-}
-func verifyFileDigest(path, expected string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return err
-	}
-	if got := hex.EncodeToString(hash.Sum(nil)); got != expected {
-		return errors.New("digest mismatch")
-	}
-	return nil
-}
-func verifyBytesDigest(data []byte, expected string) error {
-	sum := sha256.Sum256(data)
-	if hex.EncodeToString(sum[:]) != expected {
-		return errors.New("digest mismatch")
-	}
-	return nil
-}
-func contains(values []string, value string) bool {
-	for _, item := range values {
-		if item == value {
-			return true
-		}
-	}
-	return false
-}
-func validateRevision(data []byte, candidate Candidate) error {
-	var value struct {
-		Schema           string `json:"schema"`
-		ShellBuildDigest string `json:"shellBuildDigest"`
-		Entry            string `json:"entrypoint"`
-		Bridge           string `json:"bridgeProtocol"`
-	}
-	if err := json.Unmarshal(data, &value); err != nil {
-		return fmt.Errorf("decode revision artifact: %w", err)
-	}
-	if value.Schema != "cable.revision.v1" {
-		return errors.New("unsupported cable revision schema")
-	}
-	if value.ShellBuildDigest != "" && value.ShellBuildDigest != candidate.ShellBuildDigest {
-		return errors.New("revision shell digest mismatch")
-	}
-	if value.Entry != "" && value.Entry != candidate.Entrypoint {
-		return errors.New("revision entrypoint mismatch")
-	}
-	if value.Bridge != "" && value.Bridge != candidate.BridgeProtocol {
-		return errors.New("revision bridge protocol mismatch")
-	}
-	return nil
 }
 
 var _ Adapter = (*Chromium)(nil)

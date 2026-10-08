@@ -21,6 +21,7 @@ async function uploadMedia(file: File): Promise<Media> {
   return readApiResult(await api.POST("/media", {
     params: { header: { "Idempotency-Key": crypto.randomUUID() } },
     body: {
+      kind: "file",
       assetId: asset.id,
       title: asset.name,
       tags: [],
@@ -35,6 +36,7 @@ export function MediaDropzone({ onUploaded }: { onUploaded: (media: Media) => vo
   const [dragActive, setDragActive] = React.useState(false);
   const [inputKey, setInputKey] = React.useState(0);
   const dragDepth = React.useRef(0);
+  const typesId = React.useId();
   const mutation = useMutation({
     mutationFn: uploadMedia,
     onSuccess: (media) => onUploaded(media),
@@ -79,7 +81,7 @@ export function MediaDropzone({ onUploaded }: { onUploaded: (media: Media) => vo
     <div
       role="group"
       aria-label="Media upload"
-      className={`relative flex min-h-48 flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-8 text-center transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ${dragActive ? "border-primary bg-primary/10" : "border-border bg-muted/30"} ${mutation.isPending ? "cursor-wait opacity-75" : ""}`}
+      className={`relative flex min-h-36 flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-5 text-center transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 sm:p-6 ${dragActive ? "border-primary bg-primary/10" : "border-border bg-muted/30"} ${mutation.isPending ? "cursor-wait opacity-75" : ""}`}
       onDragEnter={(event) => {
         event.preventDefault();
         if (mutation.isPending) return;
@@ -107,15 +109,15 @@ export function MediaDropzone({ onUploaded }: { onUploaded: (media: Media) => vo
         type="file"
         accept={mediaAccept}
         aria-label="Choose an image or video"
-        aria-describedby="media-upload-types"
+        aria-describedby={typesId}
         disabled={mutation.isPending}
         className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-wait"
         onChange={(event) => selectFile(event.currentTarget.files?.[0])}
       />
-      <p className="font-medium">{dropzoneTitle}</p>
+      <p className="text-sm font-medium">{dropzoneTitle}</p>
       {file && <p className="max-w-full break-all text-sm text-muted-foreground">{file.name} · {fileSize(file.size)}</p>}
-      {!file && <p className="text-sm text-muted-foreground">or choose a file</p>}
-      <p id="media-upload-types" className="text-xs text-muted-foreground">JPEG, PNG, WebP, or MP4</p>
+      {!file && <p className="text-sm font-medium text-primary underline underline-offset-4">Choose a file</p>}
+      <p id={typesId} className="text-xs text-muted-foreground">JPEG, PNG, WebP, or MP4{file && !mutation.isPending ? " · Choose another file to replace it" : ""}</p>
     </div>
 
     {mutation.isPending && <div className="space-y-2" aria-live="polite">
@@ -126,11 +128,11 @@ export function MediaDropzone({ onUploaded }: { onUploaded: (media: Media) => vo
     {mutation.isError && <ErrorState title="Upload failed" description={mutation.error.message} onRetry={() => { if (file) mutation.mutate(file); }} />}
     {mutation.data && <div role="status" className="space-y-2 rounded-lg border border-status-success/40 bg-status-success/5 p-4">
       <p className="font-medium text-status-success">{mutation.data.title} is ready in your library.</p>
-      <a className="inline-block text-sm font-medium text-primary hover:underline" href={`/media/${encodeURIComponent(mutation.data.id)}`}>View {mutation.data.title}</a>
+      <a className="inline-block text-sm font-medium text-primary hover:underline" href={`/library/media/${encodeURIComponent(mutation.data.id)}`}>View {mutation.data.title}</a>
     </div>}
     <div className="flex flex-wrap gap-2">
-      {!mutation.isSuccess && !mutation.isError && <Button type="submit" disabled={!file || mutation.isPending}>{mutation.isPending ? "Uploading…" : "Upload file"}</Button>}
-      {(file || validationError) && !mutation.isPending && <Button type="button" variant="secondary" onClick={reset}>{mutation.isSuccess ? "Upload another file" : "Clear"}</Button>}
+      {file && !mutation.isSuccess && !mutation.isError && <Button type="submit" disabled={mutation.isPending}>{mutation.isPending ? "Uploading…" : "Upload media"}</Button>}
+      {(file || validationError) && !mutation.isPending && <Button type="button" variant="ghost" onClick={reset}>{mutation.isSuccess ? "Upload another file" : "Clear file"}</Button>}
     </div>
   </form>;
 }

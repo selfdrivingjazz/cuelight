@@ -1,14 +1,19 @@
 import * as React from "react";
-import { createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { HttpPresentationSource, loadPresentation, type Occurrence, type Presentation, type PresentationSource } from "./presentation";
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { loadPresentation, type Occurrence, type Presentation, type PresentationSource } from "./presentation";
 import { initialRuntimeState, runtimeReducer, type RuntimeAction, type RuntimeState } from "./state";
+import { GuideAuthError, HostedPresentationSource, type GuideAuth } from "./hosted";
+import { globalRemoteAction } from "./remoteActions";
 import { LegacyGuide } from "./components/LegacyGuide";
 import { SplashScreen } from "./components/SplashScreen";
-import { useRemoteInput, type RemoteEvent } from "./components/RemoteInput";
+import { useRemoteInput, type RemoteDescriptor, type RemoteEvent } from "./components/RemoteInput";
 
 interface RuntimeContextValue {
   state: RuntimeState;
   dispatch: React.Dispatch<RuntimeAction>;
+  auth?: GuideAuth;
+  /** Set when the guide token is missing, expired, or rejected; retrying cannot help. */
+  accessDenied: boolean;
 }
 
 const RuntimeContext = React.createContext<RuntimeContextValue | null>(null);
@@ -42,63 +47,58 @@ export function useRuntime(): RuntimeContextValue {
 
 export interface RuntimeProviderProps {
   children: React.ReactNode;
-  presentation?: Presentation;
+  /** Guide credentials read from the hosted URL; absent with `authError` when the link is unusable. */
+  auth?: GuideAuth;
+  authError?: string;
   source?: PresentationSource;
 }
 
-export function RuntimeProvider({ children, presentation, source }: RuntimeProviderProps) {
-  const defaultSource = React.useMemo(() => new HttpPresentationSource(), []);
-  const activeSource = source ?? defaultSource;
+const refreshInterval = 60_000;
+
+export function RuntimeProvider({ children, auth, authError, source }: RuntimeProviderProps) {
+  const activeSource = React.useMemo(() => source ?? (auth ? new HostedPresentationSource(auth) : undefined), [auth, source]);
   const [state, reducerDispatch] = React.useReducer(runtimeReducer, initialRuntimeState);
   const [attempt, setAttempt] = React.useState(0);
+  // Read at render: every auth failure also dispatches REVISION_FAILED, which re-renders.
+  const accessDenied = Boolean(authError) || auth?.error !== undefined;
   const dispatch = React.useCallback<React.Dispatch<RuntimeAction>>((action) => {
     if (action.type === "RETRY_REVISION") setAttempt((value) => value + 1);
     reducerDispatch(action);
   }, []);
+  const fail = React.useCallback((error: unknown) => {
+    reducerDispatch({ type: "REVISION_FAILED", message: error instanceof Error ? error.message : "The Cable guide could not be reached." });
+  }, []);
 
   React.useEffect(() => {
+    if (authError) reducerDispatch({ type: "REVISION_FAILED", message: authError });
+  }, [authError]);
+
+  React.useEffect(() => auth?.start(fail), [auth, fail]);
+
+  React.useEffect(() => {
+    if (!activeSource) return;
     let cancelled = false;
     reducerDispatch({ type: "START_REVISION_LOAD" });
-    const read = loadPresentation(presentation
-      ? { read: async () => presentation }
-      : activeSource);
-    void read.then((value) => {
+    void loadPresentation(activeSource).then((value) => {
       if (!cancelled) reducerDispatch({ type: "SYNC_REVISION", presentation: value });
-    }).catch((error: unknown) => {
-      if (cancelled) return;
-      reducerDispatch({
-        type: "REVISION_FAILED",
-        message: error instanceof Error ? error.message : "The node bridge could not be reached.",
+    }, (error: unknown) => {
+      if (!cancelled) fail(error);
+    });
+    const timer = window.setInterval(() => {
+      void loadPresentation(activeSource).then((value) => {
+        if (!cancelled) reducerDispatch({ type: "REFRESH_REVISION", presentation: value });
+      }, (error: unknown) => {
+        // Transient refresh failures keep the last lineup on screen; lost access does not.
+        if (!cancelled && error instanceof GuideAuthError) fail(error);
       });
-    });
+    }, refreshInterval);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
-  }, [activeSource, attempt, presentation]);
+  }, [activeSource, attempt, fail]);
 
-  const announcedRevisions = React.useRef(new Set<string>());
-  React.useEffect(() => {
-    if (presentation || !activeSource.markReady) return;
-    if (state.kind !== "ready" && state.kind !== "stale-offline" && state.kind !== "empty-lineup") return;
-    const revisionKey = `${state.presentation.revision.id}:${state.presentation.revision.digest}`;
-    if (announcedRevisions.current.has(revisionKey)) return;
-    announcedRevisions.current.add(revisionKey);
-    let cancelled = false;
-    void activeSource.markReady().catch((error: unknown) => {
-      announcedRevisions.current.delete(revisionKey);
-      if (!cancelled) {
-        reducerDispatch({
-          type: "REVISION_FAILED",
-          message: error instanceof Error ? error.message : "The node bridge readiness signal could not be sent.",
-        });
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSource, presentation, state]);
-
-  return <RuntimeContext.Provider value={{ state, dispatch }}>{children}</RuntimeContext.Provider>;
+  return <RuntimeContext.Provider value={{ state, dispatch, auth, accessDenied }}>{children}</RuntimeContext.Provider>;
 }
 
 function presentationOf(state: RuntimeState): Presentation | undefined {
@@ -119,7 +119,7 @@ function occurrenceForState(state: RuntimeState): Occurrence | undefined {
 }
 
 function Shell() {
-  const { state, dispatch } = useRuntime();
+  const { state, dispatch, auth } = useRuntime();
   const navigate = useNavigate();
   const presentation = presentationOf(state);
   const [showSplash, setShowSplash] = React.useState(true);
@@ -138,38 +138,24 @@ function Shell() {
   }, []);
   remoteBus.current.drain = drainRemoteEvents;
   const relayRemoteEvent = React.useCallback((event: RemoteEvent) => {
-    if (event.type === "key" && presentation) {
-      if (event.key === "Guide") {
-        dispatch({ type: "BACK_TO_GUIDE" });
-        void navigate({ to: "/" });
-        return;
-      }
-      const channels = presentation.channels.filter((channel) => channel.enabled);
-      let target = event.key?.startsWith("ChannelNumber:")
-        ? channels.find((channel) => channel.number === Number(event.key?.slice("ChannelNumber:".length)))
-        : undefined;
-      if (!target && (event.key === "ChannelUp" || event.key === "ChannelDown") && channels.length > 0) {
-        const current = occurrenceForState(state);
-        const selectedId = state.kind === "ready" || state.kind === "stale-offline" ? state.selectedId : null;
-        const currentId = current?.channelId ?? selectedId ?? channels[0]?.id;
-        const index = Math.max(0, channels.findIndex((channel) => channel.id === currentId));
-        const delta = event.key === "ChannelUp" ? -1 : 1;
-        target = channels[(index + delta + channels.length) % channels.length];
-      }
-      if (target) {
-        const now = Date.now();
-        const occurrence = presentation.occurrences.find((candidate) => candidate.channelId === target.id && new Date(candidate.startsAt).getTime() <= now && now < new Date(candidate.endsAt).getTime());
-        if (occurrence) {
-          dispatch({ type: "TUNE_LIVE", occurrence });
-          void navigate({ to: "/player" });
-        }
-        return;
-      }
+    const action = event.type === "key" && presentation ? globalRemoteAction(presentation, state, event.key) : undefined;
+    if (action?.type === "guide") {
+      dispatch({ type: "BACK_TO_GUIDE" });
+      void navigate({ to: "/" });
+      return;
     }
+    if (action?.type === "tune") {
+      dispatch({ type: "TUNE_LIVE", occurrence: action.occurrence });
+      void navigate({ to: "/player" });
+      return;
+    }
+    if (action?.type === "off-air") return;
     remoteBus.current.pending.push(event);
     remoteBus.current.drain();
   }, [dispatch, navigate, presentation, state]);
-  useRemoteInput(presentation?.remote?.url, relayRemoteEvent);
+  const updateRemote = React.useCallback((remote: RemoteDescriptor) => dispatch({ type: "UPDATE_REMOTE", remote }), [dispatch]);
+  const remoteAuthFailed = React.useCallback((error: GuideAuthError) => dispatch({ type: "REVISION_FAILED", message: error.message }), [dispatch]);
+  useRemoteInput(auth, presentation?.remote?.url, relayRemoteEvent, updateRemote, remoteAuthFailed);
   React.useEffect(() => {
     const timer = window.setTimeout(() => setShowSplash(false), 4_700);
     return () => window.clearTimeout(timer);
@@ -191,10 +177,20 @@ function SyncState() {
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
+  const { state, accessDenied } = useRuntime();
+  const message = state.kind === "error" ? state.message : undefined;
+  if (accessDenied) {
+    return (
+      <section className="state-panel state-panel-error" aria-live="assertive">
+        <h1>Guide access unavailable</h1>
+        <p>{message}</p>
+      </section>
+    );
+  }
   return (
     <section className="state-panel state-panel-error" aria-live="assertive">
       <h1>Unable to load lineup</h1>
-      <p>Check the connection and try again.</p>
+      <p>{message ?? "Check the connection and try again."}</p>
       <div className="state-actions"><button className="button" type="button" onClick={onRetry}>Try again</button></div>
     </section>
   );
@@ -384,7 +380,7 @@ function DiagnosticsPage() {
     dispatch({ type: "BACK_TO_GUIDE" });
     void navigate({ to: "/" });
   };
-  return <section className="diagnostics"><p className="eyebrow">DIAGNOSTICS / READ-ONLY</p><h1>Signal details</h1><p className="diagnostics-deck">The bridge exposes this presentation without changing its schedule or timestamps.</p><dl><div><dt>Runtime</dt><dd>{state.kind}</dd></div><div><dt>Revision</dt><dd>{presentation.revision.id}</dd></div><div><dt>Digest</dt><dd>{presentation.revision.digest}</dd></div><div><dt>Generated</dt><dd>{formatInstant(presentation.revision.generatedAt, presentation.revision.timezone)}</dd></div><div><dt>Bridge</dt><dd>{presentation.bridge.state}</dd></div><div><dt>Protocol</dt><dd>{presentation.bridge.protocolVersion}</dd></div><div><dt>Occurrences</dt><dd>{presentation.occurrences.length}</dd></div></dl><button className="button" type="button" onClick={returnToGuide}>Return to guide</button></section>;
+  return <section className="diagnostics"><p className="eyebrow">DIAGNOSTICS / READ-ONLY</p><h1>Signal details</h1><p className="diagnostics-deck">Control serves this live presentation without changing its schedule or timestamps.</p><dl><div><dt>Runtime</dt><dd>{state.kind}</dd></div><div><dt>Revision</dt><dd>{presentation.revision.id}</dd></div><div><dt>Digest</dt><dd>{presentation.revision.digest}</dd></div><div><dt>Generated</dt><dd>{formatInstant(presentation.revision.generatedAt, presentation.revision.timezone)}</dd></div><div><dt>Bridge</dt><dd>{presentation.bridge.state}</dd></div><div><dt>Protocol</dt><dd>{presentation.bridge.protocolVersion}</dd></div><div><dt>Occurrences</dt><dd>{presentation.occurrences.length}</dd></div></dl><button className="button" type="button" onClick={returnToGuide}>Return to guide</button></section>;
 }
 
 const rootRoute = createRootRoute({ component: Shell });
@@ -393,5 +389,6 @@ const playerRoute = createRoute({ getParentRoute: () => rootRoute, path: "/playe
 const placardRoute = createRoute({ getParentRoute: () => rootRoute, path: "/placard", component: PlacardPage });
 const diagnosticsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/diagnostics", component: DiagnosticsPage });
 const routeTree = rootRoute.addChildren([guideRoute, playerRoute, placardRoute, diagnosticsRoute]);
-export const router = createRouter({ routeTree });
+// Memory history keeps the address bar on the hosted `/cable/?deployment=…` URL.
+export const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/"] }) });
 declare module "@tanstack/react-router" { interface Register { router: typeof router } }

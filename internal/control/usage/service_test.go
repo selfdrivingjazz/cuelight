@@ -89,7 +89,7 @@ func TestUsageNormalizesAndBoundsQuery(t *testing.T) {
 }
 
 func TestHandlerUsesAuthenticatedActorAndReturnsReferences(t *testing.T) {
-	repository := &testRepository{page: Page{References: []Reference{{Kind: KindPlaylist, ID: "p1", Name: "Morning", Href: "/cable/playlists/p1"}}}}
+	repository := &testRepository{page: Page{References: []Reference{{Kind: KindPlaylist, ID: "p1", Name: "Morning", Href: "/library/playlists/p1"}}}}
 	authorizer := &testAuthorizer{}
 	handler := NewHandler(&Service{Repository: repository, Authorizer: authorizer})
 

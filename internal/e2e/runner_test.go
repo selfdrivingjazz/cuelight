@@ -41,8 +41,14 @@ func (f *fakeAPI) CompleteUpload(context.Context, string, string) (client.Asset,
 func (f *fakeAPI) PublishRelease(context.Context, json.RawMessage, string) (client.Document, error) {
 	return client.Document{"id": "release", "digest": "digest"}, nil
 }
+func (f *fakeAPI) CreateMedia(context.Context, any, string) (client.Document, error) {
+	return client.Document{"id": "media"}, nil
+}
+func (f *fakeAPI) MediaForAsset(context.Context, string) (client.Document, bool, error) {
+	return nil, false, nil
+}
 func (f *fakeAPI) PutAssignment(context.Context, string, string, string, client.AssignmentInput) (client.Assignment, error) {
-	return client.Assignment{AssignmentInput: client.AssignmentInput{ReleaseID: "release", ReleaseDigest: "digest"}, DesiredGeneration: 1}, nil
+	return client.Assignment{AssignmentInput: client.AssignmentInput{MediaID: "media"}, ReleaseID: "release", ReleaseDigest: "digest", DesiredGeneration: 1}, nil
 }
 func (f *fakeAPI) GetStatus(context.Context, string) (client.Document, error) {
 	if len(f.statuses) == 0 {

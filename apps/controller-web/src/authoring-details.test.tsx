@@ -6,8 +6,8 @@ import {
   BlockInspector,
   ChannelInspector,
   PlaylistInspector,
-  ProfileInspector,
   authoringIfMatch,
+  webPlaylistHint,
   authoringLinks,
   formatDuration,
   formatTimestamp,
@@ -16,8 +16,6 @@ import {
 type Playlist = components["schemas"]["CablePlaylist"];
 type Block = components["schemas"]["CableBlock"];
 type Channel = components["schemas"]["CableChannel"];
-type Profile = components["schemas"]["CableProfile"];
-type UsagePage = components["schemas"]["UsagePage"];
 
 const playlist: Playlist = {
   id: "playlist-technical-id",
@@ -70,25 +68,11 @@ const channel: Channel = {
   updatedAt: "2026-09-01T09:00:00Z",
 };
 
-const profile: Profile = {
-  id: "profile-1",
-  name: "Lobby",
-  description: "Public lobby screens",
-  deploymentId: "deployment-1",
-  shellBuildId: "shell-1",
-  releaseId: "release-1",
-  version: 2,
-  createdBy: "operator-1",
-  createdAt: "2026-09-01T08:00:00Z",
-  updatedAt: "2026-09-01T09:00:00Z",
-};
-const catalogMedia = [{ assetId: "asset-3", title: "Gallery reel" } as components["schemas"]["Media"]];
-
 describe("Cable authoring detail workflows", () => {
   it("builds stable cross-links with encoded resource IDs", () => {
-    expect(authoringLinks.playlist("playlist/one")).toEqual({ href: "/cable/playlists/playlist%2Fone", label: "View playlist" });
-    expect(authoringLinks.asset("asset one").href).toBe("/assets/asset%20one");
-    expect(authoringLinks.release("r-1").href).toBe("/cable/releases/r-1");
+    expect(authoringLinks.playlist("playlist/one")).toEqual({ href: "/library/playlists/playlist%2Fone", label: "View playlist" });
+    expect(authoringLinks.asset("asset one").href).toBe("/library/assets/asset%20one");
+    expect(authoringLinks.release("r-1").href).toBe("/releases/r-1");
   });
 
   it("formats source timing without hiding invalid values", () => {
@@ -98,33 +82,36 @@ describe("Cable authoring detail workflows", () => {
     expect(formatTimestamp("not-a-time")).toBe("Unknown time");
   });
 
-  it("renders a responsive playlist mosaic before compact ordered rows", () => {
+  it("preserves authored playlist order and total runtime", () => {
     const markup = renderToStaticMarkup(<PlaylistInspector playlist={playlist} visualState="Visual enrichment is not connected on this route." />);
 
-    expect(markup).toContain("At a glance");
     expect(markup).toContain("2 items · 2m 5s total runtime");
-    expect(markup).toContain("Morning loop media mosaic");
-    expect(markup).toContain("sm:grid-cols-2 lg:grid-cols-4");
-    expect(markup).toContain("sm:grid-cols-[2rem_8rem_minmax(0,1fr)_auto]");
     expect(markup.indexOf("First light")).toBeLessThan(markup.indexOf("City walk"));
-    expect(markup.indexOf("At a glance")).toBeLessThan(markup.indexOf("Play order"));
+    expect(markup).not.toContain(webPlaylistHint);
+  });
+
+  it("orders web page items with files and warns which screens can play them", () => {
+    const withWeb = { ...playlist, items: [...playlist.items, { id: "item-3", playlistId: playlist.id, mediaId: "media-web", position: 3, durationSeconds: 30, title: "Status board", subtitle: "" }] };
+    const markup = renderToStaticMarkup(<PlaylistInspector playlist={withWeb} />);
+
+    expect(markup).toContain("3 items · 2m 35s total runtime");
+    expect(markup.indexOf("City walk")).toBeLessThan(markup.indexOf("Status board"));
+    expect(markup).toContain(webPlaylistHint);
   });
 
   it("gives an empty playlist a useful next step without rendering reorder controls", () => {
     const markup = renderToStaticMarkup(<PlaylistInspector playlist={{ ...playlist, items: [] }} />);
 
     expect(markup).toContain("Playlist is empty");
-    expect(markup).toContain("Add authored media before placing this playlist in a scheduled block.");
-    expect(markup).not.toContain("Move up");
+    expect(markup).not.toContain("Reorder");
   });
 
-  it("surfaces the Media picker and item mutations without exposing an ID workflow", () => {
-    const markup = renderToStaticMarkup(<PlaylistInspector playlist={playlist} mediaOptions={catalogMedia} onAdd={() => undefined} onRemove={() => undefined} onDurationChange={() => undefined} onMove={() => undefined} />);
+  it("exposes drag handles, inline duration, and removal for each item", () => {
+    const markup = renderToStaticMarkup(<PlaylistInspector playlist={playlist} onAdd={() => undefined} onRemove={() => undefined} onDurationChange={() => undefined} onReorder={() => undefined} />);
 
-    expect(markup).toContain("Choose playable Media from the catalog");
-    expect(markup).toContain("Gallery reel");
     expect(markup).toContain("Add media");
-    expect(markup).toContain("Remove");
+    expect(markup).toContain("Reorder First light, position 1 of 2");
+    expect(markup).toContain("Remove City walk");
     expect(markup).toContain("Duration for City walk");
   });
 
@@ -132,16 +119,12 @@ describe("Cable authoring detail workflows", () => {
     expect(authoringIfMatch(12)).toBe('"v12"');
   });
 
-  it("keeps block source and timing ahead of an honest compiled-data gap", () => {
+  it("keeps block source and timing visible when visual enrichment is unavailable", () => {
     const markup = renderToStaticMarkup(<BlockInspector block={currentBlock} playlist={playlist} visualState="Visual enrichment is not connected on this route." action={<button type="button">Edit block</button>} />);
 
     expect(markup).toContain("Schedule window");
     expect(markup).toContain("Edit block");
     expect(markup).toContain("1h 0m");
-    expect(markup).toContain("Compiled media sequence");
-    expect(markup).toContain("Showing the authored playlist order instead");
-    expect(markup.indexOf("Schedule window")).toBeLessThan(markup.indexOf("Compiled media sequence"));
-    expect(markup).toContain("sm:grid-cols-2 lg:grid-cols-4");
   });
 
   it("shows current, next, and proportional channel schedule hierarchy responsively", () => {
@@ -153,10 +136,6 @@ describe("Cable authoring detail workflows", () => {
     expect(markup).toContain("Morning loop");
     expect(markup).toContain("Gallery hour");
     expect(markup).toContain("Proportional channel schedule");
-    expect(markup).toContain("md:grid-cols-2");
-    expect(markup).toContain("flex-col");
-    expect(markup).toContain("sm:flex-row");
-    expect(markup.indexOf("Current and next")).toBeLessThan(markup.indexOf("Schedule timeline"));
   });
 
   it("renders compact current and next empty states when the channel window is empty", () => {
@@ -165,24 +144,5 @@ describe("Cable authoring detail workflows", () => {
     expect(markup).toContain("Nothing scheduled now");
     expect(markup).toContain("No next block");
     expect(markup).toContain("No scheduled blocks");
-  });
-
-  it("summarizes linked release and assigned players from injected usage references", () => {
-    const usage: UsagePage = { resourceId: profile.id, references: [{ kind: "release", id: "release-1", name: "Lobby release", href: "/releases/release-1" }, { kind: "assignment", id: "node-1", name: "North lobby", href: "/nodes/node-1" }], hasMore: false };
-    const markup = renderToStaticMarkup(<ProfileInspector profile={profile} channels={[channel]} visuals={{ usage }} />);
-
-    expect(markup).toContain("Representative lineup");
-    expect(markup).toContain("Lobby release");
-    expect(markup).toContain("1 assigned player");
-    expect(markup).toContain("North lobby");
-    expect(markup).toContain("sm:grid-cols-2 lg:grid-cols-4");
-  });
-
-  it("is honest when profile channels and usage are unavailable", () => {
-    const markup = renderToStaticMarkup(<ProfileInspector profile={{ ...profile, releaseId: undefined }} channels={[]} visualState="Assignment usage is not connected on this route." />);
-
-    expect(markup).toContain("No representative channels");
-    expect(markup).toContain("No release linked");
-    expect(markup).toContain("Assignment usage is not connected on this route.");
   });
 });

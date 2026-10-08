@@ -21,7 +21,7 @@ func (s *Store) CreatePlaylist(ctx context.Context, mutation cable.Mutation, inp
 	}
 	positions := make(map[int]bool, len(input.Items))
 	for _, item := range input.Items {
-		if item.AssetID == "" || item.Position <= 0 || item.DurationSeconds <= 0 || positions[item.Position] {
+		if (item.AssetID == "") == (item.MediaID == "") || item.Position <= 0 || item.DurationSeconds <= 0 || positions[item.Position] {
 			return cable.Playlist{}, cable.ErrInvalidArgument
 		}
 		positions[item.Position] = true
@@ -42,9 +42,12 @@ func (s *Store) CreatePlaylist(ctx context.Context, mutation cable.Mutation, inp
 			if idErr != nil {
 				return idErr
 			}
-			if _, execErr := s.q(txCtx).ExecContext(txCtx, `INSERT INTO cable_playlist_items(id,playlist_id,asset_id,position,duration_seconds,title,subtitle) VALUES($1,$2,$3,$4,$5,$6,$7)`, itemID, playlistID, item.AssetID, item.Position, item.DurationSeconds, strings.TrimSpace(item.Title), strings.TrimSpace(item.Subtitle)); execErr != nil {
+			if _, execErr := s.q(txCtx).ExecContext(txCtx, playlistItemInsert, itemID, playlistID, item.AssetID, item.MediaID, item.Position, item.DurationSeconds, strings.TrimSpace(item.Title), strings.TrimSpace(item.Subtitle)); execErr != nil {
 				if pgConflict(execErr) {
 					return cable.ErrConflict
+				}
+				if invalidPlaylistSource(execErr) {
+					return cable.ErrInvalidArgument
 				}
 				return ce("create Cable playlist item", execErr)
 			}
@@ -63,7 +66,7 @@ func (s *Store) Playlist(ctx context.Context, id string) (cable.Playlist, error)
 	if err != nil {
 		return value, ce("get Cable playlist", err)
 	}
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT id,playlist_id,asset_id,position,duration_seconds,title,subtitle FROM cable_playlist_items WHERE playlist_id=$1 ORDER BY position,id`, id)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT id,playlist_id,COALESCE(asset_id::text,''),COALESCE(media_id::text,''),position,duration_seconds,title,subtitle FROM cable_playlist_items WHERE playlist_id=$1 ORDER BY position,id`, id)
 	if err != nil {
 		return value, ce("list Cable playlist items", err)
 	}
@@ -71,7 +74,7 @@ func (s *Store) Playlist(ctx context.Context, id string) (cable.Playlist, error)
 	value.Items = []cable.PlaylistItem{}
 	for rows.Next() {
 		var item cable.PlaylistItem
-		if err := rows.Scan(&item.ID, &item.PlaylistID, &item.AssetID, &item.Position, &item.DurationSeconds, &item.Title, &item.Subtitle); err != nil {
+		if err := rows.Scan(&item.ID, &item.PlaylistID, &item.AssetID, &item.MediaID, &item.Position, &item.DurationSeconds, &item.Title, &item.Subtitle); err != nil {
 			return value, ce("scan Cable playlist item", err)
 		}
 		value.Items = append(value.Items, item)
@@ -207,82 +210,23 @@ func (s *Store) ListBlocks(ctx context.Context, channelID, cursor string, limit 
 	}
 	return result, rows.Err()
 }
+// playlistItemInsert stores a file asset or a web media item. A media ID that
+// is not web media resolves to NULL and trips the exactly-one-source check.
+const playlistItemInsert = `INSERT INTO cable_playlist_items(id,playlist_id,asset_id,media_id,position,duration_seconds,title,subtitle)
+	VALUES($1,$2,NULLIF($3,'')::uuid,(SELECT m.id FROM media m WHERE m.id = NULLIF($4,'')::uuid AND m.kind = 'web'),$5,$6,$7,$8)`
 
-func (s *Store) CreateProfile(ctx context.Context, mutation cable.Mutation, input cable.ProfileInput) (cable.Profile, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	input.Description = strings.TrimSpace(input.Description)
-	if mutation.ActorID == "" || input.Name == "" || input.DeploymentID == "" || input.ShellBuildID == "" {
-		return cable.Profile{}, cable.ErrInvalidArgument
-	}
-	id, err := s.newUUID()
-	if err != nil {
-		return cable.Profile{}, err
-	}
-	var releaseID any
-	if input.ReleaseID != "" {
-		releaseID = input.ReleaseID
-	}
-	_, err = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_profiles(id,name,description,deployment_id,shell_build_id,release_id,version,created_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,1,$7,$8,$8)`, id, input.Name, input.Description, input.DeploymentID, input.ShellBuildID, releaseID, mutation.ActorID, ct(mutation))
-	if err != nil {
-		if pgConflict(err) {
-			return cable.Profile{}, cable.ErrConflict
-		}
-		return cable.Profile{}, ce("create Cable profile", err)
-	}
-	return s.Profile(ctx, id)
+func invalidPlaylistSource(err error) bool {
+	code := postgresCode(err)
+	return code == "23514" || code == "23503" || code == "22P02"
 }
 
-func (s *Store) Profile(ctx context.Context, id string) (cable.Profile, error) {
-	var value cable.Profile
-	var releaseID sql.NullString
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT id,name,description,deployment_id,shell_build_id,release_id,version,created_by,created_at,updated_at FROM cable_profiles WHERE id=$1`, id).Scan(&value.ID, &value.Name, &value.Description, &value.DeploymentID, &value.ShellBuildID, &releaseID, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
-	if releaseID.Valid {
-		value.ReleaseID = releaseID.String
-	}
-	return value, ce("get Cable profile", err)
-}
-
-func (s *Store) ListProfiles(ctx context.Context, cursor string, limit int) (cable.ProfilePage, error) {
-	limit = cl(limit)
-	query := `SELECT id,name,description,deployment_id,shell_build_id,release_id,version,created_by,created_at,updated_at FROM cable_profiles`
-	args := []any{}
-	if cursor != "" {
-		query += ` WHERE id>$1`
-		args = append(args, cursor)
-	}
-	query += ` ORDER BY id LIMIT $` + strconv.Itoa(len(args)+1)
-	args = append(args, limit+1)
-	rows, err := s.q(ctx).QueryContext(ctx, query, args...)
-	if err != nil {
-		return cable.ProfilePage{}, ce("list Cable profiles", err)
-	}
-	defer rows.Close()
-	result := cable.ProfilePage{Items: []cable.Profile{}}
-	for rows.Next() {
-		var value cable.Profile
-		var releaseID sql.NullString
-		if err := rows.Scan(&value.ID, &value.Name, &value.Description, &value.DeploymentID, &value.ShellBuildID, &releaseID, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt); err != nil {
-			return cable.ProfilePage{}, err
-		}
-		if releaseID.Valid {
-			value.ReleaseID = releaseID.String
-		}
-		result.Items = append(result.Items, value)
-	}
-	if len(result.Items) > limit {
-		result.Page.HasMore = true
-		result.Items = result.Items[:limit]
-		result.Page.NextCursor = result.Items[len(result.Items)-1].ID
-	}
-	return result, rows.Err()
-}
 func validatePlaylistInput(input cable.PlaylistInput) error {
 	if strings.TrimSpace(input.Name) == "" || len(input.Items) == 0 {
 		return cable.ErrInvalidArgument
 	}
 	positions := make(map[int]bool, len(input.Items))
 	for _, item := range input.Items {
-		if item.AssetID == "" || item.Position <= 0 || item.DurationSeconds <= 0 || positions[item.Position] {
+		if (item.AssetID == "") == (item.MediaID == "") || item.Position <= 0 || item.DurationSeconds <= 0 || positions[item.Position] {
 			return cable.ErrInvalidArgument
 		}
 		positions[item.Position] = true
@@ -319,9 +263,12 @@ func (s *Store) UpdatePlaylist(ctx context.Context, mutation cable.Mutation, id 
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(txCtx, `INSERT INTO cable_playlist_items(id,playlist_id,asset_id,position,duration_seconds,title,subtitle) VALUES($1,$2,$3,$4,$5,$6,$7)`, itemID, id, item.AssetID, item.Position, item.DurationSeconds, strings.TrimSpace(item.Title), strings.TrimSpace(item.Subtitle)); err != nil {
+			if _, err := tx.ExecContext(txCtx, playlistItemInsert, itemID, id, item.AssetID, item.MediaID, item.Position, item.DurationSeconds, strings.TrimSpace(item.Title), strings.TrimSpace(item.Subtitle)); err != nil {
 				if pgConflict(err) {
 					return cable.ErrConflict
+				}
+				if invalidPlaylistSource(err) {
+					return cable.ErrInvalidArgument
 				}
 				return ce("replace Cable playlist item", err)
 			}
@@ -391,33 +338,4 @@ func (s *Store) UpdateBlock(ctx context.Context, mutation cable.Mutation, id str
 		return cable.Block{}, err
 	}
 	return s.Block(ctx, id)
-}
-func (s *Store) UpdateProfile(ctx context.Context, mutation cable.Mutation, id string, input cable.ProfileInput) (cable.Profile, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	input.Description = strings.TrimSpace(input.Description)
-	if mutation.ActorID == "" || mutation.ExpectedVersion <= 0 || input.Name == "" || input.DeploymentID == "" || input.ShellBuildID == "" {
-		return cable.Profile{}, cable.ErrInvalidArgument
-	}
-	err := s.inTransaction(ctx, func(txCtx context.Context, tx *sql.Tx) error {
-		var releaseID any
-		if input.ReleaseID != "" {
-			releaseID = input.ReleaseID
-		}
-		result, err := tx.ExecContext(txCtx, `UPDATE cable_profiles SET name=$2,description=$3,deployment_id=$4,shell_build_id=$5,release_id=$6,version=version+1,updated_at=$7 WHERE id=$1 AND version=$8`, id, input.Name, input.Description, input.DeploymentID, input.ShellBuildID, releaseID, ct(mutation), mutation.ExpectedVersion)
-		if err != nil {
-			if pgConflict(err) {
-				return cable.ErrConflict
-			}
-			return ce("update Cable profile", err)
-		}
-		affected, _ := result.RowsAffected()
-		if affected != 1 {
-			return cable.ErrConflict
-		}
-		return nil
-	})
-	if err != nil {
-		return cable.Profile{}, err
-	}
-	return s.Profile(ctx, id)
 }

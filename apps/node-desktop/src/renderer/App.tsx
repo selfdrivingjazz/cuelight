@@ -75,7 +75,7 @@ export function App() {
         <div className="settings">
           <label className="check"><input type="checkbox" checked={status.settings.fullScreen} onChange={(event) => void perform("Updating", () => window.cableNode.updateSettings({ ...status.settings, fullScreen: event.currentTarget.checked }))} />Full-screen output</label>
           <label className="check"><input type="checkbox" checked={status.settings.autoStart} onChange={(event) => void perform("Updating", () => window.cableNode.updateSettings({ ...status.settings, autoStart: event.currentTarget.checked }))} />Start node at login</label>
-          <label>Presentation mode<select value={status.settings.presentationMode} onChange={(event) => void perform("Updating", () => window.cableNode.updateSettings({ ...status.settings, presentationMode: event.currentTarget.value as DesktopStatus["settings"]["presentationMode"] }))}><option value="automatic">Automatic</option><option value="media">Media</option><option value="cable">Cable</option></select></label>
+          <label>Presentation mode<select value={status.settings.presentationMode} onChange={(event) => void perform("Updating", () => window.cableNode.updateSettings({ ...status.settings, presentationMode: event.currentTarget.value as DesktopStatus["settings"]["presentationMode"] }))}><option value="automatic">Automatic</option><option value="media">Media</option><option value="media-schedule">Media schedule</option><option value="web">Web</option></select></label>
         </div>
         {status.lastError && <p className="runtime-error">{status.lastError}</p>}
       </section>

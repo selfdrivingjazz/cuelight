@@ -47,7 +47,7 @@ func (s *Store) CurrentAssignment(ctx context.Context, nodeID string) (assignmen
 		return assignment.Assignment{}, false, err
 	}
 	return s.playerAssignment(ctx, s.q(ctx), `
-		SELECT id::text, node_id::text, release_id::text, release_digest, delivery_mode,
+		SELECT id::text, node_id::text, COALESCE(media_id::text, ''), COALESCE(playlist_id::text, ''), release_id::text, release_digest, delivery_mode,
 		       desired_generation - 1, desired_generation, remote_input, show_qr, created_by::text
 		FROM assignments
 		WHERE node_id = $1
@@ -106,7 +106,7 @@ func (s *Store) AssignedRelease(ctx context.Context, nodeID, releaseID string) (
 		return assignment.Assignment{}, false, err
 	}
 	return s.playerAssignment(ctx, s.q(ctx), `
-		SELECT id::text, node_id::text, release_id::text, release_digest, delivery_mode,
+		SELECT id::text, node_id::text, COALESCE(media_id::text, ''), COALESCE(playlist_id::text, ''), release_id::text, release_digest, delivery_mode,
 		       desired_generation - 1, desired_generation, remote_input, show_qr, created_by::text
 		FROM assignments
 		WHERE node_id = $1 AND release_id = $2
@@ -125,7 +125,7 @@ func (s *Store) requirePlayerNode(ctx context.Context, nodeID string) error {
 func (s *Store) playerAssignment(ctx context.Context, q queryer, query string, arguments ...any) (assignment.Assignment, bool, error) {
 	var value assignment.Assignment
 	err := q.QueryRowContext(ctx, query, arguments...).Scan(
-		&value.ID, &value.NodeID, &value.ReleaseID, &value.ReleaseDigest,
+		&value.ID, &value.NodeID, &value.MediaID, &value.PlaylistID, &value.ReleaseID, &value.ReleaseDigest,
 		&value.DeliveryMode, &value.ExpectedGeneration, &value.DesiredGeneration, &value.RemoteInput, &value.ShowQR, &value.CreatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return assignment.Assignment{}, false, nil

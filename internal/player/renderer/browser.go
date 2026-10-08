@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	playerclient "github.com/jmill/cable/internal/player/client"
 	"github.com/jmill/cable/internal/player/screenshot"
 )
 
@@ -27,6 +28,42 @@ type BrowserLauncher interface {
 type BrowserSession interface {
 	Alive(context.Context) (bool, error)
 	Stop(context.Context) error
+}
+
+// WebLaunch describes a live website window. Unlike bridge launches, the URL
+// is an arbitrary http(s) site and the window accepts injected remote input.
+type WebLaunch struct {
+	URL    string
+	Remote *RemoteDescriptor
+}
+
+// WebBrowserLauncher is optional: only launchers that can present arbitrary
+// websites and inject input (the desktop renderer) support web presentations.
+type WebBrowserLauncher interface {
+	LaunchWeb(context.Context, WebLaunch) (BrowserSession, error)
+}
+
+// BrowserInputSession forwards remote input events into a browser window.
+type BrowserInputSession interface {
+	SendInput(context.Context, []playerclient.RemoteEvent) error
+}
+
+// BrowserRemoteSession refreshes a window's remote QR overlay after the remote
+// session was renewed.
+type BrowserRemoteSession interface {
+	UpdateRemote(context.Context, RemoteDescriptor) error
+}
+
+func (s *httpBrowserSession) UpdateRemote(ctx context.Context, remote RemoteDescriptor) error {
+	response, err := s.launcher.request(ctx, http.MethodPost, path.Join("/v1/windows", url.PathEscape(s.id), "remote"), map[string]any{"url": remote.URL, "showQr": remote.ShowQR})
+	if err != nil {
+		return err
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("desktop renderer remote update returned HTTP %d", response.StatusCode)
+	}
+	return nil
 }
 
 // BrowserScreenshotSession is optional so existing lightweight launchers remain
@@ -114,7 +151,27 @@ func NewHTTPBrowserLauncher(baseURL, token string, client *http.Client) (*HTTPBr
 }
 
 func (l *HTTPBrowserLauncher) Launch(ctx context.Context, targetURL, _ string) (BrowserSession, error) {
-	response, err := l.request(ctx, http.MethodPost, "/v1/windows", map[string]string{"url": targetURL})
+	return l.createWindow(ctx, map[string]string{"url": targetURL})
+}
+
+func (l *HTTPBrowserLauncher) LaunchWeb(ctx context.Context, launch WebLaunch) (BrowserSession, error) {
+	type remote struct {
+		URL    string `json:"url"`
+		ShowQR bool   `json:"showQr"`
+	}
+	body := struct {
+		URL    string  `json:"url"`
+		Kind   string  `json:"kind"`
+		Remote *remote `json:"remote,omitempty"`
+	}{URL: launch.URL, Kind: "web"}
+	if launch.Remote != nil && launch.Remote.URL != "" {
+		body.Remote = &remote{URL: launch.Remote.URL, ShowQR: launch.Remote.ShowQR}
+	}
+	return l.createWindow(ctx, body)
+}
+
+func (l *HTTPBrowserLauncher) createWindow(ctx context.Context, body any) (BrowserSession, error) {
+	response, err := l.request(ctx, http.MethodPost, "/v1/windows", body)
 	if err != nil {
 		return nil, err
 	}
@@ -198,6 +255,25 @@ func (s *httpBrowserSession) Screenshot(ctx context.Context) ([]byte, error) {
 		return nil, screenshot.ErrCaptureTooLarge
 	}
 	return data, nil
+}
+
+// maxInputBatch matches the desktop renderer's per-request event limit.
+const maxInputBatch = 256
+
+func (s *httpBrowserSession) SendInput(ctx context.Context, events []playerclient.RemoteEvent) error {
+	for len(events) > 0 {
+		batch := events[:min(len(events), maxInputBatch)]
+		events = events[len(batch):]
+		response, err := s.launcher.request(ctx, http.MethodPost, path.Join("/v1/windows", url.PathEscape(s.id), "input"), map[string]any{"events": batch})
+		if err != nil {
+			return err
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			return fmt.Errorf("desktop renderer input returned HTTP %d", response.StatusCode)
+		}
+	}
+	return nil
 }
 
 func (s *httpBrowserSession) Stop(ctx context.Context) error {

@@ -6,5 +6,5 @@ export default defineConfig({
   root: "src/renderer",
   plugins: [react()],
   build: { outDir: "../../dist", emptyOutDir: true },
-  test: { include: ["../shared/**/*.test.ts", "**/*.test.{ts,tsx}"] },
+  test: { include: ["../shared/**/*.test.ts", "../main/**/*.test.ts", "**/*.test.{ts,tsx}"] },
 });

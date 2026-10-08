@@ -16,36 +16,35 @@ function livePresentation() {
 }
 
 
-async function interceptBridge(page: Page) {
-  let readyCalls = 0;
-  await page.route("**/bridge/v1/presentation", async (route) => {
+const guideURL = "/cable/?deployment=dep-1#token=guide-token";
+
+async function interceptGuide(page: Page) {
+  const authorizations: string[] = [];
+  await page.route("**/api/v1/cable-guide/presentation", async (route) => {
+    authorizations.push(route.request().headers().authorization ?? "");
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(livePresentation()) });
   });
-  await page.route("**/bridge/v1/ready", async (route) => {
-    readyCalls += 1;
-    await route.fulfill({ status: 204 });
-  });
-  await page.route("**/bridge/v1/media/**", async (route) => {
+  await page.route("**/api/v1/cable-guide/media/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "image/png",
       body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwH4QZGBgYGMAAAAD//wMAHikE/QAAAABJRU5ErkJggg==", "base64"),
     });
   });
-  return () => readyCalls;
+  return () => authorizations;
 }
 
 test("viewer sees the legacy splash, browses the guide, and opens a programme", async ({ page }) => {
-  const readinessCount = await interceptBridge(page);
-  await page.goto("/");
+  const authorizations = await interceptGuide(page);
+  await page.goto(guideURL);
+  await expect(page).toHaveURL(/\/cable\/\?deployment=dep-1$/);
   await expect(page.getByText("Chiba Cable Television", { exact: true })).toBeVisible();
   await expect(page.getByText("Chiba Cable Television", { exact: true })).toBeHidden({ timeout: 6_000 });
   await expect(page.locator(".header-title")).toHaveText("Signal / Sea");
-  await expect.poll(readinessCount).toBe(1);
+  expect(authorizations()[0]).toBe("Bearer guide-token");
   await expect(page.locator(".program-card")).toHaveCount(2);
   await expect(page.locator(".time-slot")).toHaveCount(6);
   await page.getByRole("button", { name: /Night block/ }).dblclick();
-  await expect(page).toHaveURL(/player/);
   await expect(page.getByRole("img", { name: "Night archive" })).toBeVisible();
   await expect(page.locator(".player-toolbar, .player-title, .player-controls")).toHaveCount(0);
   await expect(page.locator(".player-viewport")).toHaveCSS("width", "1280px");
@@ -53,10 +52,9 @@ test("viewer sees the legacy splash, browses the guide, and opens a programme", 
 });
 
 test("viewer can tune channels with the legacy grid controls", async ({ page }) => {
-  const readinessCount = await interceptBridge(page);
-  await page.goto("/");
+  await interceptGuide(page);
+  await page.goto(guideURL);
   await expect(page.locator(".splash-screen")).toBeHidden({ timeout: 6_000 });
-  await expect.poll(readinessCount).toBe(1);
   const gallery = page.getByRole("button", { name: /02 Gallery GALL/ });
   await gallery.click();
   await page.locator(".guide-shell").focus();
@@ -72,28 +70,25 @@ test("rapid remote route changes are processed once and in order", async ({ page
     remote: { url: "https://control.example/remote/session#token=secret", showQr: false, expiresAt: new Date(Date.now() + 60_000).toISOString() },
   };
   let polls = 0;
-  await page.route("**/bridge/v1/presentation", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(presentation) }));
-  await page.route("**/bridge/v1/ready", (route) => route.fulfill({ status: 204 }));
-  await page.route("**/bridge/v1/media/**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwH4QZGBgYGMAAAAD//wMAHikE/QAAAABJRU5ErkJggg==", "base64") }));
-  await page.route("**/bridge/v1/remote/events**", async (route) => {
+  await page.route("**/api/v1/cable-guide/presentation", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(presentation) }));
+  await page.route("**/api/v1/cable-guide/media/**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwH4QZGBgYGMAAAAD//wMAHikE/QAAAABJRU5ErkJggg==", "base64") }));
+  await page.route("**/api/v1/cable-guide/remote/events**", async (route) => {
     polls += 1;
-    if (polls === 1) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [], nextSequence: 0 }) });
+    if (polls === 1) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [], next: 0 }) });
     if (polls === 2) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [
       { sequence: 1, type: "key", key: "ChannelDown" },
       { sequence: 2, type: "key", key: "Guide" },
       { sequence: 3, type: "key", key: "ChannelNumber:1" },
-    ], nextSequence: 3 }) });
-    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [], nextSequence: 3 }) });
+    ], next: 3 }) });
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [], next: 3 }) });
   });
-  await page.goto("/");
-  await expect(page).toHaveURL(/player/, { timeout: 6_000 });
-  await expect(page.getByRole("img", { name: "Signal / Sea" })).toBeVisible();
+  await page.goto(guideURL);
+  await expect(page.getByRole("img", { name: "Signal / Sea" })).toBeVisible({ timeout: 6_000 });
 });
 
-test("viewer can retry a failed bridge load", async ({ page }) => {
+test("viewer can retry a failed guide load", async ({ page }) => {
   let attempts = 0;
-  let readyCalls = 0;
-  await page.route("**/bridge/v1/presentation", async (route) => {
+  await page.route("**/api/v1/cable-guide/presentation", async (route) => {
     attempts += 1;
     if (attempts <= 2) {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "offline" }) });
@@ -101,14 +96,22 @@ test("viewer can retry a failed bridge load", async ({ page }) => {
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(livePresentation()) });
   });
-  await page.route("**/bridge/v1/ready", async (route) => {
-    readyCalls += 1;
-    await route.fulfill({ status: 204 });
-  });
-  await page.goto("/");
+  await page.goto(guideURL);
   await expect(page.getByRole("heading", { name: "Unable to load lineup" })).toBeVisible();
   await expect(page.locator(".splash-screen")).toBeHidden({ timeout: 6_000 });
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.locator(".header-title")).toHaveText("Signal / Sea");
-  await expect.poll(() => readyCalls).toBe(1);
+});
+
+test("a link without a guide token shows a clear access error", async ({ page }) => {
+  await page.goto("/cable/?deployment=dep-1");
+  await expect(page.getByRole("heading", { name: "Guide access unavailable" })).toBeVisible();
+  await expect(page.getByText(/missing its access token/)).toBeVisible();
+});
+
+test("an expired guide token shows a clear access error", async ({ page }) => {
+  await page.route("**/api/v1/cable-guide/presentation", (route) => route.fulfill({ status: 401 }));
+  await page.goto(guideURL);
+  await expect(page.getByRole("heading", { name: "Guide access unavailable" })).toBeVisible();
+  await expect(page.getByText(/access has expired/)).toBeVisible();
 });

@@ -23,9 +23,12 @@ import (
 
 type RemoteDescriptor struct {
 	SessionID string
-	URL       string
-	ShowQR    bool
-	ExpiresAt time.Time
+	// Generation is the desired generation the session was created for; a
+	// renewal creates the replacement session for the same generation.
+	Generation int64
+	URL        string
+	ShowQR     bool
+	ExpiresAt  time.Time
 }
 
 type ScheduleItem struct {
@@ -42,16 +45,9 @@ type ScheduleItem struct {
 	Volume              int
 	ImageDurationSecond int
 	Orientation         int
-}
-
-type CableOccurrence struct {
-	ID        string
-	ChannelID string
-	BlockID   string
-	ItemID    string
-	AssetID   string
-	StartsAt  time.Time
-	EndsAt    time.Time
+	// WebURL is set for web schedule items, which render a live page for the
+	// item's duration instead of a media Source.
+	WebURL string
 }
 
 type Candidate struct {
@@ -71,20 +67,10 @@ type Candidate struct {
 	WindowStart         time.Time
 	WindowEnd           time.Time
 	Schedule            []ScheduleItem
-	CableOccurrences    []CableOccurrence
-
-	// Cable candidates are materialized by the Chromium adapter. Keeping the
-	// immutable closure on the candidate lets the composite renderer dispatch
-	// without carrying presentation-specific side channels.
-	ShellBuildDigest       string
-	RevisionArtifactDigest string
-	Entrypoint             string
-	BridgeProtocol         string
-	ArtifactClosure        []string
-	ShellPath              string
-	RevisionPath           string
-	ArtifactPaths          map[string]string
-	Remote                 *RemoteDescriptor
+	// WebURL is the live website shown by the Chromium adapter for web
+	// presentations.
+	WebURL string
+	Remote *RemoteDescriptor
 }
 
 func sameCandidate(a, b Candidate) bool { return reflect.DeepEqual(a, b) }

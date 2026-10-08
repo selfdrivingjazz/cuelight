@@ -65,26 +65,40 @@ func (s *Store) GetMedia(ctx context.Context, id string) (media.Media, error) {
 	return s.authoredMedia(ctx, s.q(ctx), id)
 }
 
-func (s *Store) authoredMedia(ctx context.Context, q queryer, id string) (media.Media, error) {
+// authoredMediaSelect reads every media kind: file media join their asset's
+// original artifact and poster; web media carry their own capture columns.
+const authoredMediaSelect = `SELECT m.id::text, m.kind, COALESCE(m.asset_id::text, ''), COALESCE(m.url, ''),
+	COALESCE(m.deployment_id::text, ''), m.favicon_url, m.title, m.description, m.artist,
+	array_to_json(m.tags), m.artwork_asset_id::text, m.fit, m.loop, m.muted, m.volume, m.orientation, m.version,
+	m.created_by::text, m.updated_by::text, m.created_at, m.updated_at,
+	COALESCE(r.digest, ''), COALESCE(r.size_bytes, 0), COALESCE(r.media_type, ''), COALESCE(r.state, ''),
+	t.thumbnail_digest, t.width, t.height,
+	m.thumbnail_digest, m.thumbnail_media_type, m.thumbnail_source, m.thumbnail_captured_at, m.thumbnail_error, m.thumbnail_attempted_at
+	FROM media m
+	LEFT JOIN asset_artifacts aa ON aa.asset_id = m.asset_id AND aa.role = 'original'
+	LEFT JOIN artifacts r ON r.digest = aa.artifact_digest
+	LEFT JOIN media_thumbnails t ON t.source_digest = r.digest`
+
+// Web captures are rendered at the node viewport size.
+const webThumbnailWidth, webThumbnailHeight = 1920, 1080
+
+func scanAuthoredMedia(row rowScanner) (media.Media, error) {
 	var value media.Media
 	var description, artist, artwork sql.NullString
 	var tags []byte
-	err := q.QueryRowContext(ctx, `SELECT m.id::text, m.asset_id::text, m.title, m.description, m.artist,
-		array_to_json(m.tags), m.artwork_asset_id::text, m.fit, m.loop, m.muted, m.volume, m.orientation, m.version,
-		m.created_by::text, m.updated_by::text, m.created_at, m.updated_at,
-		r.digest, r.size_bytes, r.media_type, r.state
-		FROM media m JOIN asset_artifacts aa ON aa.asset_id = m.asset_id AND aa.role = 'original'
-		JOIN artifacts r ON r.digest = aa.artifact_digest WHERE m.id = $1`, id).Scan(
-		&value.ID, &value.AssetID, &value.Title, &description, &artist, &tags, &artwork, &value.Playback.Fit,
+	var thumbDigest, webThumbDigest, webThumbType, webThumbSource sql.NullString
+	var thumbWidth, thumbHeight sql.NullInt64
+	var attempted, captured sql.NullTime
+	var state string
+	if err := row.Scan(&value.ID, &value.Kind, &value.AssetID, &value.URL, &value.DeploymentID, &value.FaviconURL,
+		&value.Title, &description, &artist, &tags, &artwork, &value.Playback.Fit,
 		&value.Playback.Loop, &value.Playback.Muted, &value.Playback.Volume, &value.Playback.Orientation,
 		&value.Version, &value.CreatedBy, &value.UpdatedBy, &value.CreatedAt, &value.UpdatedAt,
-		&value.Artifact.Digest, &value.Artifact.Size, &value.Artifact.MediaType, &value.Artifact.State)
-	if errors.Is(err, sql.ErrNoRows) {
-		return media.Media{}, media.ErrNotFound
+		&value.Artifact.Digest, &value.Artifact.Size, &value.Artifact.MediaType, &state,
+		&thumbDigest, &thumbWidth, &thumbHeight, &webThumbDigest, &webThumbType, &webThumbSource, &captured, &value.ThumbnailError, &attempted); err != nil {
+		return media.Media{}, err
 	}
-	if err != nil {
-		return media.Media{}, wrap("read authored media", err)
-	}
+	value.Artifact.State = media.ArtifactState(state)
 	value.Description, value.Artist = description.String, artist.String
 	value.ArtworkAssetID = artwork.String
 	if err := json.Unmarshal(tags, &value.Tags); err != nil {
@@ -93,7 +107,80 @@ func (s *Store) authoredMedia(ctx context.Context, q queryer, id string) (media.
 	if value.Tags == nil {
 		value.Tags = []string{}
 	}
+	if value.Kind == media.KindWeb {
+		value.Playback = media.Playback{}
+		if webThumbDigest.Valid {
+			at := captured.Time.UTC()
+			value.Thumbnail = &media.Thumbnail{Digest: webThumbDigest.String, MediaType: webThumbType.String, Width: webThumbnailWidth, Height: webThumbnailHeight, Source: webThumbSource.String, CapturedAt: &at}
+		}
+		if attempted.Valid {
+			at := attempted.Time.UTC()
+			value.ThumbnailAttemptedAt = &at
+		}
+		return value, nil
+	}
+	value.Thumbnail = scannedThumbnail(thumbDigest, thumbWidth, thumbHeight)
 	return value, nil
+}
+
+func (s *Store) authoredMedia(ctx context.Context, q queryer, id string) (media.Media, error) {
+	if !webItemIDPattern.MatchString(id) {
+		return media.Media{}, media.ErrNotFound
+	}
+	value, err := scanAuthoredMedia(q.QueryRowContext(ctx, authoredMediaSelect+` WHERE m.id = $1`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return media.Media{}, media.ErrNotFound
+	}
+	if err != nil {
+		return media.Media{}, wrap("read authored media", err)
+	}
+	return value, nil
+}
+
+// CreateWebMedia inserts a web page or returns the library item that already
+// shows the URL.
+func (s *Store) CreateWebMedia(ctx context.Context, mutation media.Mutation, value media.Media) (media.Media, bool, error) {
+	var result media.Media
+	var created bool
+	err := s.inTransaction(ctx, func(txCtx context.Context, tx *sql.Tx) error {
+		var id string
+		err := tx.QueryRowContext(txCtx, `INSERT INTO media (id, kind, url, title, description, tags, version, created_by, updated_by)
+			VALUES ($1, 'web', $2, $3, NULLIF($4, ''), ARRAY(SELECT jsonb_array_elements_text($5::jsonb)), 1, $6, $6)
+			ON CONFLICT (url) WHERE url IS NOT NULL DO NOTHING RETURNING id::text`,
+			value.ID, value.URL, value.Title, value.Description, jsonStrings(value.Tags), mutation.ActorID).Scan(&id)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			if err := tx.QueryRowContext(txCtx, `SELECT id::text FROM media WHERE url = $1`, value.URL).Scan(&id); err != nil {
+				return wrap("read existing web media", err)
+			}
+		case err != nil:
+			return wrap("create web media", err)
+		default:
+			created = true
+		}
+		result, err = s.authoredMedia(txCtx, tx, id)
+		return err
+	})
+	return result, created, err
+}
+
+// DeleteWebMedia removes an operator-added web page. Playlist items that
+// still reference it block deletion.
+func (s *Store) DeleteWebMedia(ctx context.Context, id string) error {
+	if !webItemIDPattern.MatchString(id) {
+		return media.ErrNotFound
+	}
+	result, err := s.q(ctx).ExecContext(ctx, `DELETE FROM media WHERE id = $1 AND kind = 'web' AND deployment_id IS NULL`, id)
+	if postgresCode(err) == "23503" {
+		return media.ErrInUse
+	}
+	if err != nil {
+		return wrap("delete web media", err)
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return media.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateMedia(ctx context.Context, mutation media.Mutation, id string, expectedVersion int64, patch media.MediaPatch) (media.Media, error) {
@@ -110,6 +197,12 @@ func (s *Store) UpdateMedia(ctx context.Context, mutation media.Mutation, id str
 		current, err := s.authoredMedia(txCtx, tx, id)
 		if err != nil {
 			return err
+		}
+		if current.DeploymentID != "" {
+			return media.ErrManaged
+		}
+		if current.Kind == media.KindWeb && (patch.Playback != nil || patch.ArtworkAssetID != nil || patch.Artist != nil) {
+			return fmt.Errorf("%w: web media support title, description, and tags only", media.ErrWrongKind)
 		}
 		responseID, replayed, err := s.mediaIdempotency(txCtx, tx, authoredMediaUpdate, mutation, hash, func() (string, error) {
 			if patch.ArtworkAssetID != nil {
@@ -191,7 +284,8 @@ func (s *Store) ListMedia(ctx context.Context, request page.PageRequest, filter 
 	if sortKey == "" {
 		sortKey = "createdAt"
 	}
-	if sortKey != "createdAt" && sortKey != "title" {
+	sortColumn, ok := mediaSortColumns[sortKey]
+	if !ok {
 		return page.Response[media.Media]{}, page.ErrSortInvalid
 	}
 	codec := page.DefaultCodec()
@@ -209,13 +303,17 @@ func (s *Store) ListMedia(ctx context.Context, request page.PageRequest, filter 
 	args := make([]any, 0, 5)
 	if request.Search != "" {
 		args = append(args, "%"+strings.ToLower(request.Search)+"%")
-		clauses = append(clauses, "(LOWER(m.title) LIKE $"+strconv.Itoa(len(args))+" OR LOWER(COALESCE(m.artist,'')) LIKE $"+strconv.Itoa(len(args))+" OR LOWER(m.id::text) LIKE $"+strconv.Itoa(len(args))+")")
+		clauses = append(clauses, "(LOWER(m.title) LIKE $"+strconv.Itoa(len(args))+" OR LOWER(COALESCE(m.artist,'')) LIKE $"+strconv.Itoa(len(args))+" OR LOWER(COALESCE(m.url,'')) LIKE $"+strconv.Itoa(len(args))+" OR LOWER(m.id::text) LIKE $"+strconv.Itoa(len(args))+")")
 	}
 	if filter.Playable != nil && *filter.Playable {
-		clauses = append(clauses, "r.state = 'ready' AND (r.media_type LIKE 'audio/%' OR r.media_type LIKE 'video/%' OR r.media_type LIKE 'image/%')")
+		clauses = append(clauses, "(m.kind = 'web' OR (r.state = 'ready' AND (r.media_type LIKE 'audio/%' OR r.media_type LIKE 'video/%' OR r.media_type LIKE 'image/%')))")
 	}
 	if filter.Kind != "" {
-		args = append(args, filter.Kind+"/%")
+		args = append(args, filter.Kind)
+		clauses = append(clauses, "m.kind = $"+strconv.Itoa(len(args)))
+	}
+	if filter.MediaType != "" {
+		args = append(args, filter.MediaType+"/%")
 		clauses = append(clauses, "r.media_type LIKE $"+strconv.Itoa(len(args)))
 	}
 	if len(filter.AssetIDs) > 0 {
@@ -227,54 +325,56 @@ func (s *Store) ListMedia(ctx context.Context, request page.PageRequest, filter 
 		if request.Order == "desc" {
 			op = "<"
 		}
-		args = append(args, pos.Value, pos.ID)
-		if sortKey == "title" {
-			clauses = append(clauses, "(m.title, m.id::text) "+op+" ($"+strconv.Itoa(len(args)-1)+", $"+strconv.Itoa(len(args))+")")
-		} else {
+		var cursorValue any = pos.Value
+		switch sortKey {
+		case "createdAt":
 			parsed, e := time.Parse(time.RFC3339Nano, pos.Value)
 			if e != nil {
 				return page.Response[media.Media]{}, page.ErrCursorInvalid
 			}
-			args[len(args)-2] = parsed
-			clauses = append(clauses, "(m.created_at, m.id::text) "+op+" ($"+strconv.Itoa(len(args)-1)+", $"+strconv.Itoa(len(args))+")")
+			cursorValue = parsed
+		case "size":
+			parsed, e := strconv.ParseInt(pos.Value, 10, 64)
+			if e != nil {
+				return page.Response[media.Media]{}, page.ErrCursorInvalid
+			}
+			cursorValue = parsed
 		}
+		args = append(args, cursorValue, pos.ID)
+		clauses = append(clauses, "("+sortColumn+", m.id::text) "+op+" ($"+strconv.Itoa(len(args)-1)+", $"+strconv.Itoa(len(args))+")")
 	}
 	order := "ASC"
 	if request.Order == "desc" {
 		order = "DESC"
 	}
-	orderBy := "m.created_at " + order + ", m.id " + order
-	if sortKey == "title" {
-		orderBy = "m.title " + order + ", m.id " + order
-	}
+	orderBy := sortColumn + " " + order + ", m.id::text " + order
 	args = append(args, request.Limit+1)
-	rows, err := s.q(ctx).QueryContext(ctx, "SELECT m.id::text, m.asset_id::text, m.title, m.description, m.artist, array_to_json(m.tags), m.artwork_asset_id::text, m.fit, m.loop, m.muted, m.volume, m.orientation, m.version, m.created_by::text, m.updated_by::text, m.created_at, m.updated_at, r.digest, r.size_bytes, r.media_type, r.state FROM media m JOIN asset_artifacts aa ON aa.asset_id=m.asset_id AND aa.role='original' JOIN artifacts r ON r.digest=aa.artifact_digest WHERE "+strings.Join(clauses, " AND ")+" ORDER BY "+orderBy+" LIMIT $"+strconv.Itoa(len(args)), args...)
+	rows, err := s.q(ctx).QueryContext(ctx, authoredMediaSelect+" WHERE "+strings.Join(clauses, " AND ")+" ORDER BY "+orderBy+" LIMIT $"+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return page.Response[media.Media]{}, wrap("list authored media", err)
+	}
+	defer rows.Close()
 	items := make([]media.Media, 0, request.Limit)
 	var lastValue, lastID string
 	hasMore := false
 	for rows.Next() {
-		var item media.Media
-		var desc, artist, artwork sql.NullString
-		var tags []byte
-		var created time.Time
-		err := rows.Scan(&item.ID, &item.AssetID, &item.Title, &desc, &artist, &tags, &artwork, &item.Playback.Fit, &item.Playback.Loop, &item.Playback.Muted, &item.Playback.Volume, &item.Playback.Orientation, &item.Version, &item.CreatedBy, &item.UpdatedBy, &created, &item.UpdatedAt, &item.Artifact.Digest, &item.Artifact.Size, &item.Artifact.MediaType, &item.Artifact.State)
+		item, err := scanAuthoredMedia(rows)
 		if err != nil {
 			return page.Response[media.Media]{}, wrap("scan authored media", err)
 		}
-		item.Description, item.Artist, item.ArtworkAssetID = desc.String, artist.String, artwork.String
-		if err := json.Unmarshal(tags, &item.Tags); err != nil {
-			return page.Response[media.Media]{}, wrap("decode authored media tags", err)
-		}
-		if item.Tags == nil {
-			item.Tags = []string{}
-		}
+		created := item.CreatedAt
 		if len(items) < request.Limit {
 			item.CreatedAt = created
 			items = append(items, item)
 			lastID = item.ID
-			if sortKey == "title" {
-				lastValue = item.Title
-			} else {
+			switch sortKey {
+			case "title":
+				lastValue = strings.ToLower(item.Title)
+			case "size":
+				lastValue = strconv.FormatInt(item.Artifact.Size, 10)
+			case "type":
+				lastValue = item.Artifact.MediaType
+			default:
 				lastValue = created.UTC().Format(time.RFC3339Nano)
 			}
 		} else {
@@ -295,9 +395,63 @@ func (s *Store) ListMedia(ctx context.Context, request page.PageRequest, filter 
 	return page.NewResponse(items, next, previous, hasMore), nil
 }
 func jsonStrings(values []string) string {
+	if values == nil {
+		return "[]"
+	}
 	encoded, _ := json.Marshal(values)
 	return string(encoded)
 }
+
+// mediaSortColumns maps public sort keys to keyset columns. Every key is
+// paired with m.id as a tiebreaker so cursors stay stable.
+var mediaSortColumns = map[string]string{
+	"createdAt": "m.created_at",
+	"title":     "LOWER(m.title)",
+	"size":      "COALESCE(r.size_bytes, 0)",
+	"type":      "COALESCE(r.media_type, '')",
+}
+
+func scannedThumbnail(digest sql.NullString, width, height sql.NullInt64) *media.Thumbnail {
+	if !digest.Valid {
+		return nil
+	}
+	return &media.Thumbnail{Digest: digest.String, MediaType: media.ThumbnailMediaType, Width: int(width.Int64), Height: int(height.Int64)}
+}
+
+func (s *Store) PutMediaThumbnail(ctx context.Context, sourceDigest string, thumbnail media.Thumbnail, size int64) error {
+	return s.inTransaction(ctx, func(txCtx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txCtx, `INSERT INTO artifacts (digest, size_bytes, media_type, state) VALUES ($1, $2, $3, 'ready') ON CONFLICT (digest) DO NOTHING`, thumbnail.Digest, size, thumbnail.MediaType); err != nil {
+			return wrap("register thumbnail artifact", err)
+		}
+		_, err := tx.ExecContext(txCtx, `INSERT INTO media_thumbnails (source_digest, thumbnail_digest, width, height) VALUES ($1, $2, $3, $4)
+			ON CONFLICT (source_digest) DO UPDATE SET thumbnail_digest = EXCLUDED.thumbnail_digest, width = EXCLUDED.width, height = EXCLUDED.height, created_at = now()`,
+			sourceDigest, thumbnail.Digest, thumbnail.Width, thumbnail.Height)
+		return wrap("link media thumbnail", err)
+	})
+}
+
+func (s *Store) ListThumbnailSources(ctx context.Context, limit int) ([]media.Artifact, error) {
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT DISTINCT r.digest, r.size_bytes, r.media_type, r.state FROM media m
+		JOIN asset_artifacts aa ON aa.asset_id = m.asset_id AND aa.role = 'original'
+		JOIN artifacts r ON r.digest = aa.artifact_digest
+		LEFT JOIN media_thumbnails t ON t.source_digest = r.digest
+		WHERE t.source_digest IS NULL AND r.state = 'ready' AND r.media_type LIKE 'image/%' LIMIT $1`, limit)
+	if err != nil {
+		return nil, wrap("list thumbnail sources", err)
+	}
+	defer rows.Close()
+	var out []media.Artifact
+	for rows.Next() {
+		var artifact media.Artifact
+		if err := rows.Scan(&artifact.Digest, &artifact.Size, &artifact.MediaType, &artifact.State); err != nil {
+			return nil, wrap("scan thumbnail source", err)
+		}
+		out = append(out, artifact)
+	}
+	return out, wrap("iterate thumbnail sources", rows.Err())
+}
+
+var _ media.ThumbnailRepository = (*Store)(nil)
 
 func (s *Store) GetMediaUsage(ctx context.Context, id string) (media.MediaUsage, error) {
 	var result media.MediaUsage

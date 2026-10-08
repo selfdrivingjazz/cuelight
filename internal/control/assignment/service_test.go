@@ -102,21 +102,46 @@ func (t *assignmentTransactionFixture) PutIdempotency(actorID, key string, recor
 	return nil
 }
 
-func TestPutReplayGenerationAndIdempotencyConflict(t *testing.T) {
+// publisherFixture resolves media IDs to prepared envelopes.
+type publisherFixture struct {
+	byMedia map[string]canonical.EnvelopeV1
+	keys    []string
+}
+
+func (p *publisherFixture) PublishTarget(_ context.Context, _, key, mediaID, playlistID string) (canonical.EnvelopeV1, error) {
+	p.keys = append(p.keys, key)
+	envelope, ok := p.byMedia[mediaID+playlistID]
+	if !ok {
+		return canonical.EnvelopeV1{}, ErrTargetNotFound
+	}
+	return envelope, nil
+}
+
+func serviceFixture(tx *assignmentTransactionFixture, envelopes ...canonical.EnvelopeV1) Service {
+	publisher := &publisherFixture{byMedia: map[string]canonical.EnvelopeV1{}}
+	for _, envelope := range envelopes {
+		publisher.byMedia["media-"+envelope.ID] = envelope
+	}
+	return Service{Assignments: assignmentRepositoryFixture{tx: tx}, Releases: publisher}
+}
+
+func generation(value int64) *int64 { return &value }
+
+func TestAssignReplayGenerationAndIdempotencyConflict(t *testing.T) {
 	release := releaseFixture(t, 1, DeliveryStream, DeliveryCacheThenPlay)
 	tx := newAssignmentTransactionFixture(release)
-	service := Service{Assignments: assignmentRepositoryFixture{tx: tx}}
+	service := serviceFixture(tx, release)
 	mutation := Mutation{ActorID: "actor-one", IdempotencyKey: "request-one"}
-	input := putInput(release, DeliveryStream, 0)
+	input := target(release, DeliveryStream, 0)
 
-	created, err := service.Put(context.Background(), "node-one", mutation, input)
+	created, err := service.AssignTarget(context.Background(), mutation, "node-one", input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !created.Created || created.Assignment.DesiredGeneration != 1 || len(tx.history) != 1 {
 		t.Fatalf("unexpected first assignment: %#v", created)
 	}
-	replayed, err := service.Put(context.Background(), "node-one", mutation, input)
+	replayed, err := service.AssignTarget(context.Background(), mutation, "node-one", input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,32 +151,78 @@ func TestPutReplayGenerationAndIdempotencyConflict(t *testing.T) {
 
 	changed := input
 	changed.DeliveryMode = DeliveryCacheThenPlay
-	if _, err := service.Put(context.Background(), "node-one", mutation, changed); !errors.Is(err, ErrIdempotencyConflict) {
+	if _, err := service.AssignTarget(context.Background(), mutation, "node-one", changed); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("got %v, want idempotency conflict", err)
 	}
-	if _, err := service.Put(context.Background(), "node-one", Mutation{ActorID: "actor-one", IdempotencyKey: "request-two"}, input); !errors.Is(err, ErrGenerationConflict) {
+	if _, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: "request-two"}, "node-one", input); !errors.Is(err, ErrGenerationConflict) {
 		t.Fatalf("got %v, want stale expected generation", err)
+	}
+	current := input
+	current.ExpectedGeneration = nil
+	next, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: "request-three"}, "node-one", current)
+	if err != nil || next.Assignment.ExpectedGeneration != 1 || next.Assignment.DesiredGeneration != 2 {
+		t.Fatalf("nil expected generation must assign over the current one: %#v %v", next, err)
 	}
 }
 
-func TestPutRequiresExactReleaseBindingAndAllowedDeliveryMode(t *testing.T) {
+func TestAssignDefaultsDeliveryModeFromRelease(t *testing.T) {
+	both := releaseFixture(t, 1, DeliveryStream, DeliveryCacheThenPlay)
+	streamOnly := releaseFixture(t, 2, DeliveryStream)
+	tx := newAssignmentTransactionFixture(both, streamOnly)
+	service := serviceFixture(tx, both, streamOnly)
+	cached, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: "one"}, "node-one", Target{MediaID: "media-" + both.ID})
+	if err != nil || cached.Assignment.DeliveryMode != DeliveryCacheThenPlay || cached.Assignment.MediaID != "media-"+both.ID {
+		t.Fatalf("got %#v %v, want cache_then_play for a cacheable release", cached, err)
+	}
+	streamed, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: "two"}, "node-one", Target{MediaID: "media-" + streamOnly.ID})
+	if err != nil || streamed.Assignment.DeliveryMode != DeliveryStream {
+		t.Fatalf("got %#v %v, want stream for a stream-only release", streamed, err)
+	}
+}
+
+func TestAssignRequiresExactlyOneTarget(t *testing.T) {
+	release := releaseFixture(t, 1, DeliveryStream)
+	tx := newAssignmentTransactionFixture(release)
+	service := serviceFixture(tx, release)
+	for name, input := range map[string]Target{
+		"none": {},
+		"both": {MediaID: "media-" + release.ID, PlaylistID: "playlist-one"},
+	} {
+		if _, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: name}, "node-one", input); !errors.Is(err, ErrInvalidAssignment) {
+			t.Fatalf("%s: got %v, want invalid assignment", name, err)
+		}
+	}
+	if _, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: "missing"}, "node-one", Target{MediaID: "media-missing"}); !errors.Is(err, ErrTargetNotFound) {
+		t.Fatalf("got %v, want target not found", err)
+	}
+	if len(tx.history) != 0 {
+		t.Fatal("invalid assignment was added to history")
+	}
+}
+
+func TestAssignRequiresExactReleaseBindingAndAllowedDeliveryMode(t *testing.T) {
 	one := releaseFixture(t, 1, DeliveryStream)
 	two := releaseFixture(t, 2, DeliveryStream)
+	mismatched := one
+	mismatched.Digest = two.Digest
+	absent := one
+	absent.ID = "release-missing"
 	tests := []struct {
-		name  string
-		input PutInput
-		want  error
+		name      string
+		published canonical.EnvelopeV1
+		mode      string
+		want      error
 	}{
-		{name: "digest belongs to another release", input: PutInput{ReleaseID: one.ID, ReleaseDigest: two.Digest, DeliveryMode: DeliveryStream}, want: ErrReleaseMismatch},
-		{name: "release ID is absent", input: PutInput{ReleaseID: "release-missing", ReleaseDigest: one.Digest, DeliveryMode: DeliveryStream}, want: ErrReleaseNotFound},
-		{name: "known mode not allowed by release", input: PutInput{ReleaseID: one.ID, ReleaseDigest: one.Digest, DeliveryMode: DeliveryCacheThenPlay}, want: ErrDeliveryMode},
-		{name: "unknown mode", input: PutInput{ReleaseID: one.ID, ReleaseDigest: one.Digest, DeliveryMode: "download"}, want: ErrDeliveryMode},
+		{name: "publisher digest belongs to another release", published: mismatched, mode: DeliveryStream, want: ErrReleaseMismatch},
+		{name: "published release is absent", published: absent, mode: DeliveryStream, want: ErrReleaseNotFound},
+		{name: "known mode not allowed by release", published: one, mode: DeliveryCacheThenPlay, want: ErrDeliveryMode},
+		{name: "unknown mode", published: one, mode: "download", want: ErrDeliveryMode},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			tx := newAssignmentTransactionFixture(one, two)
-			service := Service{Assignments: assignmentRepositoryFixture{tx: tx}}
-			_, err := service.Put(context.Background(), "node-one", Mutation{ActorID: "actor-one", IdempotencyKey: test.name}, test.input)
+			service := Service{Assignments: assignmentRepositoryFixture{tx: tx}, Releases: &publisherFixture{byMedia: map[string]canonical.EnvelopeV1{"media-one": test.published}}}
+			_, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: test.name}, "node-one", Target{MediaID: "media-one", DeliveryMode: test.mode, ExpectedGeneration: generation(0)})
 			if !errors.Is(err, test.want) {
 				t.Fatalf("got %v, want %v", err, test.want)
 			}
@@ -166,13 +237,13 @@ func TestAuthorizationUsesOlderAssignedObservationButRejectsNewerAndArbitraryDig
 	one := releaseFixture(t, 1, DeliveryStream)
 	two := releaseFixture(t, 2, DeliveryStream)
 	tx := newAssignmentTransactionFixture(one, two)
-	service := Service{Assignments: assignmentRepositoryFixture{tx: tx}}
+	service := serviceFixture(tx, one, two)
 
-	first, err := service.Put(context.Background(), "node-one", Mutation{ActorID: "actor-one", IdempotencyKey: "one"}, putInput(one, DeliveryStream, 0))
+	first, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: "one"}, "node-one", target(one, DeliveryStream, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.Put(context.Background(), "node-one", Mutation{ActorID: "actor-one", IdempotencyKey: "two"}, putInput(two, DeliveryStream, 1))
+	second, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor-one", IdempotencyKey: "two"}, "node-one", target(two, DeliveryStream, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,33 +279,33 @@ func TestAuthorizationRemainsBoundedAcrossRepeatedSupersession(t *testing.T) {
 		envelopes[index] = releaseFixture(t, index+1, DeliveryStream)
 	}
 	tx := newAssignmentTransactionFixture(envelopes...)
-	service := Service{Assignments: assignmentRepositoryFixture{tx: tx}}
+	service := serviceFixture(tx, envelopes...)
 
 	for index, envelope := range envelopes {
-		generation := int64(index)
+		current := int64(index)
 		if index != 0 {
 			previous := tx.history[index-1]
 			tx.observation = &Observation{
 				EventEpoch:                 "epoch-one",
 				Sequence:                   int64(index),
-				DesiredGenerationSeen:      generation,
-				ObservedGeneration:         generation,
+				DesiredGenerationSeen:      current,
+				ObservedGeneration:         current,
 				CandidateReleaseDigest:     previous.ReleaseDigest,
 				RenderingReleaseDigest:     previous.ReleaseDigest,
 				HealthyReleaseDigest:       previous.ReleaseDigest,
 				LastKnownGoodReleaseDigest: previous.ReleaseDigest,
 			}
 		}
-		result, err := service.Put(
+		result, err := service.AssignTarget(
 			context.Background(),
-			"node-one",
 			Mutation{ActorID: "actor-one", IdempotencyKey: fmt.Sprintf("request-%d", index)},
-			putInput(envelope, DeliveryStream, generation),
+			"node-one",
+			target(envelope, DeliveryStream, current),
 		)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Assignment.DesiredGeneration != generation+1 {
+		if result.Assignment.DesiredGeneration != current+1 {
 			t.Fatalf("generation jumped: %#v", result.Assignment)
 		}
 		if len(tx.authorized) > 5 {
@@ -249,12 +320,11 @@ func TestAuthorizationRemainsBoundedAcrossRepeatedSupersession(t *testing.T) {
 	}
 }
 
-func putInput(envelope canonical.EnvelopeV1, deliveryMode string, expectedGeneration int64) PutInput {
-	return PutInput{
-		ReleaseID:          envelope.ID,
-		ReleaseDigest:      envelope.Digest,
+func target(envelope canonical.EnvelopeV1, deliveryMode string, expectedGeneration int64) Target {
+	return Target{
+		MediaID:            "media-" + envelope.ID,
 		DeliveryMode:       deliveryMode,
-		ExpectedGeneration: expectedGeneration,
+		ExpectedGeneration: generation(expectedGeneration),
 	}
 }
 

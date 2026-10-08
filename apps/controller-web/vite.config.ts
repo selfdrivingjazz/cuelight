@@ -10,7 +10,7 @@ const apiProxy: ProxyOptions | undefined = controllerProxy ? {
   configure(proxy) {
     if (!controllerToken) return;
     proxy.on("proxyReq", (request) => {
-      if (!request.path.startsWith("/api/v1/remote/")) request.setHeader("Authorization", `Bearer ${controllerToken}`);
+      if (!request.path.startsWith("/api/v1/remote/") && !request.path.startsWith("/api/v1/browser-node/") && !request.path.startsWith("/api/v1/cable-guide/")) request.setHeader("Authorization", `Bearer ${controllerToken}`);
     });
   },
 } : undefined;
@@ -18,7 +18,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     allowedHosts: ["cuelight.example.ts.net"],
-    ...(apiProxy ? { proxy: { "/api/v1": apiProxy, "/health": { target: controllerProxy!, secure: false } } } : {}),
+    ...(apiProxy ? { proxy: { "/api/v1": apiProxy, "/health": { target: controllerProxy!, secure: false }, "^/node(/|$)": { target: controllerProxy!, secure: false }, "^/cable(/|$)": { target: controllerProxy!, secure: false } } } : {}),
   },
   test: { include: ["src/**/*.test.{ts,tsx}"] },
 });

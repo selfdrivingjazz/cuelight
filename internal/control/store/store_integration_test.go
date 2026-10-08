@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,7 +18,6 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/cable"
 	"github.com/jmill/cable/internal/control/persistence"
 	controlplayerapi "github.com/jmill/cable/internal/control/playerapi"
 	controlrelease "github.com/jmill/cable/internal/control/release"
@@ -212,20 +210,23 @@ func TestPostgresReleaseAssignmentConcurrencyAndCrossNodeIsolation(t *testing.T)
 		t.Fatalf("release replay = %#v, %v", replay, err)
 	}
 
-	service := assignment.Service{Assignments: repository}
-	put := assignment.PutInput{
-		ReleaseID: published.Envelope.ID, ReleaseDigest: published.Envelope.Digest,
-		DeliveryMode: assignment.DeliveryStream, ExpectedGeneration: 0,
+	mediaID := "00000000-0000-4000-8000-000000000015"
+	if _, err := db.ExecContext(ctx, `INSERT INTO media (id, asset_id, title, created_by, updated_by) VALUES ($1, $2, 'asset', $3, $3)`, mediaID, assetID, actorID); err != nil {
+		t.Fatal(err)
 	}
+	service := assignment.Service{Assignments: repository, Releases: targetTestPublisher(t, repository)}
+	zero := int64(0)
+	put := assignment.Target{MediaID: mediaID, DeliveryMode: assignment.DeliveryStream, ExpectedGeneration: &zero}
 	for _, nodeID := range []string{nodeOne, nodeTwo} {
-		result, err := service.Put(ctx, nodeID, assignment.Mutation{ActorID: actorID, IdempotencyKey: "shared-across-nodes"}, put)
+		result, err := service.AssignTarget(ctx, assignment.Mutation{ActorID: actorID, IdempotencyKey: "shared-across-nodes"}, nodeID, put)
 		if err != nil || !result.Created || result.Assignment.NodeID != nodeID {
 			t.Fatalf("cross-node assignment %s = %#v, %v", nodeID, result, err)
 		}
 	}
 
+	one := int64(1)
 	concurrent := put
-	concurrent.ExpectedGeneration = 1
+	concurrent.ExpectedGeneration = &one
 	var successes atomic.Int32
 	var conflicts atomic.Int32
 	start := make(chan struct{})
@@ -235,7 +236,7 @@ func TestPostgresReleaseAssignmentConcurrencyAndCrossNodeIsolation(t *testing.T)
 		go func(index int) {
 			defer wait.Done()
 			<-start
-			_, err := service.Put(ctx, nodeOne, assignment.Mutation{ActorID: actorID, IdempotencyKey: fmt.Sprintf("concurrent-%d", index)}, concurrent)
+			_, err := service.AssignTarget(ctx, assignment.Mutation{ActorID: actorID, IdempotencyKey: fmt.Sprintf("concurrent-%d", index)}, nodeOne, concurrent)
 			if err == nil {
 				successes.Add(1)
 			} else if errors.Is(err, assignment.ErrGenerationConflict) {
@@ -276,6 +277,12 @@ func TestPostgresMigrationsRoundTrip(t *testing.T) {
 	if actors.Valid {
 		t.Fatalf("actors table remains after down migrations: %s", actors.String)
 	}
+}
+
+type fixedReleasePublisher struct{ envelope canonical.EnvelopeV1 }
+
+func (p fixedReleasePublisher) PublishTarget(context.Context, string, string, string, string) (canonical.EnvelopeV1, error) {
+	return p.envelope, nil
 }
 
 func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
@@ -329,9 +336,15 @@ func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assignmentService := assignment.Service{Assignments: repository}
-	putInput := assignment.PutInput{ReleaseID: published.Envelope.ID, ReleaseDigest: published.Envelope.Digest, DeliveryMode: assignment.DeliveryStream, ExpectedGeneration: 0}
-	if _, err := assignmentService.Put(ctx, nodeOne, assignment.Mutation{ActorID: actorID, IdempotencyKey: "player-assignment-1"}, putInput); err != nil {
+	// The player contracts need a raw release (text/plain artifact), so the
+	// target publisher is replaced by one that returns it.
+	rawMediaID := "00000000-0000-4000-8000-000000000025"
+	if _, err := db.ExecContext(ctx, `INSERT INTO media (id, asset_id, title, created_by, updated_by) VALUES ($1, $2, 'raw', $3, $3)`, rawMediaID, assetID, actorID); err != nil {
+		t.Fatal(err)
+	}
+	assignmentService := assignment.Service{Assignments: repository, Releases: fixedReleasePublisher{envelope: published.Envelope}}
+	zero, one := int64(0), int64(1)
+	if _, err := assignmentService.AssignTarget(ctx, assignment.Mutation{ActorID: actorID, IdempotencyKey: "player-assignment-1"}, nodeOne, assignment.Target{MediaID: rawMediaID, DeliveryMode: assignment.DeliveryStream, ExpectedGeneration: &zero}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -372,8 +385,8 @@ func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
 	if err := <-waitDone; !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled assignment wait = %v", err)
 	}
-	if _, err := assignmentService.Put(ctx, nodeOne, assignment.Mutation{ActorID: actorID, IdempotencyKey: "player-assignment-2"}, assignment.PutInput{
-		ReleaseID: published.Envelope.ID, ReleaseDigest: published.Envelope.Digest, DeliveryMode: assignment.DeliveryStream, ExpectedGeneration: 1,
+	if _, err := assignmentService.AssignTarget(ctx, assignment.Mutation{ActorID: actorID, IdempotencyKey: "player-assignment-2"}, nodeOne, assignment.Target{
+		MediaID: rawMediaID, DeliveryMode: assignment.DeliveryStream, ExpectedGeneration: &one,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -384,14 +397,14 @@ func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
 	candidate := published.Envelope.Digest
 	accepted, err := repository.RecordReport(ctx, nodeOne, playerclient.NodeReport{
 		EventEpoch: nodeOne, Sequence: 1, DesiredGenerationSeen: 2, ObservedGeneration: 2,
-		PresentationKind: canonical.PresentationCable, CandidateReleaseDigest: &candidate,
+		PresentationKind: canonical.PresentationWeb, CandidateReleaseDigest: &candidate,
 		Conditions: []playerclient.Condition{{Type: "PlaybackHealthy", Status: true, Reason: "CandidateCommitted"}},
 	})
 	if err != nil || !accepted {
 		t.Fatalf("fresh report accepted=%v err=%v", accepted, err)
 	}
 	storedReport, err := NewOperatorAdapter(repository).GetNodeStatus(ctx, nodeOne)
-	if err != nil || storedReport.PresentationKind != canonical.PresentationCable || len(storedReport.Conditions) != 1 || storedReport.Conditions[0].Reason != "CandidateCommitted" {
+	if err != nil || storedReport.PresentationKind != canonical.PresentationWeb || len(storedReport.Conditions) != 1 || storedReport.Conditions[0].Reason != "CandidateCommitted" {
 		t.Fatalf("stored wire report = %#v, %v", storedReport, err)
 	}
 	stale := playerclient.NodeReport{EventEpoch: nodeOne, Sequence: 1, DesiredGenerationSeen: 2, ObservedGeneration: 0}
@@ -460,64 +473,5 @@ func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
 	body.Close()
 	if err != nil || string(content) != "player" {
 		t.Fatalf("CAS content = %q err=%v", content, err)
-	}
-}
-
-func TestPostgresCableAuthoringAndRevisionRoundTrip(t *testing.T) {
-	repository, db := newPostgresTestStore(t)
-	ctx := context.Background()
-	actorID := "00000000-0000-4000-8000-000000000031"
-	assetID := "00000000-0000-4000-8000-000000000032"
-	assetDigest := strings.Repeat("a", 64)
-	shellDigest := strings.Repeat("b", 64)
-	revisionDigest := strings.Repeat("c", 64)
-	if err := repository.EnsureActor(ctx, actorID, "Cable author"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO artifacts(digest,size_bytes,media_type,state) VALUES($1,68,'image/png','ready'),($2,1024,'application/gzip','ready')`, assetDigest, shellDigest); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO assets(id,name) VALUES($1,'programme')`, assetID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO asset_artifacts(asset_id,artifact_digest,role) VALUES($1,$2,'original')`, assetID, assetDigest); err != nil {
-		t.Fatal(err)
-	}
-	mutation := cable.Mutation{ActorID: actorID, IdempotencyKey: "cable-authoring", Now: time.Now().UTC()}
-	deployment, err := repository.CreateDeployment(ctx, mutation, cable.DeploymentInput{Name: "Integration Cable", Timezone: "America/New_York", Theme: "gallery", GuideHorizonSeconds: 86400, GuideDensity: "hour"})
-	if err != nil || deployment.GuideHorizonSeconds != 86400 {
-		t.Fatalf("deployment = %#v, %v", deployment, err)
-	}
-	channel, err := repository.CreateChannel(ctx, mutation, cable.ChannelInput{DeploymentID: deployment.ID, Number: 7, Name: "Gallery", Callsign: "GALL", Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	start := time.Date(2026, 8, 27, 18, 0, 0, 0, time.UTC)
-	if _, err := repository.CreateProgramEntry(ctx, mutation, cable.ProgramInput{ChannelID: channel.ID, AssetID: assetID, StartsAt: start, EndsAt: start.Add(time.Hour), Title: "Night Geometry", Fit: "fill", Volume: 1}); err != nil {
-		t.Fatal(err)
-	}
-	shell, err := repository.RegisterShellBuild(ctx, mutation, cable.ShellBuildInput{Digest: shellDigest, Entrypoint: "index.html", ArtifactDigests: []string{shellDigest}, BridgeProtocol: "1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repository.RegisterCableRevisionArtifact(ctx, revisionDigest, 32); err != nil {
-		t.Fatal(err)
-	}
-	revision := cable.CableRevision{
-		ID: revisionDigest, Digest: revisionDigest, DeploymentID: deployment.ID, DeploymentVersion: deployment.Version,
-		ShellBuildID: shell.ID, ShellBuildDigest: shellDigest, Entrypoint: "index.html", BridgeProtocol: "1",
-		Timezone: deployment.Timezone, Theme: deployment.Theme, GeneratedAt: start, Window: cable.RevisionWindow{StartsAt: start, EndsAt: start.Add(time.Hour)},
-		JSON: []byte(`{"schema":"cable.revision.v1","channels":[{"id":"channel-7","number":7,"name":"Gallery","callsign":"GALL","enabled":true,"standby":false,"programs":[]}]}`), ArtifactDigests: []string{assetDigest, shellDigest, revisionDigest}, CreatedBy: actorID, CreatedAt: start,
-	}
-	if err := repository.CreateRevision(ctx, revision); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := repository.Revision(ctx, revisionDigest)
-	if err != nil || stored.Theme != "gallery" || len(stored.Channels) != 1 || stored.Channels[0].Callsign != "GALL" || len(stored.ArtifactDigests) != 3 || stored.Errors == nil || stored.Warnings == nil {
-		t.Fatalf("revision = %#v, %v", stored, err)
-	}
-	page, err := repository.ListRevisions(ctx, deployment.ID, "", 10)
-	if err != nil || len(page.Items) != 1 || page.Items[0].ID != revisionDigest {
-		t.Fatalf("revision page = %#v, %v", page, err)
 	}
 }

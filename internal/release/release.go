@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
@@ -30,8 +31,12 @@ type PresentationKind string
 
 const (
 	PresentationMedia         PresentationKind = "media"
-	PresentationCable         PresentationKind = "cable"
 	PresentationMediaSchedule PresentationKind = "media-schedule"
+	PresentationWeb           PresentationKind = "web"
+
+	// FeatureWeb is the required feature for releases that render live web
+	// pages (web presentations and media schedules with web items).
+	FeatureWeb = "web"
 )
 
 type MediaPresentation struct {
@@ -45,20 +50,27 @@ type MediaScheduleWindow struct {
 	EndsAt   string `json:"endsAt"`
 }
 
-// MediaScheduleItem is an immutable, timestamped media occurrence. Sources
-// are resolved from ArtifactDigest by the player after verification.
+// MediaScheduleItem is an immutable, timestamped occurrence. File items
+// resolve their source from ArtifactDigest after verification; web items
+// carry Web and render the page for the item's duration.
 type MediaScheduleItem struct {
-	ID                  string `json:"id"`
-	StartsAt            string `json:"startsAt"`
-	EndsAt              string `json:"endsAt"`
-	ArtifactDigest      string `json:"artifactDigest"`
-	MediaType           string `json:"mediaType"`
-	Fit                 string `json:"fit"`
-	Loop                bool   `json:"loop"`
-	Muted               bool   `json:"muted"`
-	Volume              int    `json:"volume"`
-	ImageDurationSecond int    `json:"imageDurationSeconds,omitempty"`
-	Orientation         int    `json:"orientation"`
+	ID                  string                `json:"id"`
+	StartsAt            string                `json:"startsAt"`
+	EndsAt              string                `json:"endsAt"`
+	ArtifactDigest      string                `json:"artifactDigest,omitempty"`
+	MediaType           string                `json:"mediaType,omitempty"`
+	Fit                 string                `json:"fit,omitempty"`
+	Loop                bool                  `json:"loop"`
+	Muted               bool                  `json:"muted"`
+	Volume              int                   `json:"volume"`
+	ImageDurationSecond int                   `json:"imageDurationSeconds,omitempty"`
+	Orientation         int                   `json:"orientation"`
+	Web                 *MediaScheduleWebItem `json:"web,omitempty"`
+}
+
+// MediaScheduleWebItem is a live web page scheduled inside a media schedule.
+type MediaScheduleWebItem struct {
+	URL string `json:"url"`
 }
 
 // MediaSchedulePresentation is the signed MPV-compatible presentation form.
@@ -75,12 +87,10 @@ type MediaSchedulePresentation struct {
 // presentation payloads.
 type MediaSchedule = MediaSchedulePresentation
 
-type CablePresentation struct {
-	ShellBuildDigest       string   `json:"shellBuildDigest"`
-	RevisionArtifactDigest string   `json:"revisionArtifactDigest"`
-	Entrypoint             string   `json:"entrypoint"`
-	BridgeProtocol         string   `json:"bridgeProtocol"`
-	ArtifactClosure        []string `json:"artifactClosure"`
+// WebPresentation is a live website shown by a Chromium renderer and operated
+// through the remote input stream. It carries no artifacts.
+type WebPresentation struct {
+	URL string `json:"url"`
 }
 
 // Presentation is the signed release discriminator. Exactly one variant must
@@ -89,7 +99,7 @@ type Presentation struct {
 	Kind          PresentationKind           `json:"kind"`
 	Media         *MediaPresentation         `json:"media,omitempty"`
 	MediaSchedule *MediaSchedulePresentation `json:"mediaSchedule,omitempty"`
-	Cable         *CablePresentation         `json:"cable,omitempty"`
+	Web           *WebPresentation           `json:"web,omitempty"`
 }
 
 type Artifact struct {
@@ -361,7 +371,7 @@ func validate(payload PayloadV1) error {
 	if presentation.MediaSchedule != nil {
 		variants++
 	}
-	if presentation.Cable != nil {
+	if presentation.Web != nil {
 		variants++
 	}
 	if variants != 1 {
@@ -382,18 +392,25 @@ func validate(payload PayloadV1) error {
 		if presentation.MediaSchedule == nil {
 			return errors.New("media schedule presentation is required")
 		}
-		if err := validateMediaSchedule(*presentation.MediaSchedule, payload.Artifacts); err != nil {
+		if err := validateMediaSchedule(*presentation.MediaSchedule, payload.Artifacts, payload.RequiredFeatures); err != nil {
 			return err
 		}
-	case PresentationCable:
-		if presentation.Cable == nil {
-			return errors.New("cable presentation is required")
+		if len(payload.Artifacts) == 0 {
+			return nil
 		}
-		if err := validateCable(*presentation.Cable, payload.Artifacts); err != nil {
+	case PresentationWeb:
+		if presentation.Web == nil {
+			return errors.New("web presentation is required")
+		}
+		if err := ValidateWebURL(presentation.Web.URL); err != nil {
 			return err
 		}
+		if len(payload.Artifacts) != 0 {
+			return errors.New("web releases must not contain artifacts")
+		}
+		return nil
 	default:
-		return fmt.Errorf("presentation kind must be %q, %q, or %q", PresentationMedia, PresentationMediaSchedule, PresentationCable)
+		return fmt.Errorf("presentation kind must be %q, %q, or %q", PresentationMedia, PresentationMediaSchedule, PresentationWeb)
 	}
 	if len(payload.Artifacts) == 0 {
 		return errors.New("at least one artifact is required")
@@ -410,6 +427,18 @@ func validate(payload PayloadV1) error {
 			return fmt.Errorf("artifact %q is listed more than once", artifact.Digest)
 		}
 		seen[artifact.Digest] = struct{}{}
+	}
+	return nil
+}
+
+// ValidateWebURL accepts absolute http(s) URLs without userinfo.
+func ValidateWebURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return errors.New("web url must be an absolute http or https URL")
+	}
+	if parsed.User != nil {
+		return errors.New("web url must not contain userinfo")
 	}
 	return nil
 }
@@ -435,7 +464,7 @@ func validatePlayback(playback PlaybackPayload) error {
 	return nil
 }
 
-func validateMediaSchedule(schedule MediaSchedulePresentation, artifacts []Artifact) error {
+func validateMediaSchedule(schedule MediaSchedulePresentation, artifacts []Artifact, requiredFeatures []string) error {
 	if schedule.Timezone == "" {
 		return errors.New("timezone is required")
 	}
@@ -499,6 +528,18 @@ func validateMediaSchedule(schedule MediaSchedulePresentation, artifacts []Artif
 			return fmt.Errorf("schedule has a gap before %q", item.ID)
 		}
 		previousEnd = end
+		if item.Web != nil {
+			if err := ValidateWebURL(item.Web.URL); err != nil {
+				return fmt.Errorf("item %q: %w", item.ID, err)
+			}
+			if item.ArtifactDigest != "" || item.MediaType != "" {
+				return fmt.Errorf("item %q web items must not reference an artifact", item.ID)
+			}
+			if !slices.Contains(requiredFeatures, FeatureWeb) {
+				return fmt.Errorf("item %q is a web item but requiredFeatures omits %q", item.ID, FeatureWeb)
+			}
+			continue
+		}
 		if err := ValidateDigest(item.ArtifactDigest); err != nil {
 			return fmt.Errorf("item %q artifactDigest: %w", item.ID, err)
 		}
@@ -537,54 +578,13 @@ func validateMediaSchedule(schedule MediaSchedulePresentation, artifacts []Artif
 		}
 	}
 	for _, item := range schedule.Items {
-		if !slices.Contains(closure, item.ArtifactDigest) {
+		if item.Web == nil && !slices.Contains(closure, item.ArtifactDigest) {
 			return fmt.Errorf("schedule item %q artifact is missing from artifactClosure", item.ID)
 		}
 	}
 	return nil
 }
 
-func validateCable(cable CablePresentation, artifacts []Artifact) error {
-	if err := ValidateDigest(cable.ShellBuildDigest); err != nil {
-		return fmt.Errorf("shellBuildDigest: %w", err)
-	}
-	if err := ValidateDigest(cable.RevisionArtifactDigest); err != nil {
-		return fmt.Errorf("revisionArtifactDigest: %w", err)
-	}
-	if cable.Entrypoint == "" {
-		return errors.New("entrypoint is required")
-	}
-	if cable.BridgeProtocol == "" {
-		return errors.New("bridgeProtocol is required")
-	}
-	if len(cable.ArtifactClosure) == 0 {
-		return errors.New("artifactClosure is required")
-	}
-	closure := sortedUnique(cable.ArtifactClosure)
-	if len(closure) != len(cable.ArtifactClosure) {
-		return errors.New("artifactClosure must contain unique digests")
-	}
-	for _, digest := range closure {
-		if err := ValidateDigest(digest); err != nil {
-			return fmt.Errorf("artifactClosure: %w", err)
-		}
-	}
-	if len(artifacts) != len(closure) {
-		return errors.New("artifact closure does not match artifacts")
-	}
-	for index, artifact := range artifacts {
-		if artifact.Digest != closure[index] {
-			return errors.New("artifact closure does not match artifacts")
-		}
-	}
-	if !slices.Contains(closure, cable.ShellBuildDigest) {
-		return errors.New("shellBuildDigest is missing from artifactClosure")
-	}
-	if !slices.Contains(closure, cable.RevisionArtifactDigest) {
-		return errors.New("revisionArtifactDigest is missing from artifactClosure")
-	}
-	return nil
-}
 func ValidateDigest(digest string) error {
 	if len(digest) != DigestHexBytes || strings.ToLower(digest) != digest {
 		return errors.New("digest must be 64 lowercase hexadecimal characters")
@@ -615,6 +615,14 @@ func (p PayloadV1) MediaSchedulePlayback() (MediaSchedulePresentation, bool) {
 	return *p.Presentation.MediaSchedule, true
 }
 
+// WebPresentation returns the web presentation, if this is a web release.
+func (p PayloadV1) WebPresentation() (WebPresentation, bool) {
+	if p.Presentation.Kind != PresentationWeb || p.Presentation.Web == nil {
+		return WebPresentation{}, false
+	}
+	return *p.Presentation.Web, true
+}
+
 func (p PayloadV1) AllowsDeliveryMode(mode string) bool {
 	p = normalized(p)
 	switch p.Presentation.Kind {
@@ -622,8 +630,8 @@ func (p PayloadV1) AllowsDeliveryMode(mode string) bool {
 		return p.Presentation.Media != nil && slices.Contains(p.Presentation.Media.Playback.AllowedDeliveryMode, mode)
 	case PresentationMediaSchedule:
 		return p.Presentation.MediaSchedule != nil && slices.Contains(p.Presentation.MediaSchedule.AllowedDeliveryModes, mode)
-	case PresentationCable:
-		return mode == "cache_then_play"
+	case PresentationWeb:
+		return mode == "stream"
 	default:
 		return false
 	}

@@ -128,33 +128,9 @@ func (s Service) Publish(ctx context.Context, mutation Mutation, input PublishIn
 		IdempotencyKey: mutation.IdempotencyKey,
 		RequestDigest:  requestDigest,
 	}
-	result, err := s.Releases.Publish(
-		ctx,
-		publication,
-		func() (PreparedPublication, error) {
-			return s.prepare(ctx, input)
-		},
-		func(releaseID string, prepared PreparedPublication) (canonical.EnvelopeV1, error) {
-			if releaseID == "" {
-				return canonical.EnvelopeV1{}, fmt.Errorf("%w: empty release ID", ErrSignerContract)
-			}
-			envelope, err := s.Signer.Sign(ctx, releaseID, prepared.Payload)
-			if err != nil {
-				return canonical.EnvelopeV1{}, err
-			}
-			if err := validateEnvelope(envelope, releaseID, prepared.Digest); err != nil {
-				return canonical.EnvelopeV1{}, err
-			}
-			return envelope, nil
-		},
-	)
-	if err != nil {
-		return PublishResult{}, err
-	}
-	if err := validateEnvelope(result.Envelope, result.Envelope.ID, result.Envelope.Digest); err != nil {
-		return PublishResult{}, err
-	}
-	return result, nil
+	return signAndPublish(ctx, s.Releases, s.Signer, publication, func() (PreparedPublication, error) {
+		return s.prepare(ctx, input)
+	})
 }
 
 func (s Service) prepare(ctx context.Context, input PublishInput) (PreparedPublication, error) {

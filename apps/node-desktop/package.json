@@ -16,11 +16,13 @@
     "dist": "pnpm sidecars && pnpm build && electron-builder"
   },
   "dependencies": {
+    "qrcode": "1.5.4",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "zod": "4.1.5"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.6",
     "@types/react": "19.1.10",
     "@types/react-dom": "19.1.7",
     "@vitejs/plugin-react": "5.0.2",
@@ -38,10 +40,34 @@
     "executableName": "Cable Node",
     "artifactName": "Cable-Node-${version}-${os}-${arch}.${ext}",
     "asar": true,
-    "extraResources": [{"from": "resources/bin/current", "to": "bin"}],
-    "directories": {"output": "release"},
-    "mac": {"category": "public.app-category.utilities", "target": ["zip", "dmg"]},
-    "win": {"target": ["portable", "nsis"]},
-    "linux": {"category": "Utility", "target": ["AppImage", "tar.gz"]}
+    "extraResources": [
+      {
+        "from": "resources/bin/current",
+        "to": "bin"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "zip",
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ]
+    }
   }
 }

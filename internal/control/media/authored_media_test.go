@@ -46,6 +46,15 @@ func (r *authoredRepo) UpdateMedia(_ context.Context, _ Mutation, _ string, vers
 func (r *authoredRepo) GetMediaUsage(context.Context, string) (MediaUsage, error) {
 	return MediaUsage{}, nil
 }
+func (r *authoredRepo) CreateWebMedia(_ context.Context, _ Mutation, v Media) (Media, bool, error) {
+	r.createCalls++
+	r.value = v
+	return v, true, nil
+}
+func (r *authoredRepo) DeleteWebMedia(context.Context, string) error {
+	r.value = Media{}
+	return nil
+}
 
 type testContent struct{ data []byte }
 type testHandle struct{ *bytes.Reader }

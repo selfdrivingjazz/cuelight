@@ -1,28 +1,34 @@
-import type { CredentialStorage, NodeCredential } from "./types";
+import type { BrowserCredential } from "./types";
 
-const STORAGE_KEY = "cable.website-node.credential";
+export const STORAGE_KEY = "cable.browser-node.credential";
 
-/** Stores only the scoped credential; assignments and media are never persisted. */
+export interface CredentialStorage {
+  load(): BrowserCredential | null;
+  save(credential: BrowserCredential): void;
+  clear(): void;
+}
+
+/** Persists only the scoped browser credential; assignments and media are never stored. */
 export class LocalCredentialStorage implements CredentialStorage {
   constructor(private readonly storage: Storage = window.localStorage) {}
 
-  load(): NodeCredential | null {
+  load(): BrowserCredential | null {
     const raw = this.storage.getItem(STORAGE_KEY);
     if (!raw) return null;
     try {
-      const value = JSON.parse(raw) as Partial<NodeCredential>;
-      if (typeof value.nodeId !== "string" || typeof value.token !== "string" || typeof value.expiresAt !== "string") {
-        this.clear();
-        return null;
+      const value = JSON.parse(raw) as Partial<BrowserCredential>;
+      if (typeof value.nodeId === "string" && typeof value.token === "string" && typeof value.expiresAt === "string"
+        && typeof value.renewAfter === "string" && typeof value.eventEpoch === "string") {
+        return { nodeId: value.nodeId, token: value.token, expiresAt: value.expiresAt, renewAfter: value.renewAfter, eventEpoch: value.eventEpoch };
       }
-      return { nodeId: value.nodeId, token: value.token, expiresAt: value.expiresAt };
     } catch {
-      this.clear();
-      return null;
+      // Corrupt values are discarded below.
     }
+    this.clear();
+    return null;
   }
 
-  save(credential: NodeCredential): void {
+  save(credential: BrowserCredential): void {
     this.storage.setItem(STORAGE_KEY, JSON.stringify(credential));
   }
 
@@ -32,10 +38,8 @@ export class LocalCredentialStorage implements CredentialStorage {
 }
 
 export class MemoryCredentialStorage implements CredentialStorage {
-  private value: NodeCredential | null = null;
-  load(): NodeCredential | null { return this.value ? { ...this.value } : null; }
-  save(credential: NodeCredential): void { this.value = { ...credential }; }
+  private value: BrowserCredential | null = null;
+  load(): BrowserCredential | null { return this.value ? { ...this.value } : null; }
+  save(credential: BrowserCredential): void { this.value = { ...credential }; }
   clear(): void { this.value = null; }
 }
-
-export { STORAGE_KEY };

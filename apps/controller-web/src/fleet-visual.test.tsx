@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { components } from "@cable/api-client";
 import {
-  FleetNodeList,
   NodePlaybackView,
+  ScreenTile,
   nextNodeSelection,
   type FleetNodeVisual,
   type Media,
@@ -42,6 +42,7 @@ const report = (state?: "playing" | "paused" | "off_air" | "stale"): NodeReport 
 
 const media: Media = {
   id: "media-2",
+  kind: "file",
   assetId: "asset-2",
   title: "Morning headlines",
   tags: ["news"],
@@ -59,39 +60,22 @@ describe("fleet visual playback surfaces", () => {
     expect(nextNodeSelection(["lobby"], "studio", true)).toEqual(["lobby", "studio"]);
     expect(nextNodeSelection(["lobby", "studio"], "lobby", false)).toEqual(["studio"]);
 
-    const nodes: FleetNodeVisual[] = [
-      { node: node("lobby", "Lobby display"), report: report("playing") },
-      { node: node("studio", "Studio display"), report: report("off_air") },
-    ];
-    const markup = renderToStaticMarkup(<FleetNodeList
-      nodes={nodes}
-      selectedNodeIds={["lobby"]}
-      onSelectedNodeIdsChange={() => undefined}
-      bulkActions={(selected) => <button type="button">Restart playback on {selected.length}</button>}
-    />);
-
-    expect(markup).toContain("Select all nodes");
+    const markup = renderToStaticMarkup(<ScreenTile node={node("lobby", "Lobby display")} report={report("playing")} nodeHref="/screens/lobby" selected onSelectedChange={() => undefined} />);
     expect(markup).toContain("Select Lobby display");
     expect(markup).toContain("checked=\"\"");
-    expect(markup).toContain("1 selected");
-    expect(markup).toContain("Restart playback on 1");
-    expect(markup).not.toMatch(/ssh/i);
+    expect(markup).toContain("href=\"/screens/lobby\"");
   });
 
   it("makes mixed playing, off-air, stale, and older-node reports scannable", () => {
-    const nodes: FleetNodeVisual[] = [
-      { node: node("one", "Playing screen"), report: report("playing") },
-      { node: node("two", "Off-air screen"), report: report("off_air") },
-      { node: node("three", "Stale screen"), report: report("stale") },
-      { node: node("four", "Older screen"), report: report() },
-    ];
-    const markup = renderToStaticMarkup(<FleetNodeList nodes={nodes} now={new Date("2026-09-02T12:00:00.000Z")} />);
-
-    expect(markup).toContain("Playing");
-    expect(markup).toContain("Off air");
-    expect(markup).toContain("Stale");
-    expect(markup).toContain("Observation unavailable");
-    expect(markup).toContain("older player");
+    const tiles = [
+      [report("playing"), "Playing"],
+      [report("off_air"), "Off air"],
+      [report("stale"), "Stale"],
+      [report(), "Observation unavailable"],
+    ] as const;
+    for (const [nodeReport, label] of tiles) {
+      expect(renderToStaticMarkup(<ScreenTile node={node("one", "Screen")} report={nodeReport} now={new Date("2026-09-02T12:00:00.000Z")} />)).toContain(label);
+    }
   });
 
   it("does not turn expected content into an observation for older nodes", () => {
@@ -126,18 +110,16 @@ describe("fleet visual playback surfaces", () => {
     expect(markup).toContain("Weather");
     expect(markup).not.toContain("Actual capture from Lobby display");
   });
-  it("labels expected, reported, and captured evidence independently", () => {
-    const markup = renderToStaticMarkup(<FleetNodeList nodes={[{
-      node: node("lobby", "Lobby display"),
-      report: report("playing"),
-      observedNow: { title: "Reported title" },
-      expectedNow: { title: "Expected title" },
-      capture: { url: "blob:actual", capturedAt: "2026-09-02T12:00:00Z", provenance: "node-renderer" },
-    }]} />);
-    expect(markup).toContain("Expected preview");
-    expect(markup).toContain("Reported media");
-    expect(markup).toContain("Actual node capture");
-    expect(markup).toContain("node-renderer");
-    expect(markup).not.toContain("Reported identity · not a screenshot");
+  it("labels which evidence a screen tile is showing, preferring a real capture", () => {
+    const base: FleetNodeVisual = { node: node("lobby", "Lobby display"), report: report("playing"), observedNow: { title: "Reported title" }, expectedNow: { title: "Expected title", media, mediaPreviewUrl: "blob:expected" } };
+    const captured = renderToStaticMarkup(<ScreenTile {...base} capture={{ url: "blob:actual", capturedAt: "2026-09-02T12:00:00Z" }} />);
+    expect(captured).toContain("Capture preview for Lobby display");
+    expect(captured).toContain("blob:actual");
+    expect(captured).not.toContain("blob:expected");
+    const expected = renderToStaticMarkup(<ScreenTile {...base} />);
+    expect(expected).toContain("Expected preview for Lobby display");
+    expect(expected).toContain("Reported title");
+    const blank = renderToStaticMarkup(<ScreenTile node={node("dark", "Dark display")} />);
+    expect(blank).toContain("No signal");
   });
 });

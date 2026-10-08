@@ -178,7 +178,7 @@ func (c *Client) GetAssignment(ctx context.Context, etag string, wait time.Durat
 	if err := decodeJSON(response.Body, &assignment); err != nil {
 		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid JSON body"}
 	}
-	if assignment.PresentationKind != release.PresentationMedia && assignment.PresentationKind != release.PresentationCable && assignment.PresentationKind != release.PresentationMediaSchedule {
+	if assignment.PresentationKind != release.PresentationMedia && assignment.PresentationKind != release.PresentationMediaSchedule && assignment.PresentationKind != release.PresentationWeb {
 		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid presentation kind"}
 	}
 	return AssignmentResult{Assignment: assignment, ETag: responseETag}, nil
@@ -272,6 +272,24 @@ func (c *Client) CreateRemoteSession(ctx context.Context, desiredGeneration int6
 	return session, err
 }
 
+// CreateCableGuideToken mints a guide token for the hosted Cable guide of
+// deploymentID; control rejects it unless this node is assigned that guide.
+func (c *Client) CreateCableGuideToken(ctx context.Context, deploymentID string) (CableGuideToken, error) {
+	if strings.TrimSpace(deploymentID) == "" {
+		return CableGuideToken{}, errors.New("deployment ID is required")
+	}
+	var token CableGuideToken
+	err := c.jsonOperation(ctx, http.MethodPost, "/player/cable-guide-tokens", nil, map[string]string{"deploymentId": deploymentID}, "", []int{http.StatusOK, http.StatusCreated}, &token, 0)
+	if err == nil && token.Token == "" {
+		err = &ProtocolError{Method: http.MethodPost, Path: "/player/cable-guide-tokens", Reason: "missing guide token"}
+	}
+	return token, err
+}
+
+// ErrRemoteSessionGone reports that the control plane no longer knows the
+// remote session (expired or lost on restart); callers should create a new one.
+var ErrRemoteSessionGone = errors.New("remote session gone")
+
 func (c *Client) PollRemoteEvents(ctx context.Context, sessionID string, after int64, wait time.Duration) (RemoteEventPage, error) {
 	if sessionID == "" || after < 0 || wait < 0 || wait > 30*time.Second || wait%time.Second != 0 {
 		return RemoteEventPage{}, errors.New("invalid remote event poll")
@@ -286,6 +304,9 @@ func (c *Client) PollRemoteEvents(ctx context.Context, sessionID string, after i
 	}
 	defer cancel()
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusGone {
+		return RemoteEventPage{}, fmt.Errorf("%w: %w", ErrRemoteSessionGone, responseError(response, http.MethodGet, path))
+	}
 	if response.StatusCode != http.StatusOK {
 		return RemoteEventPage{}, responseError(response, http.MethodGet, path)
 	}

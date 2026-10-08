@@ -18,6 +18,8 @@ export type RuntimeAction =
   | { type: "REVISION_FAILED"; message: string }
   | { type: "RETRY_REVISION" }
   | { type: "SYNC_REVISION"; presentation: Presentation }
+  | { type: "REFRESH_REVISION"; presentation: Presentation }
+  | { type: "UPDATE_REMOTE"; remote: NonNullable<Presentation["remote"]> }
   | { type: "SELECT_CHANNEL"; channelId: string }
   | { type: "SELECT_PROGRAM"; occurrence: Occurrence }
   | { type: "TUNE_LIVE"; occurrence: Occurrence }
@@ -44,6 +46,22 @@ export function runtimeReducer(state: RuntimeState, action: RuntimeAction): Runt
         : action.presentation.bridge.state !== "online" || action.presentation.revision.stale
           ? { kind: "stale-offline", presentation: action.presentation, selectedId: null }
           : { kind: "ready", presentation: action.presentation, selectedId: null, mode: "guide" };
+    case "REFRESH_REVISION": {
+      // Periodic live refresh: adopt programming edits without leaving the current view.
+      if (!("presentation" in state)) return state;
+      if (state.kind === "ready" || state.kind === "stale-offline" || state.kind === "empty-lineup") {
+        const synced = runtimeReducer(state, { type: "SYNC_REVISION", presentation: action.presentation });
+        const selectedId = "selectedId" in state ? state.selectedId : null;
+        if (synced.kind === "ready") return { ...synced, selectedId, mode: state.kind === "ready" ? state.mode : "guide" };
+        if (synced.kind === "stale-offline") return { ...synced, selectedId };
+        return synced;
+      }
+      return { ...state, presentation: action.presentation };
+    }
+    case "UPDATE_REMOTE":
+      // The node renewed its remote session; keep the current view.
+      if (!("presentation" in state)) return state;
+      return { ...state, presentation: { ...state.presentation, remote: action.remote } };
     case "SELECT_CHANNEL":
       if (state.kind !== "ready" && state.kind !== "stale-offline") return state;
       return { ...state, selectedId: action.channelId };

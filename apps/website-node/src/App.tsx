@@ -1,96 +1,251 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import QRCode from "qrcode";
+import { BrowserNodeApi } from "./api";
 import { BrowserNodeController } from "./controller";
+import type { NodeSnapshot, RenderState } from "./controller";
+import { isWebItem, nextScheduleChange, scheduledItem } from "./presentation";
+import type { MediaItem, Presentation, ScheduleItem } from "./presentation";
 import { LocalCredentialStorage } from "./storage";
-import type { BrowserNodeTransport, MediaPort } from "./types";
-import { HttpBrowserNodeTransport } from "./transport";
+import type { ClaimStarted, RemoteEvent, RemoteSession } from "./types";
 
-class ElementMediaPort implements MediaPort {
-  constructor(private readonly image: HTMLImageElement, private readonly video: HTMLVideoElement) {}
-  showImage(url: string): Promise<void> {
-    this.video.pause(); this.video.removeAttribute("src"); this.video.load();
-    this.image.hidden = false; this.video.hidden = true;
-    return new Promise((resolve, reject) => {
-      this.image.onload = () => resolve();
-      this.image.onerror = () => reject(new Error("image could not be observed"));
-      this.image.src = url;
-      if (this.image.complete && this.image.naturalWidth > 0) resolve();
-    });
-  }
-  loadVideo(url: string): Promise<void> {
-    this.image.hidden = true; this.video.hidden = false;
-    return new Promise((resolve, reject) => {
-      this.video.onloadeddata = () => resolve();
-      this.video.onerror = () => reject(new Error("video could not be loaded"));
-      this.video.src = url;
-      this.video.load();
-    });
-  }
-  playVideo(): Promise<void> { return this.video.play(); }
-  clear(): void {
-    this.image.hidden = true; this.video.hidden = true;
-    this.image.removeAttribute("src"); this.video.pause(); this.video.removeAttribute("src"); this.video.load();
-  }
+type Report = (render: RenderState) => void;
+
+/** Injected by apps/node-android's WebView; absent in plain browsers. */
+declare global {
+  interface Window { CableAndroid?: { isAvailable(): boolean; injectInput(json: string): number } }
 }
 
-export type WebsiteNodeAppProps = { transport?: BrowserNodeTransport; nodeId?: string };
+export function WebsiteNodeApp({ controller: provided }: { controller?: BrowserNodeController }) {
+  const [controller] = useState(() => provided || new BrowserNodeController(new BrowserNodeApi(), new LocalCredentialStorage(), { userAgent: navigator.userAgent }));
+  const [snapshot, setSnapshot] = useState<NodeSnapshot>(controller.snapshot);
+  const [soundBlocked, setSoundBlocked] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
-export function WebsiteNodeApp({ transport = new HttpBrowserNodeTransport(), nodeId }: WebsiteNodeAppProps) {
-  const imageRef = useRef<HTMLImageElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [claimCode, setClaimCode] = useState("");
-  const [claiming, setClaiming] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [controller] = useState(() => new BrowserNodeController(
-    transport,
-    new LocalCredentialStorage(),
-    // The media port is replaced after mount once the actual elements exist.
-    { showImage: async () => {}, loadVideo: async () => {}, playVideo: async () => {}, clear: () => {} },
-  ));
-  const [mediaReady, setMediaReady] = useState(false);
-  const [snapshot, setSnapshot] = useState(controller.snapshot);
-  const resolvedNodeId = useMemo(() => nodeId ?? new URLSearchParams(window.location.search).get("node") ?? "", [nodeId]);
-
-  useEffect(() => controller.subscribe(setSnapshot), [controller]);
   useEffect(() => {
-    if (!resolvedNodeId || !imageRef.current || !videoRef.current) return;
-    // Keep the controller instance stable while wiring the real DOM adapter.
-    controller.setMediaPort(new ElementMediaPort(imageRef.current, videoRef.current));
-    setMediaReady(true);
-    void controller.start(resolvedNodeId);
-    return () => controller.disconnect();
-  }, [controller, resolvedNodeId]);
+    const unsubscribe = controller.subscribe(setSnapshot);
+    controller.start();
+    return () => { unsubscribe(); controller.stop(); };
+  }, [controller]);
 
-  async function claim(event: FormEvent) {
-    event.preventDefault();
-    setClaiming(true); setMessage(null);
-    try { await controller.claim(resolvedNodeId, claimCode); setClaimCode(""); }
-    catch { setMessage("That claim code could not be used."); }
-    finally { setClaiming(false); }
-  }
+  useEffect(() => keepScreenAwake(), []);
 
-  const status = snapshot.status;
-  if (!resolvedNodeId) return <main className="node-shell"><p>This browser-node URL is missing its node identity.</p></main>;
-  if (!mediaReady || status === "connecting") return <main className="node-shell"><p>Connecting browser node…</p></main>;
-  if (status === "unclaimed" || status === "error") return (
-    <main className="node-shell claim-screen">
-      <form onSubmit={claim} aria-label="Claim browser node">
-        <h1>Claim this browser node</h1>
-        <p>Enter the one-time code shown by your controller.</p>
-        <label>Claim code<input value={claimCode} onChange={(event) => setClaimCode(event.target.value)} autoComplete="one-time-code" required /></label>
-        <button type="submit" disabled={claiming}>{claiming ? "Claiming…" : "Claim node"}</button>
-        {message && <p role="alert">{message}</p>}
-      </form>
-    </main>
-  );
+  useEffect(() => controller.onRemoteEvent((event) => handleRemoteEvent(event, snapshot, videoRef.current)), [controller, snapshot]);
 
+  // TVs block fullscreen and unmuted playback until a user gesture; the first
+  // remote/keyboard/pointer interaction unlocks both.
+  useEffect(() => {
+    const unlock = () => {
+      requestFullscreen();
+      const video = videoRef.current;
+      if (video && video.dataset.wantSound === "true") {
+        video.muted = false;
+        void video.play().catch(() => undefined);
+        setSoundBlocked(false);
+      }
+    };
+    window.addEventListener("keydown", unlock);
+    window.addEventListener("pointerdown", unlock);
+    return () => { window.removeEventListener("keydown", unlock); window.removeEventListener("pointerdown", unlock); };
+  }, []);
+
+  const view = snapshot.view;
+  const report: Report = (render) => { void controller.reportRender(render); };
   return (
-    <main className="node-shell" aria-label="Website node">
-      <img ref={imageRef} alt="Current assignment" hidden />
-      <video ref={videoRef} muted playsInline controls={false} hidden />
-      {status === "autoplay_suspended" && <button className="resume" onClick={() => void controller.resumeAutoplay()}>Tap to play</button>}
-      {status === "unsupported" && <p role="status">This browser cannot play the assigned media.</p>}
-      {status === "offline" && <p role="status">Waiting for the controller connection.</p>}
+    <main className="node-shell">
+      {view.phase === "starting" && <Message title="Starting Cable…" />}
+      {view.phase === "pairing" && <PairingScreen claim={view.claim} />}
+      {view.phase === "idle" && <Message title="Paired with Cable" detail="Waiting for an assignment from the controller." small={`Node ${view.nodeId}`} />}
+      {view.phase === "presenting" && (
+        <PresentationView
+          key={`${view.assignment.desiredGeneration}`}
+          presentation={view.presentation}
+          report={report}
+          videoRef={videoRef}
+          onSoundBlocked={setSoundBlocked}
+        />
+      )}
+      {soundBlocked && view.phase === "presenting" && <div className="hint">Press OK or tap to turn on sound</div>}
+      {snapshot.remote && snapshot.remote.showQr && !(view.phase === "presenting" && view.presentation.kind === "web" && view.presentation.guide) && <RemoteBadge session={snapshot.remote} />}
+      {snapshot.offline && <div className="offline" role="status">Reconnecting to Cable…</div>}
     </main>
   );
+}
+
+function Message({ title, detail, small }: { title: string; detail?: string; small?: string }) {
+  return (
+    <section className="message">
+      <h1>{title}</h1>
+      {detail && <p>{detail}</p>}
+      {small && <p className="small">{small}</p>}
+    </section>
+  );
+}
+
+function PairingScreen({ claim }: { claim: ClaimStarted }) {
+  const qr = useQrCode(claim.pairUrl || "");
+  return (
+    <section className="pairing" aria-label="Pair this screen">
+      <div className="pairing-text">
+        <p className="eyebrow">Cable · pair this screen</p>
+        <h1>Enter this code in the Cable controller</h1>
+        <p className="code" aria-label="Pairing code">{claim.displayCode}</p>
+        <p className="instructions">Open <strong>{claim.pairUrl ? displayUrl(claim.pairUrl) : "the Cable controller"}</strong> on your phone or computer, or scan the QR code.</p>
+        <p className="small">The code refreshes automatically every few minutes.</p>
+      </div>
+      {qr && <img className="qr" src={qr} alt="QR code for the pairing page" />}
+    </section>
+  );
+}
+
+function RemoteBadge({ session }: { session: RemoteSession }) {
+  const qr = useQrCode(session.remoteUrl);
+  if (!qr) return null;
+  return <div className="remote-badge"><img src={qr} alt="Remote control QR code" /><span>Scan for remote</span></div>;
+}
+
+function PresentationView({ presentation, report, videoRef, onSoundBlocked }: {
+  presentation: Presentation;
+  report: Report;
+  videoRef: React.MutableRefObject<HTMLVideoElement | null>;
+  onSoundBlocked: (blocked: boolean) => void;
+}) {
+  if (presentation.kind === "media") return <MediaView item={presentation.item} report={report} videoRef={videoRef} onSoundBlocked={onSoundBlocked} />;
+  if (presentation.kind === "media-schedule") return <ScheduleView items={presentation.items} report={report} videoRef={videoRef} onSoundBlocked={onSoundBlocked} />;
+  if (presentation.kind === "web") return <WebView url={presentation.url} title={presentation.guide ? "Cable guide" : "Assigned website"} focus={presentation.guide} report={report} />;
+  return <Message title="This screen can't show the assigned content" detail={presentation.reason} small={`Presentation: ${presentation.presentationKind}`} />;
+}
+
+function ScheduleView({ items, report, videoRef, onSoundBlocked }: { items: ScheduleItem[]; report: Report; videoRef: React.MutableRefObject<HTMLVideoElement | null>; onSoundBlocked: (blocked: boolean) => void }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const delay = nextScheduleChange(items, now);
+    if (delay === null) return;
+    // Cap the timer so clock adjustments and very long waits still converge.
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(Math.max(delay, 250), 60000));
+    return () => clearTimeout(timer);
+  }, [items, now]);
+  const item = scheduledItem(items, now);
+  useEffect(() => { if (!item) report({ state: "off_air" }); }, [item ? item.id : ""]);
+  if (!item) return <Message title="Off air" detail="Nothing is scheduled right now." />;
+  if (isWebItem(item)) return <WebView key={item.id} url={item.webUrl} title="Scheduled website" report={(state) => report({ ...state, itemId: item.id })} />;
+  return <MediaView key={item.id} item={item} report={report} videoRef={videoRef} onSoundBlocked={onSoundBlocked} />;
+}
+
+function MediaView({ item, report, videoRef, onSoundBlocked }: { item: MediaItem; report: Report; videoRef: React.MutableRefObject<HTMLVideoElement | null>; onSoundBlocked: (blocked: boolean) => void }) {
+  const style = mediaStyle(item);
+  const failed = (message: string) => report({ state: "off_air", itemId: item.id, error: message });
+  if (item.element === "image") {
+    return <img className="media" style={style} src={item.url} alt="" onLoad={(event) => report({ state: "playing", itemId: item.id, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => failed("image failed to load")} />;
+  }
+  return (
+    <video
+      className="media"
+      style={style}
+      ref={(element) => {
+        videoRef.current = element;
+        if (!element) return;
+        element.volume = Math.max(0, Math.min(1, item.volume / 100));
+        element.dataset.wantSound = item.muted ? "false" : "true";
+      }}
+      src={item.url}
+      autoPlay
+      muted={item.muted}
+      loop={item.loop}
+      playsInline
+      preload="auto"
+      onCanPlay={(event) => {
+        const video = event.currentTarget;
+        if (!video.paused) return;
+        video.play().catch(() => {
+          // Autoplay with sound is commonly blocked until a gesture: play muted.
+          video.muted = true;
+          onSoundBlocked(!item.muted);
+          void video.play().catch(() => failed("autoplay blocked"));
+        });
+      }}
+      onPlaying={(event) => report({ state: "playing", itemId: item.id, width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight, positionMs: Math.round(event.currentTarget.currentTime * 1000) })}
+      onPause={(event) => { if (!event.currentTarget.ended) report({ state: "paused", itemId: item.id, positionMs: Math.round(event.currentTarget.currentTime * 1000) }); }}
+      onError={() => failed("video failed to load or decode")}
+    />
+  );
+}
+
+function WebView({ url, title, focus = false, report }: { url: string; title: string; focus?: boolean; report: Report }) {
+  // Sites that send X-Frame-Options/frame-ancestors refuse to load here; the
+  // browser does not expose that failure, so "playing" means the frame loaded.
+  // The same-origin Cable guide takes focus so local remote keys reach it.
+  return <iframe className="web" src={url} title={title} allow="autoplay; fullscreen; encrypted-media" referrerPolicy="no-referrer" onLoad={(event) => { if (focus) event.currentTarget.contentWindow?.focus(); report({ state: "playing" }); }} />;
+}
+
+function handleRemoteEvent(event: RemoteEvent, snapshot: NodeSnapshot, video: HTMLVideoElement | null): void {
+  const view = snapshot.view;
+  if (view.phase !== "presenting") return;
+  if (view.presentation.kind === "web") {
+    // The hosted Cable guide polls the remote session itself.
+    if (view.presentation.guide) return;
+    // Cross-origin frames cannot receive synthetic input from this page. The
+    // Android shell exposes a native injector; plain browsers drop the event.
+    const bridge = window.CableAndroid;
+    if (bridge && bridge.isAvailable()) bridge.injectInput(JSON.stringify({ events: [event] }));
+    return;
+  }
+  if (!video || event.type !== "key") return;
+  if (event.key === "Mute") video.muted = !video.muted;
+  else if (event.key === "VolumeUp") { video.muted = false; video.volume = Math.min(1, video.volume + 0.1); }
+  else if (event.key === "VolumeDown") video.volume = Math.max(0, video.volume - 0.1);
+  else if (event.key === "Enter" || event.key === "Space") { if (video.paused) void video.play().catch(() => undefined); else video.pause(); }
+}
+
+function mediaStyle(item: MediaItem): CSSProperties {
+  const quarter = item.orientation === 90 || item.orientation === 270;
+  return {
+    objectFit: item.fit === "fill" ? "cover" : "contain",
+    transform: item.orientation ? `rotate(${item.orientation}deg)` : undefined,
+    width: quarter ? "100vh" : "100%",
+    height: quarter ? "100vw" : "100%",
+  };
+}
+
+function useQrCode(text: string): string {
+  const [dataUrl, setDataUrl] = useState("");
+  useEffect(() => {
+    let current = true;
+    if (!text) { setDataUrl(""); return; }
+    QRCode.toDataURL(text, { margin: 1, width: 560, errorCorrectionLevel: "M" })
+      .then((value) => { if (current) setDataUrl(value); })
+      .catch(() => { if (current) setDataUrl(""); });
+    return () => { current = false; };
+  }, [text]);
+  return dataUrl;
+}
+
+function displayUrl(url: string): string {
+  return url.replace(/^https?:\/\//, "");
+}
+
+function requestFullscreen(): void {
+  const root = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+  const doc = document as Document & { webkitFullscreenElement?: Element | null };
+  if (document.fullscreenElement || doc.webkitFullscreenElement) return;
+  if (root.requestFullscreen) void root.requestFullscreen().catch(() => undefined);
+  else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+}
+
+/** Holds a screen wake lock where supported, re-acquiring after visibility changes. */
+function keepScreenAwake(): () => void {
+  type WakeLockSentinel = { release(): Promise<void> };
+  const wakeLock = (navigator as Navigator & { wakeLock?: { request(type: "screen"): Promise<WakeLockSentinel> } }).wakeLock;
+  if (!wakeLock) return () => undefined;
+  let sentinel: WakeLockSentinel | null = null;
+  const acquire = () => {
+    if (document.visibilityState !== "visible") return;
+    wakeLock.request("screen").then((value) => { sentinel = value; }).catch(() => undefined);
+  };
+  acquire();
+  document.addEventListener("visibilitychange", acquire);
+  return () => {
+    document.removeEventListener("visibilitychange", acquire);
+    if (sentinel) void sentinel.release().catch(() => undefined);
+  };
 }

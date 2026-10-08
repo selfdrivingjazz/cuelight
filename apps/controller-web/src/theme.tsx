@@ -91,11 +91,11 @@ export function ThemeControl({ id, label = "Theme", className }: ThemeControlPro
   const { preference, setPreference } = useControllerTheme();
   const generatedId = React.useId();
   const controlId = id ?? generatedId;
-  return <div className={["inline-flex items-center gap-2 rounded-md border border-border bg-card p-1.5 text-card-foreground", className].filter(Boolean).join(" ")}>
-    <label className="pl-1 text-xs font-medium text-muted-foreground" htmlFor={controlId}>{label}</label>
+  return <div className={["inline-flex items-center gap-3", className].filter(Boolean).join(" ")}>
+    <label className="text-xs text-muted-foreground" htmlFor={controlId}>{label}</label>
     <select
       id={controlId}
-      className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      className="h-8 rounded-md border border-border bg-transparent px-2 text-xs text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       value={preference}
       onChange={(event) => setPreference(event.currentTarget.value as ControllerThemePreference)}
     >

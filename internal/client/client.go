@@ -123,6 +123,13 @@ func (c *Client) CreateRecoveryToken(ctx context.Context, nodeID, idempotencyKey
 	return result, err
 }
 
+// CreateNodeRemoteLink mints a phone link for the node's active remote-input session.
+func (c *Client) CreateNodeRemoteLink(ctx context.Context, nodeID string) (RemoteLink, error) {
+	var result RemoteLink
+	err := c.doJSON(ctx, http.MethodPost, "/nodes/"+url.PathEscape(nodeID)+"/remote-link", nil, "", "", &result, http.StatusCreated)
+	return result, err
+}
+
 func (c *Client) ListNodes(ctx context.Context) ([]Node, error) {
 	var response struct {
 		Items []Node `json:"items"`
@@ -312,6 +319,29 @@ func (c *Client) PublishRelease(ctx context.Context, input json.RawMessage, idem
 	var result Document
 	err := c.doJSON(ctx, http.MethodPost, "/releases/publish", input, idempotencyKey, "", &result, http.StatusCreated)
 	return result, err
+}
+
+// CreateMedia adds a library item: file media ({"assetId", "title", ...}) or
+// web media ({"kind": "web", "url", "title"}).
+func (c *Client) CreateMedia(ctx context.Context, input any, idempotencyKey string) (Document, error) {
+	var result Document
+	err := c.doJSON(ctx, http.MethodPost, "/media", input, idempotencyKey, "", &result, http.StatusCreated, http.StatusOK)
+	return result, err
+}
+
+// MediaForAsset returns the library item wrapping assetID, if any.
+func (c *Client) MediaForAsset(ctx context.Context, assetID string) (Document, bool, error) {
+	var result struct {
+		Items []Document `json:"items"`
+	}
+	query := url.Values{"assetId": {assetID}, "limit": {"1"}}
+	if err := c.doJSON(ctx, http.MethodGet, "/media?"+query.Encode(), nil, "", "", &result, http.StatusOK); err != nil {
+		return nil, false, err
+	}
+	if len(result.Items) == 0 {
+		return nil, false, nil
+	}
+	return result.Items[0], true, nil
 }
 
 func (c *Client) PutAssignment(ctx context.Context, nodeID, ifMatch, idempotencyKey string, input AssignmentInput) (Assignment, error) {

@@ -11,7 +11,6 @@
     "generate": "pnpm --filter @cable/api-client generate",
     "check": "pnpm generate && pnpm -r typecheck && pnpm --filter @cable/api-client check-generated",
     "build": "pnpm -r build",
-    "bundle:cable": "pnpm --filter @cable/cable-web build && tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C apps/cable-web/dist -cf - . | gzip -n > apps/cable-web/cable-shell.tar.gz",
     "test": "pnpm -r test",
     "e2e": "pnpm --filter @cable/controller-web e2e && pnpm --filter @cable/cable-web e2e"
   },

@@ -15,24 +15,30 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/app"
 	"github.com/jmill/cable/internal/control/auth"
 	controlcable "github.com/jmill/cable/internal/control/cable"
+	"github.com/jmill/cable/internal/control/cableguide"
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/operatorapi"
 	"github.com/jmill/cable/internal/control/persistence"
 	"github.com/jmill/cable/internal/control/pki"
 	"github.com/jmill/cable/internal/control/playerapi"
 	"github.com/jmill/cable/internal/control/preview"
+	"github.com/jmill/cable/internal/control/profile"
 	controlrelease "github.com/jmill/cable/internal/control/release"
 	"github.com/jmill/cable/internal/control/remote"
 	"github.com/jmill/cable/internal/control/store"
 	"github.com/jmill/cable/internal/control/usage"
+	"github.com/jmill/cable/internal/control/webitem"
+	"github.com/jmill/cable/internal/control/webnode"
 	"github.com/jmill/cable/internal/media/localcas"
 	playerclient "github.com/jmill/cable/internal/player/client"
 	"github.com/jmill/cable/internal/protocol"
@@ -110,11 +116,14 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	}
 	releaseService := releaseAdapter{service: controlrelease.Service{Releases: repository, Artifacts: repository, Profiles: staticProfile{minimum: config.ProtocolVersion}, Signer: signer}, repository: repository}
 	cableService := &controlcable.Service{Repository: repository, Programming: repository}
-	revisionArtifacts := revisionArtifactAdapter{cas: cas, repository: repository}
-	cableCompiler := &controlcable.Compiler{Repository: repository, Artifacts: repository, Builds: repository, RevisionArtifacts: revisionArtifacts}
-	cablePublisher := &controlrelease.CablePublisher{
-		Releases: repository, Revisions: repository, Artifacts: repository, Signer: signer,
-		MinimumProtocolVersion: config.ProtocolVersion,
+	targetPublisher := controlrelease.TargetPublisher{
+		Media:   controlrelease.Service{Releases: repository, Artifacts: repository, Profiles: staticProfile{minimum: config.ProtocolVersion}, Signer: signer},
+		Catalog: repository, Releases: repository, Signer: signer,
+		MinimumProtocolVersion: config.ProtocolVersion, PublicOrigin: config.PublicURL,
+	}
+	assignmentService := assignment.Service{Assignments: repository, Releases: targetPublisher}
+	if err := cableguide.ConvertLegacyAssignments(context.Background(), repository, assignmentService); err != nil {
+		slog.Default().Warn("convert legacy Cable assignments", "error", err)
 	}
 	playerService, err := playerapi.NewService(repository, repository, store.NewLocalCASReader(cas), playerapi.Limits{MaxBodyBytes: config.MaxBodyBytes, MaxEvents: config.MaxEvents, MaxWait: config.MaxWait})
 	if err != nil {
@@ -127,13 +136,23 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("construct authored media service: %w", err)
 	}
+	authoredMediaService.CableOrigin = config.PublicURL
+	webCapture := &webitem.Service{Repository: &store.WebCaptureRepository{Store: repository, CAS: cas}}
+	if browser := webitem.FindChromium(config.WebCaptureBrowser); browser != "" {
+		webCapture.Capturer = webitem.ChromiumCapturer{Binary: browser}
+	}
+	go webCapture.Run(context.Background(), time.Minute)
 	mediaScopeAuthorizer := operatorapi.ScopeAuthorizer{Scopes: map[string]string{
 		operatorapi.ScopeMediaRead:  operatorapi.ScopeMediaRead,
 		operatorapi.ScopeMediaWrite: operatorapi.ScopeMediaWrite,
 	}}
+	mediaThumbnails := &media.ThumbnailService{Repository: repository, CAS: cas, Content: media.NewLocalCASContent(cas)}
+	go mediaThumbnails.Backfill(context.Background(), slog.Default())
 	authoredMediaHandler := media.NewOperatorHandler(media.OperatorDependencies{
-		Service: authoredMediaService,
-		Content: media.NewLocalCASContent(cas),
+		Service:    authoredMediaService,
+		Content:    media.NewLocalCASContent(cas),
+		Thumbnails: mediaThumbnails,
+		Web:        webCapture,
 		Authorize: func(actor auth.Actor, action, resourceType, resourceID string) error {
 			return mediaScopeAuthorizer.Authorize(actor, action, resourceType, resourceID)
 		},
@@ -142,8 +161,10 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	operatorDependencies := operatorapi.Dependencies{
 		Auth:            authService,
 		PKI:             pkiService,
+		RemoteLinks:     remoteService,
 		Nodes:           operatorRepository,
 		Assignments:     repository,
+		Assigner:        assignmentService,
 		AssignmentPages: repository,
 		Media:           mediaService,
 		Uploads:         repository,
@@ -152,12 +173,11 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		Releases:        releaseService,
 		Cable:           cableService,
 		CableRepository: repository,
-		CableCompiler:   cableCompiler,
-		CableReleases:   cablePublisher,
 		ReleasePages:    repository,
 		MaxJSONBytes:    config.MaxBodyBytes,
 		MaxChunkBytes:   config.MaxChunkBytes,
 		Idempotency:     operatorapi.NewIdempotencyCache(),
+		Profiles:        profile.Service{Repository: store.ProfileRepository{Store: repository}, Assigner: assignmentService},
 	}
 	operator := operatorapi.NewHandler(operatorDependencies)
 	usageService := usage.NewService(repository, nil)
@@ -168,10 +188,12 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	api.Handle("/player/recover", pkiHandler)
 	api.Handle("/player/credentials:rotate", pkiHandler)
 	api.Handle("/player/credentials/rotate", pkiHandler)
-	remoteHandler := remote.NewHandler(remoteService)
+	remoteHandler := remote.NewHandler(remoteService, nil)
 	api.Handle("/player/remote-sessions", remoteHandler)
 	api.Handle("/player/remote-sessions/", remoteHandler)
 	api.Handle("/remote/", remoteHandler)
+	guideService := &cableguide.Service{Repository: repository}
+	api.Handle("/player/cable-guide-tokens", cableguide.NewPlayerHandler(guideService, func(r *http.Request) (string, error) { return protocol.NodeIdentity(r, nil) }))
 	api.Handle("/media", operatorDependencies.Middleware(authoredMediaHandler))
 	playerScreenshotHandler := preview.NewPlayerHandler(previewService, func(r *http.Request) (string, error) { return protocol.NodeIdentity(r, nil) })
 	api.Handle("/player/screenshots/", playerScreenshotHandler)
@@ -184,10 +206,45 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	api.Handle("/player/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerHandler.ServeHTTP(w, r)
 	}))
+	browserNodes := &webnode.Service{Repository: repository, Config: webnode.Config{PairBaseURL: config.PublicURL}, NewID: newUUID}
+	browserPlayerService := *playerService
+	browserPlayerService.Identity = browserNodes.Identity
+	browserPlayer := http.NewServeMux()
+	browserPlayerRemote := remote.NewHandler(remoteService, browserNodes.Identity)
+	browserPlayer.Handle("/player/remote-sessions", browserPlayerRemote)
+	browserPlayer.Handle("/player/remote-sessions/", browserPlayerRemote)
+	browserPlayer.Handle("/player/cable-guide-tokens", cableguide.NewPlayerHandler(guideService, browserNodes.Identity))
+	browserPlayer.Handle("/player/", playerapi.NewHandler(&browserPlayerService))
+	api.Handle("/browser-node/", http.StripPrefix("/browser-node", webnode.NewBrowserHandler(browserNodes, browserPlayer)))
+	api.Handle("/cable-guide/", cableguide.NewGuideHandler(cableguide.GuideDependencies{
+		Service:       guideService,
+		Presentations: controlcable.PresentationBuilder{Repository: repository, Programming: repository, Artifacts: repository},
+		Remote:        remoteService,
+		Artifacts:     repository,
+		Content:       media.NewLocalCASContent(cas),
+	}))
+	browserNodeOperator := webnode.NewOperatorHandler(browserNodes, operatorDependencies.MiddlewareForScope, operatorapi.ScopeNodeEnroll, operatorapi.ScopeNodeRead, operatorapi.ScopeSecurityAdmin)
+	api.Handle("/browser-nodes", browserNodeOperator)
+	api.Handle("/browser-nodes/", browserNodeOperator)
 	api.Handle("/", operator)
 	root := http.NewServeMux()
 	root.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
+	if config.WebNodeDir != "" {
+		root.Handle("/node/", http.StripPrefix("/node", webnode.NewAppHandler(config.WebNodeDir)))
+		root.Handle("/node", http.RedirectHandler("/node/", http.StatusMovedPermanently))
+	}
+	if config.CableWebDir != "" {
+		root.Handle("/cable/", http.StripPrefix("/cable", webnode.NewAppHandler(config.CableWebDir)))
+		root.Handle("/cable", http.RedirectHandler("/cable/", http.StatusMovedPermanently))
+	}
 	return root, nil
+}
+
+func newUUID() (string, error) {
+	if id := randomID(); id != "" {
+		return id, nil
+	}
+	return "", errors.New("generate UUID: random source failed")
 }
 
 func newPKIHandler(service *pki.Service, maxBody int64) http.Handler {
@@ -368,25 +425,6 @@ func (a releaseAdapter) GetRelease(ctx context.Context, id string) (canonical.En
 }
 
 type staticProfile struct{ minimum string }
-type revisionArtifactAdapter struct {
-	cas        *localcas.Store
-	repository *store.Store
-}
-
-func (a revisionArtifactAdapter) PutRevisionArtifact(ctx context.Context, digest string, content []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	object, err := a.cas.Put(bytes.NewReader(content), digest)
-	if err != nil {
-		return err
-	}
-	if object.Digest != digest || object.Size != int64(len(content)) {
-		return errors.New("revision artifact store returned inconsistent metadata")
-	}
-	return a.repository.RegisterCableRevisionArtifact(ctx, digest, object.Size)
-}
-
 func (p staticProfile) ProfileForPlayback(context.Context, canonical.PlaybackPayload) (controlrelease.Profile, error) {
 	return controlrelease.Profile{MinimumProtocolVersion: p.minimum}, nil
 }

@@ -5,9 +5,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  EmptyState,
   NowPlayingCard,
-  PreviewMosaic,
   PreviewSurface,
   StatusSummary,
   TechnicalDetails,
@@ -27,7 +25,7 @@ export interface PlaybackMetadata {
   title: string;
   subtitle?: string;
   media?: Media;
-  /** An already-authorized object URL for the supplied media. */
+  /** An already-authorized object URL for a still: the media's persisted poster, or a web page capture when `media` is absent. */
   mediaPreviewUrl?: string;
   channelName?: string;
   blockTitle?: string;
@@ -67,15 +65,6 @@ export interface FleetNodeCardProps extends FleetNodeVisual {
   now?: Date | number;
 }
 
-export interface FleetNodeListProps {
-  nodes: readonly FleetNodeVisual[];
-  selectedNodeIds?: readonly string[];
-  onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
-  bulkActions?: React.ReactNode | ((selectedNodes: readonly FleetNodeVisual[]) => React.ReactNode);
-  empty?: React.ReactNode;
-  now?: Date | number;
-}
-
 export interface NodePlaybackViewProps extends FleetNodeVisual {
   now?: Date | number;
 }
@@ -93,6 +82,14 @@ function toneForPlayback(state: CurrentContent["state"]): StatusTone {
   return "neutral";
 }
 
+/** A screen whose last report is older than this is treated as offline rather than showing its stale state. */
+const offlineAfterMs = 10 * 60_000;
+
+export function isScreenOffline(report: NodeReport | undefined, now: number = Date.now()): boolean {
+  const reportedAt = report?.reportedAt ? Date.parse(report.reportedAt) : Number.NaN;
+  return Number.isFinite(reportedAt) && now - reportedAt > offlineAfterMs;
+}
+
 function nodeHealth({ report, health, healthDetail }: Pick<FleetNodeVisual, "report" | "health" | "healthDetail">): HealthSummary {
   if (health) {
     return {
@@ -102,6 +99,8 @@ function nodeHealth({ report, health, healthDetail }: Pick<FleetNodeVisual, "rep
       tone: /offline|failed|unhealthy|error/i.test(health) ? "danger" : /stale|degraded|warning/i.test(health) ? "warning" : /online|healthy|connected/i.test(health) ? "success" : "neutral",
     };
   }
+
+  if (isScreenOffline(report)) return { status: "offline", label: "Offline", detail: "No recent report", tone: "danger" };
 
   const failedCondition = report?.conditions.find((condition) =>
     condition.type === "SafeMode" ? condition.status : !condition.status
@@ -165,11 +164,9 @@ function LastContact({ value, now }: { value?: string; now?: Date | number }) {
     : <span className="text-xs text-muted-foreground">{label}</span>;
 }
 
+/** `mediaPreviewUrl` is always a still: the media's persisted poster or a web capture. */
 function mediaPreview(metadata: PlaybackMetadata | undefined): PreviewMedia | undefined {
-  if (!metadata?.media || !metadata.mediaPreviewUrl) return undefined;
-  if (metadata.media.artifact.mediaType.startsWith("video/")) {
-    return { kind: "video", src: metadata.mediaPreviewUrl, label: `Preview of ${metadata.title}`, controls: true };
-  }
+  if (!metadata?.mediaPreviewUrl) return undefined;
   return { kind: "image", src: metadata.mediaPreviewUrl, alt: `Preview of ${metadata.title}` };
 }
 
@@ -186,24 +183,26 @@ function CapturePreview({ nodeName, capture, compact = false }: { nodeName: stri
 
 function ExpectedPreview({ expected, compact = false }: { expected?: PlaybackMetadata; compact?: boolean }) {
   const preview = mediaPreview(expected);
+  if (compact && !preview) return <p className="px-4 py-6 text-sm text-muted-foreground">{expected ? "No preview available for this assignment." : "No content assigned."}</p>;
   return <PreviewSurface
     aria-label="Expected media preview"
     media={preview}
     state={preview ? undefined : "empty"}
     className={compact ? "rounded-none border-x-0" : undefined}
-    fit={expected?.media?.playback.fit === "fill" ? "cover" : "contain"}
+    fit={expected?.media?.kind === "web" || expected?.media?.playback?.fit === "fill" ? "cover" : "contain"}
     emptyTitle={expected ? "Expected preview unavailable" : "No expected content"}
     emptyDescription={expected ? "Expected metadata is available, but no media preview URL was supplied." : "No current schedule or assignment metadata was supplied."}
   />;
 }
 function ObservedPreview({ observed, compact = false }: { observed?: PlaybackMetadata; compact?: boolean }) {
   const preview = mediaPreview(observed);
+  if (compact && !preview) return <p className="px-4 py-6 text-sm text-muted-foreground">{observed ? "No preview available for the reported media." : "No media reported."}</p>;
   return <PreviewSurface
     aria-label="Reported media preview"
     media={preview}
     state={preview ? undefined : "empty"}
     className={compact ? "rounded-none border-x-0" : undefined}
-    fit={observed?.media?.playback.fit === "fill" ? "cover" : "contain"}
+    fit={observed?.media?.kind === "web" || observed?.media?.playback?.fit === "fill" ? "cover" : "contain"}
     emptyTitle={observed ? "Reported media preview unavailable" : "No reported media"}
     emptyDescription={observed ? "The player reported this media identity, but no preview URL was supplied." : "The node has not reported a current media identity."}
     overlay={preview ? <span>Reported identity · not a screenshot</span> : undefined}
@@ -313,140 +312,40 @@ function NodeTechnicalDetails({ node, report, capabilities }: Pick<FleetNodeVisu
   return <TechnicalDetails items={technicalItems(node, report, capabilities)}><Conditions report={report} /></TechnicalDetails>;
 }
 
-function SelectionControl({ nodeName, selected, onSelectedChange }: { nodeName: string; selected: boolean; onSelectedChange: (selected: boolean) => void }) {
-  return <label className="inline-flex cursor-pointer items-center gap-2 rounded-md text-xs font-medium text-muted-foreground focus-within:text-foreground">
-    <input
-      type="checkbox"
-      className="h-4 w-4 rounded border-input accent-primary"
-      checked={selected}
-      onChange={(event) => onSelectedChange(event.currentTarget.checked)}
-    />
-    <span>Select {nodeName}</span>
-  </label>;
+function screenSource({ capture, expectedNow, observedNow }: Pick<FleetNodeVisual, "capture" | "expectedNow" | "observedNow">): { label: string; media?: PreviewMedia; fit: "contain" | "cover" } {
+  if (capture) return { label: "Capture", media: { kind: "image", src: capture.url, alt: capture.alt ?? "Actual node capture" }, fit: "cover" };
+  const expected = mediaPreview(expectedNow);
+  if (expected) return { label: "Expected", media: expected.kind === "video" ? { ...expected, controls: false, muted: true, autoPlay: true, loop: true } : expected, fit: expectedNow?.media?.kind === "web" || expectedNow?.media?.playback?.fit === "fill" ? "cover" : "contain" };
+  const observed = mediaPreview(observedNow);
+  if (observed) return { label: "Reported", media: observed.kind === "video" ? { ...observed, controls: false, muted: true, autoPlay: true, loop: true } : observed, fit: "contain" };
+  return { label: expectedNow ? "Expected" : "No preview", fit: "contain" };
 }
 
-export function FleetNodeCard({
-  node,
-  report,
-  lastContactAt,
-  health,
-  healthDetail,
-  observedNow,
-  expectedNow,
-  next,
-  capture,
-  capabilities,
-  nodeHref,
-  actions,
-  selected = false,
-  onSelectedChange,
-  now,
-}: FleetNodeCardProps) {
+/** Compact wall tile: a monitor-framed preview, the screen name, what it shows, and a tally status. */
+export function ScreenTile({ node, report, lastContactAt, health, healthDetail, observedNow, expectedNow, capture, nodeHref, selected = false, onSelectedChange, now }: Omit<FleetNodeCardProps, "actions" | "capabilities" | "next">) {
   const summary = nodeHealth({ report, health, healthDetail });
-  const expectedHeadingId = React.useId();
-  const captureHeadingId = React.useId();
-  return <article
-    aria-label={`Node ${node.name}`}
-    data-selected={selected || undefined}
-    className={`overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm transition-colors ${selected ? "border-primary ring-2 ring-ring/20" : "border-border"}`}
-  >
-    <div className="space-y-4 p-4">
-      <header className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold tracking-tight">
-            {nodeHref ? <a className="rounded-sm hover:text-primary hover:underline" href={nodeHref}>{node.name}</a> : node.name}
-          </h2>
-          <div className="mt-1"><LastContact value={lastContactAt} now={now} /></div>
-        </div>
-        {onSelectedChange && <SelectionControl nodeName={node.name} selected={selected} onSelectedChange={onSelectedChange} />}
-      </header>
-      <StatusSummary status={summary.status} label={summary.label} detail={summary.detail} tone={summary.tone} ariaLive="polite" />
-      <ObservedIdentity report={report} observedNow={observedNow} />
+  const source = screenSource({ capture, expectedNow, observedNow });
+  const showing = observedNow?.title ?? expectedNow?.title ?? (report?.currentContent?.state === "off_air" ? "Off air" : report?.currentContent ? humanizeStatus(report.currentContent.state) : "Nothing reported");
+    return <article aria-label={`Screen ${node.name}`} data-selected={selected || undefined} className={`group relative min-w-0 rounded-lg border bg-card p-2 transition-colors hover:border-input ${selected ? "border-primary ring-1 ring-primary" : "border-border"}`}>
+    <div className="monitor relative">
+      {source.media
+        ? <PreviewSurface media={source.media} fit={source.fit} aria-label={`${source.label} preview for ${node.name}`} />
+        : <div className="no-signal relative grid aspect-video place-items-center overflow-hidden rounded-[5px]" aria-label={`No preview for ${node.name}`} role="img"><span className="relative z-10 rounded-sm bg-black/70 px-2 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-white/85">{expectedNow ? expectedNow.title : "No signal"}</span></div>}
+      <span className="pointer-events-none absolute left-3 top-3 z-10 rounded-sm bg-black/65 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-white/90">{source.label}</span>
+      {node.nodeClass === "browser" && <span className="pointer-events-none absolute right-3 top-3 z-10 rounded-sm bg-black/65 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-white/90">Browser</span>}
     </div>
-
-    <div className={`grid border-y border-border ${capture ? "sm:grid-cols-2 sm:divide-x sm:divide-border" : ""}`}>
-      <section aria-labelledby={expectedHeadingId} className="min-w-0">
-        <h3 id={expectedHeadingId} className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{expectedNow ? "Expected preview" : observedNow ? "Reported media" : "Preview"}</h3>
-        {expectedNow ? <ExpectedPreview expected={expectedNow} compact /> : <ObservedPreview observed={observedNow} compact />}
-        <div className="p-4"><MetadataSummary metadata={expectedNow ?? observedNow} empty="Preview unavailable." /></div>
-        {expectedNow && observedNow && <div className="border-t border-border">
-          <h3 className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reported media</h3>
-          <ObservedPreview observed={observedNow} compact />
-          <div className="p-4"><MetadataSummary metadata={observedNow} empty="Reported media unavailable." /></div>
-        </div>}
-      </section>
-      {capture && <section aria-labelledby={captureHeadingId} className="min-w-0 border-t border-border sm:border-t-0">
-        <h3 id={captureHeadingId} className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actual capture</h3>
-        <CapturePreview nodeName={node.name} capture={capture} compact />
-      </section>}
+    <div className="flex items-start justify-between gap-3 px-1.5 pt-2.5">
+      <div className="min-w-0">
+        <h2 className="truncate font-semibold tracking-tight">{nodeHref ? <a className="after:absolute after:inset-0 after:rounded-lg focus-visible:shadow-none focus-visible:after:shadow-[var(--focus-ring)]" href={nodeHref}>{node.name}</a> : node.name}</h2>
+        <p className="mt-0.5 truncate text-sm text-muted-foreground">{showing}</p>
+      </div>
+      {onSelectedChange && <label className="relative z-10 -m-1 inline-flex cursor-pointer p-1"><input type="checkbox" className="h-4 w-4 rounded border-input accent-primary" checked={selected} onChange={(event) => onSelectedChange(event.currentTarget.checked)} /><span className="sr-only">Select {node.name}</span></label>}
     </div>
-
-    <div className="space-y-4 p-4">
-      {next && <section aria-label="Up next" className="rounded-md bg-muted/40 p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Up next</p>
-        <MetadataSummary metadata={next} empty="No next item supplied." />
-      </section>}
-      <NodeTechnicalDetails node={node} report={report} capabilities={capabilities} />
-      {actions && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4" aria-label={`${node.name} actions`}>{actions}</div>}
+    <div className="flex items-center justify-between gap-3 px-1.5 pb-1 pt-2">
+      <StatusSummary className="text-xs" status={summary.status} label={summary.label} tone={summary.tone} ariaLive="polite" />
+      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{lastContactAt ? formatLastContact(lastContactAt, now) : "—"}</span>
     </div>
   </article>;
-}
-
-export function FleetNodeList({
-  nodes,
-  selectedNodeIds = [],
-  onSelectedNodeIdsChange,
-  bulkActions,
-  empty,
-  now,
-}: FleetNodeListProps) {
-  const selectedSet = new Set(selectedNodeIds);
-  const selectedNodes = nodes.filter((item) => selectedSet.has(item.node.id));
-  const allSelected = nodes.length > 0 && selectedNodes.length === nodes.length;
-  const someSelected = selectedNodes.length > 0 && !allSelected;
-  const selectAll = React.useRef<HTMLInputElement>(null);
-  React.useEffect(() => {
-    if (selectAll.current) selectAll.current.indeterminate = someSelected;
-  }, [someSelected]);
-
-  if (!nodes.length) return <>{empty ?? <EmptyState title="No nodes to show" description="No registered nodes match the current fleet view." />}</>;
-
-  const setSelection = (nodeId: string, selected: boolean) => {
-    onSelectedNodeIdsChange?.(nextNodeSelection(selectedNodeIds, nodeId, selected));
-  };
-  const setAll = (selected: boolean) => {
-    onSelectedNodeIdsChange?.(selected ? nodes.map((item) => item.node.id) : []);
-  };
-  const renderedBulkActions = typeof bulkActions === "function" ? bulkActions(selectedNodes) : bulkActions;
-
-  return <div className="space-y-4">
-    {(onSelectedNodeIdsChange || bulkActions) && <div className="flex flex-col justify-between gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center" aria-label="Fleet selection and bulk actions">
-      <div className="flex items-center gap-3">
-        {onSelectedNodeIdsChange && <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium">
-          <input
-            ref={selectAll}
-            type="checkbox"
-            className="h-4 w-4 rounded border-input accent-primary"
-            aria-label="Select all nodes"
-            checked={allSelected}
-            onChange={(event) => setAll(event.currentTarget.checked)}
-          />
-          Select all
-        </label>}
-        <span className="text-sm text-muted-foreground" aria-live="polite">{selectedNodes.length.toLocaleString()} selected</span>
-      </div>
-      {renderedBulkActions && <div className="flex flex-wrap items-center gap-2" aria-label="Bulk node actions">{renderedBulkActions}</div>}
-    </div>}
-    <PreviewMosaic label="Fleet nodes" columns={2}>
-      {nodes.map((item) => <FleetNodeCard
-        key={item.node.id}
-        {...item}
-        now={now}
-        selected={selectedSet.has(item.node.id)}
-        onSelectedChange={onSelectedNodeIdsChange ? (selected) => setSelection(item.node.id, selected) : undefined}
-      />)}
-    </PreviewMosaic>
-  </div>;
 }
 
 export function NodePlaybackView({
@@ -470,10 +369,29 @@ export function NodePlaybackView({
   const expectedHeadingId = React.useId();
   const captureHeadingId = React.useId();
 
-  return <div className="space-y-6">
-    <div className="flex flex-col justify-between gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center">
-      <StatusSummary status={summary.status} label={summary.label} detail={summary.detail} tone={summary.tone} ariaLive="polite" />
-      <LastContact value={lastContactAt} now={now} />
+  const statusRow = <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+    <StatusSummary status={summary.status} label={summary.label} detail={summary.detail} tone={summary.tone} ariaLive="polite" />
+    <LastContact value={lastContactAt} now={now} />
+  </div>;
+
+  return <div className="space-y-5">
+    <div className="grid gap-5 lg:grid-cols-2">
+      <section aria-labelledby={expectedHeadingId} className="min-w-0 space-y-2.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id={expectedHeadingId} className="eyebrow text-foreground/80">{expectedNow ? "Expected now" : observedNow ? "Reported media" : "Expected now"}</h2>
+          <p className="truncate text-xs text-muted-foreground">{expectedNow ? "From the assignment — not observed pixels" : observedNow ? "Identity reported by the player — not a screenshot" : "No expected schedule or assignment metadata is available."}</p>
+        </div>
+        <div className="monitor">{expectedNow ? <ExpectedPreview expected={expectedNow} /> : <ObservedPreview observed={observedNow} />}</div>
+        <MetadataSummary metadata={expectedNow ?? observedNow} empty={expectedNow ? "No expected metadata supplied." : "No reported media metadata supplied."} />
+      </section>
+      <section aria-labelledby={captureHeadingId} className="min-w-0 space-y-2.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id={captureHeadingId} className="eyebrow text-foreground/80">Actual capture</h2>
+          <p className="truncate text-xs text-muted-foreground">A screenshot taken by the screen itself</p>
+        </div>
+        <div className="monitor"><CapturePreview nodeName={node.name} capture={capture} /></div>
+        {actions && <div className="flex flex-wrap items-center gap-2" aria-label={`${node.name} actions`}>{actions}</div>}
+      </section>
     </div>
 
     {observed?.state === "playing" ? <NowPlayingCard
@@ -486,8 +404,7 @@ export function NodePlaybackView({
       positionMs={observed.positionMs}
       durationMs={observedNow?.durationMs}
       startedAt={observed.startedAt}
-      details={<ObservedIdentity report={report} observedNow={observedNow} />}
-      actions={actions}
+      details={<><ObservedIdentity report={report} observedNow={observedNow} />{statusRow}</>}
     /> : observed ? <Card>
       <CardHeader className="flex-row items-center justify-between gap-3">
         <CardTitle>{humanizeStatus(observed.state)}</CardTitle>
@@ -495,33 +412,15 @@ export function NodePlaybackView({
       </CardHeader>
       <CardContent className="space-y-4">
         <ObservedIdentity report={report} observedNow={observedNow} />
-        {actions && <div className="flex flex-wrap gap-2 border-t border-border pt-4" aria-label={`${node.name} actions`}>{actions}</div>}
+        {statusRow}
       </CardContent>
     </Card> : <Card>
       <CardHeader><CardTitle>Playback observation unavailable</CardTitle></CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">This node has not reported current content. It may be an older player or have no recent observation; expected content is not treated as observed.</p>
-        {actions && <div className="mt-4 flex flex-wrap gap-2" aria-label={`${node.name} actions`}>{actions}</div>}
+        {statusRow}
       </CardContent>
     </Card>}
-
-    <div className="grid gap-4 lg:grid-cols-2">
-      <section aria-labelledby={expectedHeadingId} className="space-y-3">
-        <div>
-          <h2 id={expectedHeadingId} className="text-base font-semibold tracking-tight">{expectedNow ? "Expected now" : observedNow ? "Reported media" : "Expected now"}</h2>
-          <p className="text-xs text-muted-foreground">{expectedNow ? "Schedule or assignment metadata, not observed pixels." : observedNow ? "Media identity reported by the player; this preview is not a screenshot." : "No expected schedule or assignment metadata is available."}</p>
-        </div>
-        {expectedNow ? <ExpectedPreview expected={expectedNow} /> : <ObservedPreview observed={observedNow} />}
-        <MetadataSummary metadata={expectedNow ?? observedNow} empty={expectedNow ? "No expected metadata supplied." : "No reported media metadata supplied."} />
-      </section>
-      <section aria-labelledby={captureHeadingId} className="space-y-3">
-        <div>
-          <h2 id={captureHeadingId} className="text-base font-semibold tracking-tight">Actual capture</h2>
-          <p className="text-xs text-muted-foreground">A screenshot supplied by the node, when available.</p>
-        </div>
-        <CapturePreview nodeName={node.name} capture={capture} />
-      </section>
-    </div>
 
     {next && <Card>
       <CardHeader><CardTitle>Up next</CardTitle></CardHeader>

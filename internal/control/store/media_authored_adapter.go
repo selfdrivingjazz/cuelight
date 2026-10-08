@@ -12,6 +12,12 @@ import (
 func (a *OperatorAdapter) CreateMedia(ctx context.Context, mutation media.Mutation, value media.Media) (media.Media, error) {
 	return a.Store.CreateMedia(ctx, mutation, value)
 }
+func (a *OperatorAdapter) CreateWebMedia(ctx context.Context, mutation media.Mutation, value media.Media) (media.Media, bool, error) {
+	return a.Store.CreateWebMedia(ctx, mutation, value)
+}
+func (a *OperatorAdapter) DeleteWebMedia(ctx context.Context, id string) error {
+	return a.Store.DeleteWebMedia(ctx, id)
+}
 func (a *OperatorAdapter) ListMedia(ctx context.Context, request page.PageRequest, filter media.MediaListFilter) (page.Response[media.Media], error) {
 	return a.Store.ListMedia(ctx, request, filter)
 }

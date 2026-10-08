@@ -11,6 +11,7 @@ import (
 	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
 	"github.com/jmill/cable/internal/control/release"
+	"github.com/jmill/cable/internal/control/remote"
 	playerclient "github.com/jmill/cable/internal/player/client"
 	canonical "github.com/jmill/cable/internal/release"
 	"sync"
@@ -61,6 +62,7 @@ type Node struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`
 	CredentialState    string `json:"credentialState"`
+	NodeClass          string `json:"nodeClass"`
 	DesiredGeneration  int64  `json:"desiredGeneration,omitempty"`
 	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
 }
@@ -68,11 +70,24 @@ type Node struct {
 type Assignment struct {
 	ID                 string `json:"id"`
 	NodeID             string `json:"nodeId"`
+	MediaID            string `json:"mediaId,omitempty"`
+	PlaylistID         string `json:"playlistId,omitempty"`
 	ReleaseID          string `json:"releaseId"`
 	ReleaseDigest      string `json:"releaseDigest"`
 	DeliveryMode       string `json:"deliveryMode"`
 	ExpectedGeneration int64  `json:"expectedGeneration"`
 	DesiredGeneration  int64  `json:"desiredGeneration"`
+	RemoteInput        bool   `json:"remoteInput"`
+	ShowQR             bool   `json:"showQr"`
+}
+
+// AssignmentInput targets exactly one media item or playlist; the server
+// publishes or reuses the release that presents it.
+type AssignmentInput struct {
+	MediaID            string `json:"mediaId,omitempty"`
+	PlaylistID         string `json:"playlistId,omitempty"`
+	DeliveryMode       string `json:"deliveryMode,omitempty"`
+	ExpectedGeneration int64  `json:"expectedGeneration"`
 	RemoteInput        bool   `json:"remoteInput"`
 	ShowQR             bool   `json:"showQr"`
 }
@@ -129,7 +144,11 @@ type NodeRevocationService interface {
 
 type AssignmentService interface {
 	GetAssignment(context.Context, string) (assignment.Assignment, error)
-	PutAssignment(context.Context, string, assignment.Mutation, assignment.PutInput) (assignment.PutResult, error)
+}
+
+// Assigner publishes or reuses the release for a target and assigns it.
+type Assigner interface {
+	AssignTarget(context.Context, assignment.Mutation, string, assignment.Target) (assignment.PutResult, error)
 }
 
 type AssetService interface {
@@ -140,9 +159,6 @@ type AssetService interface {
 type ReleaseService interface {
 	Publish(context.Context, release.Mutation, release.PublishInput) (release.PublishResult, error)
 	GetRelease(context.Context, string) (canonical.EnvelopeV1, error)
-}
-type CableReleaseService interface {
-	Publish(context.Context, release.Mutation, release.CablePublishInput) (release.PublishResult, error)
 }
 
 type UploadPageService interface {
@@ -183,7 +199,7 @@ func (a ScopeAuthorizer) Authorize(actor auth.Actor, action, resourceType, resou
 		return ErrInvalidRequest
 	}
 	switch resourceType {
-	case "node", "upload", "asset", "media", "release", "token", "enrollment-token", "operator", "assignment", "assignments", "cable", "deployment", "channel", "program", "shell_build", "revision":
+	case "node", "upload", "asset", "media", "release", "token", "enrollment-token", "operator", "assignment", "assignments", "cable", "deployment", "channel", "program", "profile":
 	default:
 		return fmt.Errorf("%w: unknown resource %q", ErrForbidden, resourceType)
 	}
@@ -243,6 +259,18 @@ func (s AuditService) List(ctx context.Context, query AuditQuery) (page.Response
 	return s.Repository.Query(ctx, query)
 }
 
+// RemoteLinkService mints phone links for a node's active remote-input session.
+type RemoteLinkService interface {
+	Link(context.Context, string) (remote.SessionCreated, error)
+}
+
+// RemoteLink is the operator-facing phone link for an active remote session.
+type RemoteLink struct {
+	SessionID string    `json:"sessionId"`
+	RemoteURL string    `json:"remoteUrl"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
 // Dependencies is the explicit composition boundary for the operator API.
 // Services are deliberately narrow, allowing HTTP to be tested without SQL.
 type Dependencies struct {
@@ -259,6 +287,8 @@ type Dependencies struct {
 	}
 	Nodes       NodeService
 	Assignments AssignmentService
+	Assigner    Assigner
+	RemoteLinks RemoteLinkService
 	Media       interface {
 		CreateUpload(context.Context, media.Mutation, media.CreateUploadRequest) (media.Upload, error)
 		Upload(context.Context, string) (media.Upload, error)
@@ -275,11 +305,10 @@ type Dependencies struct {
 	ReleasePages    ReleasePageService
 	Cable           *cable.Service
 	CableRepository cable.Repository
-	CableCompiler   *cable.Compiler
-	CableReleases   CableReleaseService
 	MaxJSONBytes    int64
 	MaxChunkBytes   int64
 	Idempotency     *IdempotencyCache
+	Profiles        ProfileService
 }
 
 // IdempotencyCache is only used by adapters that need HTTP-level replay. Domain

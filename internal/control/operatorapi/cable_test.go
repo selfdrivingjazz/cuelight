@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/jmill/cable/internal/control/cable"
-	controlrelease "github.com/jmill/cable/internal/control/release"
-	canonical "github.com/jmill/cable/internal/release"
 )
 
 type cableHandlerRepository struct {
@@ -65,39 +63,6 @@ func (f *cableHandlerRepository) ListProgramEntries(context.Context, string, str
 func (f *cableHandlerRepository) DeleteProgramEntry(context.Context, cable.Mutation, string) error {
 	return errors.New("unused")
 }
-func (f *cableHandlerRepository) RegisterShellBuild(context.Context, cable.Mutation, cable.ShellBuildInput) (cable.ShellBuild, error) {
-	return cable.ShellBuild{}, errors.New("unused")
-}
-func (f *cableHandlerRepository) ShellBuild(context.Context, string) (cable.ShellBuild, error) {
-	return cable.ShellBuild{}, errors.New("unused")
-}
-func (f *cableHandlerRepository) ListShellBuilds(context.Context, string, int) (cable.ShellBuildPage, error) {
-	return cable.ShellBuildPage{}, errors.New("unused")
-}
-func (f *cableHandlerRepository) CreateRevision(context.Context, cable.CableRevision) error {
-	return errors.New("unused")
-}
-func (f *cableHandlerRepository) Revision(context.Context, string) (cable.CableRevision, error) {
-	return cable.CableRevision{}, errors.New("unused")
-}
-func (f *cableHandlerRepository) ListRevisions(context.Context, string, string, int) (cable.RevisionPage, error) {
-	return cable.RevisionPage{}, errors.New("unused")
-}
-
-type cableReleasePublisherFixture struct {
-	mutation controlrelease.Mutation
-	input    controlrelease.CablePublishInput
-}
-
-func (f *cableReleasePublisherFixture) Publish(_ context.Context, mutation controlrelease.Mutation, input controlrelease.CablePublishInput) (controlrelease.PublishResult, error) {
-	f.mutation = mutation
-	f.input = input
-	return controlrelease.PublishResult{Envelope: canonical.EnvelopeV1{
-		ID:     "release-one",
-		Digest: strings.Repeat("d", 64),
-	}}, nil
-}
-
 func TestCableHandlerMutationContract(t *testing.T) {
 	repo := &cableHandlerRepository{deployment: cable.CableDeployment{ID: "dep", Name: "demo", Version: 7}}
 	h := NewHandler(Dependencies{
@@ -129,22 +94,5 @@ func TestCableHandlerListEnvelopeAndAuth(t *testing.T) {
 	w = request(h, http.MethodGet, "/cable/deployments", "", nil)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status=%d", w.Code)
-	}
-}
-
-func TestCableHandlerPublishesSignedReleaseFromRevision(t *testing.T) {
-	publisher := &cableReleasePublisherFixture{}
-	handler := NewHandler(Dependencies{
-		Auth:          testAuth{scopes: []string{ScopeCableWrite}},
-		CableReleases: publisher,
-	})
-	response := withHeader(handler, http.MethodPost, "/cable/revisions/revision-one/release", "token", nil, map[string]string{
-		"Idempotency-Key": "publish-release-one",
-	})
-	if response.Code != http.StatusCreated || response.Header().Get("ETag") != `"`+strings.Repeat("d", 64)+`"` {
-		t.Fatalf("publish status=%d etag=%q body=%s", response.Code, response.Header().Get("ETag"), response.Body.String())
-	}
-	if publisher.mutation.ActorID != "actor" || publisher.mutation.IdempotencyKey != "publish-release-one" || publisher.input.RevisionID != "revision-one" {
-		t.Fatalf("mutation=%+v input=%+v", publisher.mutation, publisher.input)
 	}
 }

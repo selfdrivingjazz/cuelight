@@ -173,7 +173,7 @@ func (s *Store) ListAssignmentsPage(ctx context.Context, request page.PageReques
 		order = "DESC"
 	}
 	args = append(args, request.Limit+1)
-	query := "SELECT a.id::text, a.node_id::text, a.release_id::text, a.release_digest, a.delivery_mode, a.desired_generation - 1, a.desired_generation, a.created_at FROM assignments a WHERE " + strings.Join(clauses, " AND ") + " ORDER BY a.created_at " + order + ", a.id " + order + " LIMIT $" + strconv.Itoa(len(args))
+	query := "SELECT a.id::text, a.node_id::text, COALESCE(a.media_id::text, ''), COALESCE(a.playlist_id::text, ''), a.release_id::text, a.release_digest, a.delivery_mode, a.desired_generation - 1, a.desired_generation, a.remote_input, a.show_qr, a.created_at FROM assignments a WHERE " + strings.Join(clauses, " AND ") + " ORDER BY a.created_at " + order + ", a.id " + order + " LIMIT $" + strconv.Itoa(len(args))
 	rows, err := s.q(ctx).QueryContext(ctx, query, args...)
 	if err != nil {
 		return page.Response[operatorapi.Assignment]{}, wrap("list assignments page", err)
@@ -185,7 +185,7 @@ func (s *Store) ListAssignmentsPage(ctx context.Context, request page.PageReques
 	for rows.Next() {
 		var item operatorapi.Assignment
 		var createdAt time.Time
-		if err := rows.Scan(&item.ID, &item.NodeID, &item.ReleaseID, &item.ReleaseDigest, &item.DeliveryMode, &item.ExpectedGeneration, &item.DesiredGeneration, &createdAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.NodeID, &item.MediaID, &item.PlaylistID, &item.ReleaseID, &item.ReleaseDigest, &item.DeliveryMode, &item.ExpectedGeneration, &item.DesiredGeneration, &item.RemoteInput, &item.ShowQR, &createdAt); err != nil {
 			return page.Response[operatorapi.Assignment]{}, wrap("scan assignment page", err)
 		}
 		if len(items) < request.Limit {

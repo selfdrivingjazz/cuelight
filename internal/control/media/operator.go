@@ -22,6 +22,8 @@ type MediaAuthorizer func(auth.Actor, string, string, string) error
 type OperatorDependencies struct {
 	Service      *AuthoredService
 	Content      ContentReader
+	Thumbnails   *ThumbnailService
+	Web          WebCapture
 	Authorize    MediaAuthorizer
 	MaxJSONBytes int64
 }
@@ -36,9 +38,13 @@ func NewOperatorHandler(deps OperatorDependencies) http.Handler {
 	mux.HandleFunc("GET /media", h.list)
 	mux.HandleFunc("GET /media/{mediaId}", h.get)
 	mux.HandleFunc("PATCH /media/{mediaId}", h.update)
+	mux.HandleFunc("DELETE /media/{mediaId}", h.delete)
+	mux.HandleFunc("POST /media/{mediaId}/refresh", h.refresh)
 	mux.HandleFunc("GET /media/{mediaId}/usage", h.usage)
 	mux.HandleFunc("HEAD /media/{mediaId}/content", h.content)
 	mux.HandleFunc("GET /media/{mediaId}/content", h.content)
+	mux.HandleFunc("GET /media/{mediaId}/thumbnail", h.thumbnail)
+	mux.HandleFunc("PUT /media/{mediaId}/thumbnail", h.putThumbnail)
 	return mux
 }
 
@@ -75,12 +81,82 @@ func (h *operatorHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeMediaError(w, err)
 		return
 	}
-	value, err := h.deps.Service.Create(r.Context(), Mutation{ActorID: actor.ID, IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key"))}, input)
+	mutation := Mutation{ActorID: actor.ID, IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key"))}
+	if input.Kind == KindWeb {
+		value, created, err := h.deps.Service.CreateWeb(r.Context(), mutation, input)
+		if err != nil {
+			writeMediaError(w, err)
+			return
+		}
+		status := http.StatusOK
+		if created {
+			status = http.StatusCreated
+		}
+		if (created || value.Thumbnail == nil) && h.deps.Web != nil {
+			h.deps.Web.Capture(value.ID, value.URL)
+		}
+		setMediaETag(w, value)
+		writeMediaJSON(w, status, value)
+		return
+	}
+	value, err := h.deps.Service.Create(r.Context(), mutation, input)
 	if err != nil {
 		writeMediaError(w, err)
 		return
 	}
+	if value.Thumbnail == nil && h.deps.Thumbnails != nil {
+		// Decodable images get their poster at ingest so the library never
+		// has to download the original to render a card.
+		if thumbnail, err := h.deps.Thumbnails.Generate(r.Context(), value.Artifact); err == nil {
+			value.Thumbnail = &thumbnail
+		}
+	}
 	writeMediaJSON(w, http.StatusCreated, value)
+}
+func (h *operatorHandler) delete(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.actor(r, "media_write", r.PathValue("mediaId")); err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	if h.deps.Service == nil {
+		writeMediaError(w, errors.New("media service is not configured"))
+		return
+	}
+	if err := h.deps.Service.DeleteWeb(r.Context(), r.PathValue("mediaId")); err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+func (h *operatorHandler) refresh(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.actor(r, "media_write", r.PathValue("mediaId")); err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	if h.deps.Service == nil || h.deps.Web == nil {
+		writeMediaError(w, ErrCaptureDisabled)
+		return
+	}
+	current, err := h.deps.Service.Get(r.Context(), r.PathValue("mediaId"))
+	if err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	if current.Kind != KindWeb {
+		writeMediaError(w, ErrWrongKind)
+		return
+	}
+	if err := h.deps.Web.Refresh(r.Context(), current.ID); err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	value, err := h.deps.Service.Get(r.Context(), current.ID)
+	if err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	setMediaETag(w, value)
+	writeMediaJSON(w, http.StatusOK, value)
 }
 func (h *operatorHandler) list(w http.ResponseWriter, r *http.Request) {
 	actor, err := h.actor(r, "media_read", "")
@@ -106,12 +182,19 @@ func (h *operatorHandler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Playable = &v
 	}
-	if kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind != "" {
-		if kind != "image" && kind != "video" && kind != "audio" {
-			writeMediaError(w, &ValidationError{Field: "kind", Reason: "must be image, video, or audio"})
+	switch kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind {
+	case "", KindFile, KindWeb:
+		filter.Kind = kind
+	default:
+		writeMediaError(w, &ValidationError{Field: "kind", Reason: "must be file or web"})
+		return
+	}
+	if mediaType := strings.TrimSpace(r.URL.Query().Get("mediaType")); mediaType != "" {
+		if mediaType != "image" && mediaType != "video" && mediaType != "audio" {
+			writeMediaError(w, &ValidationError{Field: "mediaType", Reason: "must be image, video, or audio"})
 			return
 		}
-		filter.Kind = kind
+		filter.MediaType = mediaType
 	}
 	for _, assetID := range r.URL.Query()["assetId"] {
 		assetID = strings.TrimSpace(assetID)
@@ -242,6 +325,89 @@ func (h *operatorHandler) content(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, serveRequest, value.Title, value.UpdatedAt, reader)
 }
 
+func (h *operatorHandler) thumbnail(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.actor(r, "media_read", r.PathValue("mediaId")); err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	if h.deps.Service == nil || h.deps.Content == nil {
+		writeMediaError(w, errors.New("media content service is not configured"))
+		return
+	}
+	value, err := h.deps.Service.Get(r.Context(), r.PathValue("mediaId"))
+	if err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	if value.Thumbnail == nil {
+		writeMediaError(w, ErrNotFound)
+		return
+	}
+	etag := `"` + value.Thumbnail.Digest + `"`
+	w.Header().Set("ETag", etag)
+	// A versioned URL (?v=digest) names immutable bytes; the bare URL must
+	// revalidate because a new poster may replace the old one.
+	if r.URL.Query().Get("v") == value.Thumbnail.Digest {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "private, no-cache")
+	}
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	reader, err := h.deps.Content.Open(r.Context(), value.Thumbnail.Digest)
+	if err != nil {
+		writeMediaError(w, ErrArtifactUnavailable)
+		return
+	}
+	defer reader.Close()
+	w.Header().Set("Content-Type", value.Thumbnail.MediaType)
+	http.ServeContent(w, r, "", time.Time{}, reader)
+}
+
+func (h *operatorHandler) putThumbnail(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.actor(r, "media_write", r.PathValue("mediaId")); err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	if h.deps.Service == nil || h.deps.Thumbnails == nil {
+		writeMediaError(w, errors.New("media thumbnail service is not configured"))
+		return
+	}
+	switch strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]) {
+	case "image/png", "image/jpeg":
+	default:
+		writeMediaError(w, &ValidationError{Field: "Content-Type", Reason: "must be image/png or image/jpeg"})
+		return
+	}
+	value, err := h.deps.Service.Get(r.Context(), r.PathValue("mediaId"))
+	if err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	if !value.Playable() {
+		writeMediaError(w, ErrArtifactUnavailable)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, ThumbnailMaxUploadBytes))
+	if err != nil {
+		writeMediaError(w, &ValidationError{Field: "body", Reason: "thumbnail must be at most 8 MiB"})
+		return
+	}
+	thumbnail, err := h.deps.Thumbnails.Store(r.Context(), value.Artifact.Digest, body)
+	if errors.Is(err, ErrThumbnailUnsupported) {
+		writeMediaError(w, &ValidationError{Field: "body", Reason: "must be a decodable PNG or JPEG image"})
+		return
+	}
+	if err != nil {
+		writeMediaError(w, err)
+		return
+	}
+	value.Thumbnail = &thumbnail
+	writeMediaJSON(w, http.StatusOK, value)
+}
+
 func mediaIfRangeMatches(value, etag string, updated time.Time) bool {
 	if value == etag {
 		return true
@@ -322,8 +488,10 @@ func mediaStatus(err error) int {
 		return http.StatusPreconditionFailed
 	case errors.Is(err, ErrInvalidArgument), errors.Is(err, page.ErrCursorInvalid), errors.Is(err, page.ErrLimitInvalid), errors.Is(err, page.ErrSortInvalid), errors.Is(err, page.ErrOrderInvalid):
 		return http.StatusBadRequest
-	case errors.Is(err, ErrArtifactUnavailable):
+	case errors.Is(err, ErrArtifactUnavailable), errors.Is(err, ErrManaged), errors.Is(err, ErrWrongKind), errors.Is(err, ErrInUse):
 		return http.StatusConflict
+	case errors.Is(err, ErrCaptureDisabled):
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}

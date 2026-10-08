@@ -163,15 +163,19 @@ type ReleaseEnvelope struct {
 	Payload   ReleasePayload `json:"payload"`
 }
 type AssignmentInput struct {
-	ReleaseID          string `json:"releaseId"`
-	ReleaseDigest      string `json:"releaseDigest"`
-	DeliveryMode       string `json:"deliveryMode"`
+	MediaID            string `json:"mediaId,omitempty"`
+	PlaylistID         string `json:"playlistId,omitempty"`
+	DeliveryMode       string `json:"deliveryMode,omitempty"`
 	ExpectedGeneration int64  `json:"expectedGeneration"`
+	RemoteInput        bool   `json:"remoteInput"`
+	ShowQR             bool   `json:"showQr"`
 }
 type Assignment struct {
 	AssignmentInput
 	ID                string `json:"id"`
 	NodeID            string `json:"nodeId"`
+	ReleaseID         string `json:"releaseId"`
+	ReleaseDigest     string `json:"releaseDigest"`
 	DesiredGeneration int64  `json:"desiredGeneration"`
 }
 type EnrollPlayerInput struct {

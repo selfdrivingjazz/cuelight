@@ -457,7 +457,7 @@ func (s *PreviewRepository) CleanupScreenshotRetention(ctx context.Context, now 
 				continue
 			}
 			var referenced bool
-			if err := tx.QueryRowContext(txCtx, `SELECT EXISTS (SELECT 1 FROM screenshot_jobs WHERE result_artifact_digest = $1)`, value.digest).Scan(&referenced); err != nil {
+			if err := tx.QueryRowContext(txCtx, `SELECT EXISTS (SELECT 1 FROM screenshot_jobs WHERE result_artifact_digest = $1) OR EXISTS (SELECT 1 FROM web_items WHERE thumbnail_digest = $1)`, value.digest).Scan(&referenced); err != nil {
 				return wrap("check screenshot artifact references", err)
 			}
 			if !referenced {

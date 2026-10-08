@@ -4,9 +4,18 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
 import { cn } from "./utils";
+export { ToastProvider, useToast, type ToastApi, type ToastOptions, type ToastTone } from "./toast";
 
-const buttonStyles = cva("inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50", {
-  variants: { variant: { primary: "bg-primary text-primary-foreground hover:bg-primary/90", secondary: "border border-border bg-background hover:bg-accent", ghost: "hover:bg-accent hover:text-accent-foreground" }, size: { sm: "h-8 px-3", md: "h-9 px-4", lg: "h-10 px-5" } },
+const buttonStyles = cva("inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[background-color,border-color,color,box-shadow] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4", {
+  variants: {
+    variant: {
+      primary: "bg-primary text-primary-foreground shadow-[inset_0_-1px_0_hsl(var(--shadow)/.25)] hover:bg-primary/90",
+      secondary: "border border-input bg-card text-foreground hover:border-foreground/30 hover:bg-accent",
+      ghost: "text-muted-foreground hover:bg-accent hover:text-foreground",
+      danger: "border border-status-danger/50 bg-status-danger/10 text-status-danger hover:bg-status-danger/20",
+    },
+    size: { sm: "h-8 px-3 text-[13px]", md: "h-9 px-4", lg: "h-11 px-5", icon: "h-9 w-9" },
+  },
   defaultVariants: { variant: "primary", size: "md" },
 });
 
@@ -16,39 +25,170 @@ export function Button({ className, variant, size, asChild = false, ...props }: 
   return <Comp className={cn(buttonStyles({ variant, size }), className)} {...props} />;
 }
 
-export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) { return <section className={cn("rounded-lg border border-border bg-card text-card-foreground shadow-sm", className)} {...props} />; }
-export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) { return <div className={cn("flex flex-col gap-1.5 p-5", className)} {...props} />; }
-export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) { return <h2 className={cn("text-base font-semibold tracking-tight", className)} {...props} />; }
-export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) { return <div className={cn("p-5 pt-0", className)} {...props} />; }
+export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) { return <section className={cn("min-w-0 rounded-lg border border-border bg-card text-card-foreground", className)} {...props} />; }
+export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) { return <div className={cn("flex flex-col gap-1 px-5 pb-3 pt-4", className)} {...props} />; }
+export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) { return <h2 className={cn("eyebrow text-foreground/80", className)} {...props} />; }
+export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) { return <div className={cn("px-5 pb-5", className)} {...props} />; }
 
 export type StatusTone = "success" | "warning" | "danger" | "neutral" | "info";
-const statusStyles: Record<StatusTone, string> = { success: "bg-status-success/15 text-status-success", warning: "bg-status-warning/15 text-status-warning", danger: "bg-status-danger/15 text-status-danger", neutral: "bg-muted text-muted-foreground", info: "bg-status-info/15 text-status-info" };
-export function StatusBadge({ tone, children, className }: { tone: StatusTone; children: React.ReactNode; className?: string }) { return <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium", statusStyles[tone], className)}><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />{children}</span>; }
+const statusStyles: Record<StatusTone, string> = { success: "border-status-success/35 text-status-success", warning: "border-status-warning/40 text-status-warning", danger: "border-status-danger/40 text-status-danger", neutral: "border-border text-muted-foreground", info: "border-status-info/40 text-status-info" };
+export function StatusBadge({ tone, children, className }: { tone: StatusTone; children: React.ReactNode; className?: string }) { return <span className={cn("inline-flex items-center gap-1.5 rounded-[4px] border bg-card px-1.5 py-0.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em]", statusStyles[tone], className)}><span aria-hidden="true" className="tally h-1.5 w-1.5 rounded-full bg-current" />{children}</span>; }
 
 export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) { return <div role="status" aria-label="Loading" className={cn("animate-pulse rounded-md bg-muted", className)} {...props} />; }
-export function EmptyState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <div className="flex min-h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border p-8 text-center"><h3 className="font-medium">{title}</h3><p className="max-w-md text-sm text-muted-foreground">{description}</p>{action}</div>; }
-export function ErrorState({ title = "Something went wrong", description, onRetry }: { title?: string; description: string; onRetry?: () => void }) { return <div role="alert" className="rounded-lg border border-status-danger/40 bg-status-danger/5 p-5"><h3 className="font-medium text-status-danger">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{description}</p>{onRetry && <Button className="mt-3" variant="secondary" size="sm" onClick={onRetry}>Try again</Button>}</div>; }
+export function EmptyState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <div className="flex min-h-44 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input bg-[repeating-linear-gradient(135deg,transparent_0_10px,hsl(var(--muted)/.5)_10px_11px)] p-8 text-center"><h3 className="font-semibold">{title}</h3><p className="max-w-md text-sm text-muted-foreground">{description}</p>{action && <div className="mt-2">{action}</div>}</div>; }
+export function ErrorState({ title = "Something went wrong", description, onRetry }: { title?: string; description: string; onRetry?: () => void }) { return <div role="alert" className="rounded-lg border border-status-danger/40 border-l-4 bg-status-danger/5 p-5"><h3 className="font-semibold text-status-danger">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{description}</p>{onRetry && <Button className="mt-3" variant="secondary" size="sm" onClick={onRetry}>Try again</Button>}</div>; }
 
-export type NavigationLink = React.ComponentType<{ to: string; className?: string; children?: React.ReactNode; "aria-current"?: "page" | undefined }>;
-interface NavigationProps { linkComponent?: NavigationLink }
+export type NavigationLink = React.ComponentType<{ to: string; className?: string; children?: React.ReactNode; "aria-current"?: "page" | undefined; onClick?: () => void }>;
 const AnchorLink: NavigationLink = ({ to, ...props }) => <a href={to} {...props} />;
-export function Breadcrumbs({ items, linkComponent: LinkComponent = AnchorLink }: { items: Array<{ label: string; href?: string }>; linkComponent?: NavigationLink }) { return <nav aria-label="Breadcrumb" className="text-sm text-muted-foreground"><ol className="flex flex-wrap items-center gap-2">{items.map((item, index) => <li key={`${item.label}-${index}`} className="flex items-center gap-2">{index > 0 && <span aria-hidden="true">/</span>}{item.href ? <LinkComponent className="hover:text-foreground hover:underline" to={item.href}>{item.label}</LinkComponent> : <span aria-current="page" className="text-foreground">{item.label}</span>}</li>)}</ol></nav>; }
-
-export function DataTable<T>({ caption, columns, rows, rowKey, empty }: { caption: string; columns: Array<{ key: string; header: string; render: (row: T) => React.ReactNode }>; rows: T[]; rowKey: (row: T) => string; empty?: React.ReactNode }) { return <div className="overflow-x-auto rounded-lg border border-border"><table className="w-full caption-bottom text-sm"><caption className="sr-only">{caption}</caption><thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground"><tr>{columns.map((column) => <th className="h-10 px-4 font-medium" scope="col" key={column.key}>{column.header}</th>)}</tr></thead><tbody className="divide-y divide-border">{rows.length ? rows.map((row) => <tr className="h-12 transition-colors hover:bg-muted/40" key={rowKey(row)}>{columns.map((column) => <td className="px-4" key={column.key}>{column.render(row)}</td>)}</tr>) : <tr><td colSpan={columns.length} className="p-8">{empty ?? <EmptyState title="No results" description="There are no records to show." />}</td></tr>}</tbody></table></div>; }
-export function TanStackDataTable<T>({ caption, columns, rows, rowKey, empty }: { caption: string; columns: Array<{ key: string; header: string; render: (row: T) => React.ReactNode }>; rows: T[]; rowKey: (row: T) => string; empty?: React.ReactNode }) { const tableColumns = React.useMemo<ColumnDef<T>[]>(() => columns.map((column) => ({ id: column.key, header: column.header, cell: ({ row }) => column.render(row.original) })), [columns]); const table = useReactTable({ data: rows, columns: tableColumns, getCoreRowModel: getCoreRowModel() }); return <div className="overflow-x-auto rounded-lg border border-border"><table className="w-full caption-bottom text-sm"><caption className="sr-only">{caption}</caption><thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">{table.getHeaderGroups().map((headerGroup) => <tr key={headerGroup.id}>{headerGroup.headers.map((header) => <th className="h-10 px-4 font-medium" scope="col" key={header.id}>{flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead><tbody className="divide-y divide-border">{rows.length ? table.getRowModel().rows.map((row) => <tr className="h-12 transition-colors hover:bg-muted/40" key={rowKey(row.original)}>{row.getVisibleCells().map((cell) => <td className="px-4" key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>) : <tr><td colSpan={columns.length} className="p-8">{empty ?? <EmptyState title="No results" description="There are no records to show." />}</td></tr>}</tbody></table></div>; }
-
-export function Pagination({ page, onPrevious, onNext }: { page: { previousCursor: string | null; nextCursor: string | null }; onPrevious: () => void; onNext: () => void }) { return <nav aria-label="Pagination" className="flex justify-end"><div className="flex gap-2"><Button variant="secondary" size="sm" disabled={!page.previousCursor} onClick={onPrevious}>Previous</Button><Button variant="secondary" size="sm" disabled={!page.nextCursor} onClick={onNext}>Next</Button></div></nav>; }
-
-export function Sidebar({ items, currentPath, linkComponent: LinkComponent = AnchorLink }: { items: Array<{ label: string; href: string; section: string }>; currentPath: string; linkComponent?: NavigationLink }) {
-  const sections = [...new Set(items.map((item) => item.section))];
-  return <aside className="hidden w-[var(--sidebar-width)] shrink-0 border-r border-border bg-sidebar md:block" aria-label="Primary navigation"><div className="sticky top-0 flex h-screen flex-col"><div className="flex h-16 items-center border-b border-border px-5"><span className="text-lg font-semibold tracking-tight">Cable <span className="text-primary">Control</span></span></div><nav className="flex-1 space-y-6 overflow-y-auto p-3">{sections.map((section) => <div key={section}>{section && <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{section}</p>}<div className="space-y-0.5">{items.filter((item) => item.section === section).map((item) => <LinkComponent key={item.href} aria-current={currentPath === item.href ? "page" : undefined} className={cn("block rounded-md px-3 py-2 text-sm transition-colors", currentPath === item.href ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground")} to={item.href}>{item.label}</LinkComponent>)}</div></div>)}</nav></div></aside>;
-}
-export function MobileSidebar({ items, currentPath, linkComponent: LinkComponent = AnchorLink }: { items: Array<{ label: string; href: string; section: string }>; currentPath: string; linkComponent?: NavigationLink }) {
-  const sections = [...new Set(items.map((item) => item.section))];
-  return <nav aria-label="Primary navigation" className="space-y-6">{sections.map((section) => <div key={section}>{section && <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{section}</p>}{items.filter((item) => item.section === section).map((item) => <LinkComponent key={item.href} aria-current={currentPath === item.href ? "page" : undefined} className={cn("block rounded-md px-3 py-2 text-sm", currentPath === item.href ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground")} to={item.href}>{item.label}</LinkComponent>)}</div>)}</nav>;
+export interface Crumb { label: string; href?: string }
+/** Full trail from `sm` up; on phones only a "← parent" link (or the current page when the parent is not navigable). */
+export function Breadcrumbs({ items, linkComponent: LinkComponent = AnchorLink }: { items: readonly Crumb[]; linkComponent?: NavigationLink }) {
+  const backIndex = items.length > 1 && items[items.length - 2]?.href ? items.length - 2 : -1;
+  const compactIndex = backIndex >= 0 ? backIndex : items.length - 1;
+  return <nav aria-label="Breadcrumb" className="min-w-0 text-sm"><ol className="flex min-w-0 items-center gap-1.5">{items.map((item, index) => {
+    const last = index === items.length - 1;
+    return <li key={`${item.label}-${index}`} className={cn("min-w-0 items-center gap-1.5", index === compactIndex ? "flex" : "hidden sm:flex")}>
+      {index > 0 && <span aria-hidden="true" className="hidden text-input sm:inline">/</span>}
+      {item.href && !last ? <LinkComponent className="truncate text-muted-foreground hover:text-foreground" to={item.href}>{index === backIndex && <span aria-hidden="true" className="mr-1 sm:hidden">←</span>}{item.label}</LinkComponent> : <span aria-current={last ? "page" : undefined} className={cn("truncate", last ? "font-medium text-foreground" : "text-muted-foreground")}>{item.label}</span>}
+    </li>;
+  })}</ol></nav>;
 }
 
-export function MobileNav({ children }: { children: React.ReactNode }) { return <Dialog.Root><Dialog.Trigger asChild><Button variant="secondary" size="sm" className="md:hidden">Menu</Button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-overlay" /><Dialog.Content className="fixed inset-y-0 left-0 z-50 w-72 bg-sidebar p-5 text-sidebar-foreground shadow-xl"><Dialog.Title className="sr-only">Navigation</Dialog.Title>{children}<Dialog.Close asChild><Button variant="secondary" className="mt-6 w-full">Close</Button></Dialog.Close></Dialog.Content></Dialog.Portal></Dialog.Root>; }
+export function PageHeader({ title, description, eyebrow, meta, children }: { title: string; description?: string; eyebrow?: React.ReactNode; meta?: React.ReactNode; children?: React.ReactNode }) {
+  return <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 border-b border-border pb-5">
+    <div className="min-w-0 max-w-3xl flex-1 basis-64">
+      {eyebrow && <p className="eyebrow mb-2 text-primary">{eyebrow}</p>}
+      <h1 className="break-words text-[1.7rem] font-semibold leading-tight tracking-[-0.02em] md:text-[2rem]">{title}</h1>
+      {description && <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>}
+      {meta && <div className="mt-3 flex flex-wrap items-center gap-2">{meta}</div>}
+    </div>
+    {children && <div className="flex max-w-full flex-wrap items-center gap-2">{children}</div>}
+  </header>;
+}
+
+export function PageFrame({ children, width = "wide" }: { children: React.ReactNode; width?: "wide" | "narrow" }) {
+  return <main id="main-content" tabIndex={-1} className={cn("mx-auto w-full space-y-6 px-4 pb-16 pt-6 outline-none sm:px-6 md:px-8 md:pt-8", width === "narrow" ? "max-w-3xl" : "max-w-[var(--content-max-width)]")}>
+    {children}
+  </main>;
+}
+
+export interface SectionTab { label: string; href: string; active: boolean; count?: number }
+export function SectionTabs({ label, tabs, linkComponent: LinkComponent = AnchorLink }: { label: string; tabs: readonly SectionTab[]; linkComponent?: NavigationLink }) {
+  return <nav aria-label={label} className="-mt-2 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none]">{tabs.map((tab) => <LinkComponent key={tab.href} to={tab.href} aria-current={tab.active ? "page" : undefined} className={cn("relative -mb-px whitespace-nowrap border-b-2 px-3 pb-2.5 pt-1 text-sm transition-colors", tab.active ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>{tab.label}{tab.count !== undefined && <span className="ml-1.5 font-mono text-xs text-muted-foreground">{tab.count}</span>}</LinkComponent>)}</nav>;
+}
+
+export interface Fact { label: React.ReactNode; value: React.ReactNode; mono?: boolean; wide?: boolean }
+export function Facts({ items, columns = 2, className }: { items: readonly Fact[]; columns?: 1 | 2 | 3; className?: string }) {
+  return <dl className={cn("grid gap-x-6 gap-y-4 text-sm", columns === 2 && "sm:grid-cols-2", columns === 3 && "sm:grid-cols-2 lg:grid-cols-3", className)}>{items.map((item, index) => <div key={index} className={cn("min-w-0", item.wide && "sm:col-span-full")}><dt className="eyebrow">{item.label}</dt><dd className={cn("mt-1 break-words text-foreground", item.mono && "break-all font-mono text-[13px]")}>{item.value}</dd></div>)}</dl>;
+}
+
+const tableShell = "overflow-x-auto rounded-lg border border-border bg-card";
+const tableHead = "border-b border-border text-left";
+const headCell = "eyebrow h-9 px-4 font-medium";
+const bodyRow = "transition-colors hover:bg-accent/60";
+const bodyCell = "h-12 px-4 py-2 align-middle";
+export function DataTable<T>({ caption, columns, rows, rowKey, empty }: { caption: string; columns: Array<{ key: string; header: string; render: (row: T) => React.ReactNode }>; rows: T[]; rowKey: (row: T) => string; empty?: React.ReactNode }) { return <div className={tableShell}><table className="w-full caption-bottom text-sm"><caption className="sr-only">{caption}</caption><thead className={tableHead}><tr>{columns.map((column) => <th className={headCell} scope="col" key={column.key}>{column.header}</th>)}</tr></thead><tbody className="divide-y divide-border">{rows.length ? rows.map((row) => <tr className={bodyRow} key={rowKey(row)}>{columns.map((column) => <td className={bodyCell} key={column.key}>{column.render(row)}</td>)}</tr>) : <tr><td colSpan={columns.length} className="p-4">{empty ?? <EmptyState title="No results" description="There are no records to show." />}</td></tr>}</tbody></table></div>; }
+export function TanStackDataTable<T>({ caption, columns, rows, rowKey, empty }: { caption: string; columns: Array<{ key: string; header: string; render: (row: T) => React.ReactNode }>; rows: T[]; rowKey: (row: T) => string; empty?: React.ReactNode }) { const tableColumns = React.useMemo<ColumnDef<T>[]>(() => columns.map((column) => ({ id: column.key, header: column.header, cell: ({ row }) => column.render(row.original) })), [columns]); const table = useReactTable({ data: rows, columns: tableColumns, getCoreRowModel: getCoreRowModel() }); return <div className={tableShell}><table className="w-full caption-bottom text-sm"><caption className="sr-only">{caption}</caption><thead className={tableHead}>{table.getHeaderGroups().map((headerGroup) => <tr key={headerGroup.id}>{headerGroup.headers.map((header) => <th className={headCell} scope="col" key={header.id}>{flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead><tbody className="divide-y divide-border">{rows.length ? table.getRowModel().rows.map((row) => <tr className={bodyRow} key={rowKey(row.original)}>{row.getVisibleCells().map((cell) => <td className={bodyCell} key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>) : <tr><td colSpan={columns.length} className="p-4">{empty ?? <EmptyState title="No results" description="There are no records to show." />}</td></tr>}</tbody></table></div>; }
+
+export function Pagination({ page, onPrevious, onNext }: { page: { previousCursor: string | null; nextCursor: string | null }; onPrevious: () => void; onNext: () => void }) {
+  if (!page.previousCursor && !page.nextCursor) return null;
+  return <nav aria-label="Pagination" className="flex justify-end pt-2"><div className="flex gap-2"><Button variant="secondary" size="sm" disabled={!page.previousCursor} onClick={onPrevious}>Previous</Button><Button variant="secondary" size="sm" disabled={!page.nextCursor} onClick={onNext}>Next</Button></div></nav>;
+}
+
+export interface NavigationItem { label: string; href: string; section: string; icon?: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>; match?: readonly string[] }
+interface SidebarProps {
+  items: readonly NavigationItem[];
+  currentPath: string;
+  linkComponent?: NavigationLink;
+  footer?: React.ReactNode;
+}
+
+export function isNavigationActive(item: Pick<NavigationItem, "href" | "match">, currentPath: string) {
+  const prefixes = [item.href, ...(item.match ?? [])];
+  return prefixes.some((href) => currentPath === href || (href !== "/" && currentPath.startsWith(`${href}/`)));
+}
+
+function SidebarLinks({ items, currentPath, linkComponent: LinkComponent = AnchorLink, mobile = false }: SidebarProps & { mobile?: boolean }) {
+  const sections = [...new Set(items.map((item) => item.section))];
+  return <nav aria-label="Primary navigation" className="space-y-6">{sections.map((section) => <div key={section || "main"}>
+    {section && <p className="eyebrow mb-1.5 px-3 text-sidebar-foreground/45">{section}</p>}
+    <div className="space-y-0.5">{items.filter((item) => item.section === section).map((item) => {
+      const active = isNavigationActive(item, currentPath);
+      const Icon = item.icon;
+      const link = <LinkComponent aria-current={active ? "page" : undefined} className={cn("group relative flex min-h-9 items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors", active ? "bg-sidebar-accent font-medium text-sidebar-foreground" : "text-sidebar-foreground/65 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground")} to={item.href}>
+        {active && <span aria-hidden="true" className="absolute -left-3 top-1.5 bottom-1.5 w-[3px] rounded-r bg-primary" />}
+        {Icon && <Icon aria-hidden className={cn("h-4 w-4 shrink-0", active ? "text-primary" : "opacity-70 group-hover:opacity-100")} />}
+        {item.label}
+      </LinkComponent>;
+      return mobile ? <Dialog.Close asChild key={item.href}>{link}</Dialog.Close> : <React.Fragment key={item.href}>{link}</React.Fragment>;
+    })}</div>
+  </div>)}</nav>;
+}
+
+export function BrandMark({ className }: { className?: string }) {
+  return <span className={cn("inline-flex items-center gap-2.5 font-semibold tracking-[-0.01em]", className)}>
+    <span aria-hidden="true" className="relative grid h-6 w-6 place-items-center rounded-[5px] bg-sidebar-foreground text-sidebar"><span className="h-2 w-2 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))]" /></span>
+    <span>Cable<span className="ml-1.5 font-mono text-[11px] font-normal uppercase tracking-[0.14em] opacity-55">Control</span></span>
+  </span>;
+}
+
+export function Sidebar({ footer, linkComponent: LinkComponent = AnchorLink, ...props }: SidebarProps) {
+  return <aside className="hidden w-[var(--sidebar-width)] shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:block">
+    <div className="sticky top-0 flex h-dvh flex-col">
+      <div className="flex h-14 items-center px-5"><LinkComponent to="/" className="rounded-md"><BrandMark /></LinkComponent></div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6 pt-4"><SidebarLinks {...props} linkComponent={LinkComponent} /></div>
+      {footer && <div className="space-y-3 border-t border-sidebar-border p-4">{footer}</div>}
+    </div>
+  </aside>;
+}
+
+export function MobileSidebar({ footer, ...props }: SidebarProps) {
+  return <div className="space-y-6"><SidebarLinks {...props} mobile />{footer && <div className="space-y-3 border-t border-sidebar-border pt-5">{footer}</div>}</div>;
+}
+
+export interface ModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  className?: string;
+}
+/** Accessible modal dialog: focus trap, Esc to close, focus restoration. Full-height sheet on narrow screens. */
+export function Modal({ open, onOpenChange, title, description, children, footer, className }: ModalProps) {
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-overlay backdrop-blur-[2px]" /><Dialog.Content {...(description ? {} : { "aria-describedby": undefined })} className={cn("fixed inset-x-0 bottom-0 top-[4vh] z-50 flex flex-col overflow-hidden rounded-t-xl border border-border bg-card text-card-foreground shadow-xl sm:inset-auto sm:left-1/2 sm:top-[8vh] sm:max-h-[84vh] sm:w-[min(56rem,calc(100vw-2rem))] sm:-translate-x-1/2 sm:rounded-xl", className)}>
+    <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4"><div className="min-w-0"><Dialog.Title className="text-base font-semibold tracking-tight">{title}</Dialog.Title>{description && <Dialog.Description className="mt-0.5 text-sm text-muted-foreground">{description}</Dialog.Description>}</div><Dialog.Close asChild><Button variant="ghost" size="icon" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></Button></Dialog.Close></div>
+    <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+    {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-3">{footer}</div>}
+  </Dialog.Content></Dialog.Portal></Dialog.Root>;
+}
+
+export function MobileNav({ children }: { children: React.ReactNode }) { return <Dialog.Root><Dialog.Trigger asChild><Button variant="ghost" size="icon" className="-ml-2 lg:hidden" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg></Button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-overlay backdrop-blur-[2px]" /><Dialog.Content aria-describedby={undefined} className="fixed inset-y-0 left-0 z-50 w-[min(18rem,86vw)] overflow-y-auto border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground shadow-xl"><div className="mb-6 flex items-center justify-between"><Dialog.Title><BrandMark /></Dialog.Title><Dialog.Close asChild><Button variant="ghost" size="sm">Close</Button></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>; }
+
+export interface CommandItem { id: string; label: string; group: string; href: string; hint?: string }
+export function CommandPalette({ open, onOpenChange, items, onSelect, loading = false }: { open: boolean; onOpenChange: (open: boolean) => void; items: readonly CommandItem[]; onSelect: (item: CommandItem) => void; loading?: boolean }) {
+  const [query, setQuery] = React.useState("");
+  const [cursor, setCursor] = React.useState(0);
+  React.useEffect(() => { if (!open) { setQuery(""); setCursor(0); } }, [open]);
+  const needle = query.trim().toLocaleLowerCase();
+  const matches = (needle ? items.filter((item) => `${item.label} ${item.hint ?? ""} ${item.group}`.toLocaleLowerCase().includes(needle)) : items).slice(0, 40);
+  const groups = [...new Set(matches.map((item) => item.group))];
+  const active = matches[Math.min(cursor, Math.max(matches.length - 1, 0))];
+  const choose = (item: CommandItem | undefined) => { if (!item) return; onOpenChange(false); onSelect(item); };
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-overlay backdrop-blur-[2px]" /><Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-[12vh] z-50 w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-xl">
+    <Dialog.Title className="sr-only">Jump to</Dialog.Title>
+    <div className="flex items-center gap-3 border-b border-border px-4"><span aria-hidden="true" className="eyebrow text-primary">Go</span><input autoFocus aria-label="Search destinations" role="combobox" aria-expanded="true" aria-controls="command-results" aria-activedescendant={active ? `command-${active.id}` : undefined} className="h-12 min-w-0 flex-1 border-0 bg-transparent text-base outline-none focus-visible:shadow-none" placeholder="Screens, media, deployments, pages…" value={query} onChange={(event) => { setQuery(event.currentTarget.value); setCursor(0); }} onKeyDown={(event) => {
+      if (event.key === "ArrowDown") { event.preventDefault(); setCursor((value) => Math.min(value + 1, matches.length - 1)); }
+      if (event.key === "ArrowUp") { event.preventDefault(); setCursor((value) => Math.max(value - 1, 0)); }
+      if (event.key === "Enter") { event.preventDefault(); choose(active); }
+    }} /><kbd className="hidden rounded border border-border px-1.5 font-mono text-[11px] text-muted-foreground sm:inline">esc</kbd></div>
+    <div id="command-results" role="listbox" aria-label="Destinations" className="max-h-[60vh] overflow-y-auto p-2">
+      {groups.map((group) => <div key={group} role="group" aria-label={group} className="pb-2"><p className="eyebrow px-2 py-1.5">{group}</p>{matches.filter((item) => item.group === group).map((item) => <div key={item.id} id={`command-${item.id}`} role="option" aria-selected={item === active} className={cn("flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-2 text-sm", item === active ? "bg-accent text-foreground" : "text-foreground/85")} onMouseEnter={() => setCursor(matches.indexOf(item))} onClick={() => choose(item)}><span className="truncate">{item.label}</span>{item.hint && <span className="shrink-0 truncate font-mono text-[11px] text-muted-foreground">{item.hint}</span>}</div>)}</div>)}
+      {!matches.length && <p className="px-2 py-6 text-center text-sm text-muted-foreground">{loading ? "Loading…" : "Nothing matches."}</p>}
+    </div>
+  </Dialog.Content></Dialog.Portal></Dialog.Root>;
+}
 
 export interface PixelDimensions {
   width: number;
@@ -303,22 +443,22 @@ export function MediaCard({
   ...props
 }: MediaCardProps) {
   const pixels = dimensions ? formatPixels(dimensions) : null;
-  return <article className={cn("overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm", className)} {...props}>
+  return <article className={cn("media-card relative min-w-0 overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-colors", titleHref && "media-card-linked hover:border-input focus-within:border-ring", className)} {...props}>
     {preview}
-    <div className="space-y-3 p-4">
+    <div className="space-y-2 p-4">
       <div className="min-w-0">
-        <h3 className="truncate text-base font-semibold tracking-tight">
-          {titleHref ? <LinkComponent className="rounded-sm hover:text-primary hover:underline" to={titleHref}>{title}</LinkComponent> : title}
+        <h3 className="truncate text-sm font-semibold">
+          {titleHref ? <LinkComponent className="media-card-link rounded-sm hover:text-primary" to={titleHref}>{title}</LinkComponent> : title}
         </h3>
         {artist && <p className="mt-1 truncate text-sm text-muted-foreground">{artist}</p>}
-        {description && <p className="mt-2 text-sm text-muted-foreground">{description}</p>}
+        {description && <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       {(pixels || metadata || status) && <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
         {pixels && <span className="tabular-nums">{pixels}</span>}
         {metadata}
         {status && <StatusSummary className="text-xs" status={status} label={statusLabel} tone={statusTone} />}
       </div>}
-      {actions && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3" aria-label={`${title} actions`}>{actions}</div>}
+      {actions && <div className="relative z-20 flex flex-wrap items-center gap-2 border-t border-border pt-3" aria-label={`${title} actions`}>{actions}</div>}
     </div>
   </article>;
 }

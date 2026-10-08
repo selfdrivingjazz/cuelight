@@ -277,7 +277,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, assignment playerclient.Assi
 	if err != nil {
 		return r.fail(ctx, generation, "materialize release", err)
 	}
-	if assignment.RemoteInput && candidate.Kind == release.PresentationCable {
+	if assignment.RemoteInput && candidate.Kind == release.PresentationWeb {
 		remoteController, ok := r.deps.Controller.(RemoteController)
 		if !ok {
 			return r.fail(ctx, generation, "create remote session", errors.New("controller does not support remote input"))
@@ -286,7 +286,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, assignment playerclient.Assi
 		if sessionErr != nil {
 			return r.fail(ctx, generation, "create remote session", sessionErr)
 		}
-		candidate.Remote = &renderer.RemoteDescriptor{SessionID: session.ID, URL: session.RemoteURL, ShowQR: session.ShowQR, ExpiresAt: session.ExpiresAt}
+		candidate.Remote = &renderer.RemoteDescriptor{SessionID: session.ID, Generation: assignment.DesiredGeneration, URL: session.RemoteURL, ShowQR: session.ShowQR, ExpiresAt: session.ExpiresAt}
 	}
 	keepSource := false
 	defer func() {
@@ -384,6 +384,14 @@ func (r *Reconciler) checkProfile(envelope release.EnvelopeV1, mode string) erro
 func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV1, mode string) (renderer.Candidate, func(), error) {
 	kind := envelope.Payload.PresentationMode()
 	candidate := renderer.Candidate{Kind: kind, ReleaseDigest: envelope.Digest}
+	if kind == release.PresentationWeb {
+		web, ok := envelope.Payload.WebPresentation()
+		if !ok || mode != DeliveryStream {
+			return candidate, nil, fmt.Errorf("%w: web requires stream delivery", ErrIncompatibleRelease)
+		}
+		candidate.WebURL = web.URL
+		return candidate, nil, nil
+	}
 	if kind == release.PresentationMedia {
 		playback, ok := envelope.Payload.MediaPlayback()
 		if !ok || len(envelope.Payload.Artifacts) == 0 {
@@ -449,7 +457,9 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 				return candidate, nil, parseErr
 			}
 			resolved := renderer.ScheduleItem{ID: item.ID, AssetID: wireString(item, "assetId"), MediaID: wireString(item, "mediaId"), StartsAt: start, EndsAt: end, MediaType: item.MediaType, Fit: item.Fit, Loop: item.Loop, Muted: item.Muted, Volume: item.Volume, ImageDurationSecond: item.ImageDurationSecond, Orientation: item.Orientation}
-			if mode == DeliveryStream {
+			if item.Web != nil {
+				resolved.WebURL = item.Web.URL
+			} else if mode == DeliveryStream {
 				if r.deps.Streamer == nil {
 					return candidate, nil, ErrUnsafeStreamSource
 				}
@@ -476,10 +486,8 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 			keepRevokes = true
 			return candidate, revokeAll, nil
 		}
-	} else if kind != release.PresentationCable {
+	} else {
 		return candidate, nil, ErrIncompatibleRelease
-	} else if mode != DeliveryCacheThenPlay {
-		return candidate, nil, fmt.Errorf("%w: cable requires cache_then_play", ErrIncompatibleRelease)
 	}
 
 	referenced := make(map[string]bool, len(envelope.Payload.Artifacts))
@@ -530,10 +538,6 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 			return candidate, nil, ErrIncompatibleRelease
 		}
 		for _, item := range schedule.Items {
-			object := objects[item.ArtifactDigest]
-			if object.Path == "" {
-				return candidate, nil, errors.New("CAS committed object has no renderer path")
-			}
 			start, parseErr := time.Parse(time.RFC3339Nano, item.StartsAt)
 			if parseErr != nil {
 				return candidate, nil, parseErr
@@ -542,35 +546,24 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 			if parseErr != nil {
 				return candidate, nil, parseErr
 			}
-			candidate.Schedule = append(candidate.Schedule, renderer.ScheduleItem{
-				ID: item.ID, StartsAt: start, EndsAt: end, Source: object.Path, MediaType: item.MediaType,
+			resolved := renderer.ScheduleItem{
+				ID: item.ID, AssetID: wireString(item, "assetId"), MediaID: wireString(item, "mediaId"), StartsAt: start, EndsAt: end, MediaType: item.MediaType,
 				Fit: item.Fit, Loop: item.Loop, Muted: item.Muted, Volume: item.Volume,
 				ImageDurationSecond: item.ImageDurationSecond, Orientation: item.Orientation,
-			})
+			}
+			if item.Web != nil {
+				resolved.WebURL = item.Web.URL
+			} else {
+				resolved.Source = objects[item.ArtifactDigest].Path
+				if resolved.Source == "" {
+					return candidate, nil, errors.New("CAS committed object has no renderer path")
+				}
+			}
+			candidate.Schedule = append(candidate.Schedule, resolved)
 		}
 		candidate.Timezone = schedule.Timezone
 		candidate.WindowStart, _ = time.Parse(time.RFC3339Nano, schedule.Window.StartsAt)
 		candidate.WindowEnd, _ = time.Parse(time.RFC3339Nano, schedule.Window.EndsAt)
-		return candidate, nil, nil
-	}
-	if kind == release.PresentationCable {
-		cable := envelope.Payload.Presentation.Cable
-		if cable == nil {
-			return candidate, nil, ErrIncompatibleRelease
-		}
-		shell, shellOK := objects[cable.ShellBuildDigest]
-		revision, revisionOK := objects[cable.RevisionArtifactDigest]
-		if !shellOK || !revisionOK || shell.Path == "" || revision.Path == "" {
-			return candidate, nil, errors.New("cable artifacts are not cached")
-		}
-		candidate.ShellBuildDigest, candidate.RevisionArtifactDigest = cable.ShellBuildDigest, cable.RevisionArtifactDigest
-		candidate.Entrypoint, candidate.BridgeProtocol = cable.Entrypoint, cable.BridgeProtocol
-		candidate.ArtifactClosure = slices.Clone(cable.ArtifactClosure)
-		candidate.ShellPath, candidate.RevisionPath = shell.Path, revision.Path
-		candidate.ArtifactPaths = make(map[string]string, len(objects))
-		for digest, object := range objects {
-			candidate.ArtifactPaths[digest] = object.Path
-		}
 		return candidate, nil, nil
 	}
 	artifact := envelope.Payload.Artifacts[0]
@@ -646,7 +639,7 @@ func (r *Reconciler) fail(ctx context.Context, generation uint64, operation stri
 }
 
 func (r *Reconciler) rollback(ctx context.Context, generation uint64, outcome string) bool {
-	if r.lkg.ReleaseDigest == "" || (r.lkg.Source == "" && len(r.lkg.Schedule) == 0 && r.lkg.Kind != release.PresentationCable) {
+	if r.lkg.ReleaseDigest == "" || (r.lkg.Source == "" && len(r.lkg.Schedule) == 0 && r.lkg.Kind != release.PresentationWeb) {
 		return false
 	}
 	if err := r.deps.Renderer.Prepare(ctx, r.lkg); err != nil {

@@ -31,6 +31,8 @@ type API interface {
 	AppendUpload(context.Context, string, int64, int64, io.Reader) (int64, error)
 	CompleteUpload(context.Context, string, string) (client.Asset, error)
 	PublishRelease(context.Context, json.RawMessage, string) (client.Document, error)
+	CreateMedia(context.Context, any, string) (client.Document, error)
+	MediaForAsset(context.Context, string) (client.Document, bool, error)
 	PutAssignment(context.Context, string, string, string, client.AssignmentInput) (client.Assignment, error)
 	GetStatus(context.Context, string) (client.Document, error)
 	ListEvents(context.Context, string, string) (client.EventPage, error)
@@ -199,6 +201,7 @@ type execution struct {
 	generation           int64
 	initialGeneration    int64
 	lastAsset            client.Asset
+	lastMediaID          string
 	lastRelease          client.Document
 	lastAssignment       client.Assignment
 	cursor               string
@@ -236,10 +239,27 @@ func (r *Runner) step(ctx context.Context, scenario string, index int, step fixt
 			}
 		}
 		asset, err := r.api.CompleteUpload(ctx, upload.ID, step.IdempotencyKey)
-		if err == nil {
-			state.lastAsset = asset
+		if err != nil {
+			return err
 		}
-		return err
+		state.lastAsset = asset
+		// Assignments target library media, so every uploaded fixture gets
+		// one with the same playback the publish step signs.
+		item, found, err := r.api.MediaForAsset(ctx, asset.ID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			item, err = r.api.CreateMedia(ctx, map[string]any{
+				"assetId": asset.ID, "title": media.Name, "tags": []string{},
+				"playback": map[string]any{"fit": "fit", "loop": true, "muted": true, "volume": 0, "orientation": 0},
+			}, step.IdempotencyKey+"-media")
+			if err != nil {
+				return err
+			}
+		}
+		state.lastMediaID = documentString(item, "id")
+		return nil
 	case "publish":
 		var body json.RawMessage
 		var err error
@@ -271,13 +291,12 @@ func (r *Runner) step(ctx context.Context, scenario string, index int, step fixt
 		}
 		return err
 	case "assign":
-		input := client.AssignmentInput{ReleaseID: documentString(state.lastRelease, "id"), ReleaseDigest: documentString(state.lastRelease, "digest"), DeliveryMode: step.DeliveryMode, ExpectedGeneration: step.Generation}
+		input := client.AssignmentInput{MediaID: state.lastMediaID, DeliveryMode: step.DeliveryMode, ExpectedGeneration: step.Generation}
 		if input.DeliveryMode == "" {
 			input.DeliveryMode = "cache_then_play"
 		}
-		if input.ReleaseID == "" {
-			input.ReleaseID = documentString(state.lastAssignment, "releaseId")
-			input.ReleaseDigest = documentString(state.lastAssignment, "releaseDigest")
+		if input.MediaID == "" {
+			input.MediaID = state.lastAssignment.MediaID
 		}
 		if input.ExpectedGeneration == 0 {
 			input.ExpectedGeneration = state.generation

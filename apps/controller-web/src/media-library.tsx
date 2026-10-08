@@ -1,9 +1,8 @@
 import * as React from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { type components } from "@cable/api-client";
 import {
-  Breadcrumbs,
   Button,
   Card,
   CardContent,
@@ -13,29 +12,42 @@ import {
   ErrorState,
   MediaCard,
   Pagination,
+  PageFrame,
+  PageHeader,
   PreviewMosaic,
   PreviewSurface,
   Skeleton,
   TechnicalDetails,
+  useToast,
   type NavigationLink,
   type PixelDimensions,
 } from "@cable/controller-ui";
-import { api, ApiRequestError, controllerBaseUrl, hasCapability, readApiResult } from "./api";
+import { api, ApiRequestError, controllerBaseUrl, getApiToken, hasCapability, readApiResult } from "./api";
 import { useAuth } from "./auth";
 import { MediaDropzone } from "./components/MediaDropzone";
 import { NodeAssignmentComposer } from "./assignment";
+import { MediaThumbnail, previewKind, useMediaThumbnail } from "./media-thumbnail";
+import { mediaKindLabel } from "./components/MediaPicker";
 
 export type Media = components["schemas"]["Media"];
 type MediaPage = components["schemas"]["MediaPage"];
 type MediaPatch = components["schemas"]["MediaPatch"];
+type MediaArtifact = NonNullable<Media["artifact"]>;
+type MediaPlayback = NonNullable<Media["playback"]>;
 type UsagePage = components["schemas"]["UsagePage"];
-type MediaTypeFilter = "all" | "image" | "video";
+type MediaTypeFilter = "all" | "image" | "video" | "web";
+export type MediaSortKey = "title" | "size" | "type";
 
+/** URL state for the library. Defaults are omitted: no `sort` means date added, no `order` means newest first. */
 export interface MediaLibrarySearch {
   cursor?: string;
   limit: number;
   search?: string;
   type: MediaTypeFilter;
+  sort?: MediaSortKey;
+  order?: "asc" | "desc";
+  /** Opens the add form: `upload` for files, `web` for a page URL. */
+  add?: "upload" | "web";
 }
 
 export function normalizeMediaSearch(search: Record<string, unknown>): MediaLibrarySearch {
@@ -43,9 +55,23 @@ export function normalizeMediaSearch(search: Record<string, unknown>): MediaLibr
     cursor: typeof search.cursor === "string" ? search.cursor : undefined,
     limit: typeof search.limit === "number" ? Math.min(Math.max(search.limit, 1), 48) : 24,
     search: typeof search.search === "string" && search.search.trim() ? search.search.trim() : undefined,
-    type: search.type === "image" || search.type === "video" ? search.type : "all",
+    type: search.type === "image" || search.type === "video" || search.type === "web" ? search.type : "all",
+    sort: search.sort === "title" || search.sort === "size" || search.sort === "type" ? search.sort : undefined,
+    order: search.order === "asc" ? "asc" : undefined,
+    add: search.add === "upload" || search.add === "web" ? search.add : undefined,
   };
 }
+
+const mediaSortOptions: { value: string; label: string; sort?: MediaSortKey; order?: "asc" }[] = [
+  { value: "createdAt:desc", label: "Newest first" },
+  { value: "createdAt:asc", label: "Oldest first", order: "asc" },
+  { value: "title:asc", label: "Name A–Z", sort: "title", order: "asc" },
+  { value: "title:desc", label: "Name Z–A", sort: "title" },
+  { value: "size:desc", label: "Largest first", sort: "size" },
+  { value: "size:asc", label: "Smallest first", sort: "size", order: "asc" },
+  { value: "type:asc", label: "Type A–Z", sort: "type", order: "asc" },
+  { value: "type:desc", label: "Type Z–A", sort: "type" },
+];
 
 const RouterLink = Link as unknown as NavigationLink;
 const fieldClass = "mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring";
@@ -59,12 +85,6 @@ function formatBytes(size: number): string {
   return `${(size / 1_000_000_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} GB`;
 }
 
-function mediaKind(mediaType: string): "image" | "video" | null {
-  if (mediaType.startsWith("image/")) return "image";
-  if (mediaType.startsWith("video/")) return "video";
-  return null;
-}
-
 function QueryError({ error, retry }: { error: Error; retry: () => void }) {
   const status = error instanceof ApiRequestError ? error.status : undefined;
   return <ErrorState
@@ -74,110 +94,63 @@ function QueryError({ error, retry }: { error: Error; retry: () => void }) {
   />;
 }
 
-function PageFrame({ children, breadcrumbs }: { children: React.ReactNode; breadcrumbs: Array<{ label: string; href?: string }> }) {
-  return <main className="mx-auto max-w-[var(--content-max-width)] space-y-6 p-4 md:p-8">
-    <Breadcrumbs items={breadcrumbs} linkComponent={RouterLink} />
-    {children}
-  </main>;
-}
-
-function PageHeader({ title, description, children }: { title: string; description?: string; children?: React.ReactNode }) {
-  return <div className="flex flex-col justify-between gap-4 border-b border-border pb-5 md:flex-row md:items-end">
-    <div>
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-      {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
-    </div>
-    {children && <div className="flex flex-wrap gap-2">{children}</div>}
-  </div>;
-}
-
-interface PreviewState {
-  status: "loading" | "ready" | "error";
-  url?: string;
-  message?: string;
-}
-
-export function useAuthenticatedPreview(media: Media) {
-  const { token } = useAuth();
-  const [attempt, setAttempt] = React.useState(0);
-  const [preview, setPreview] = React.useState<PreviewState>({ status: "loading" });
-
-  React.useEffect(() => {
-    const controller = new AbortController();
-    let objectUrl: string | undefined;
-    setPreview({ status: "loading" });
-
-    const headers = new Headers({ Accept: media.artifact.mediaType });
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    const base = controllerBaseUrl.replace(/\/$/, "");
-
-    void fetch(`${base}/media/${encodeURIComponent(media.id)}/content`, {
-      method: "GET",
-      headers,
-      credentials: "omit",
-      cache: "no-store",
-      signal: controller.signal,
-    }).then(async (response) => {
-      if (!response.ok) throw new ApiRequestError(response.status, "The preview could not be fetched.");
+/** Fetches the original on demand. Only the detail page uses this: images to show full resolution, video once the operator presses play. */
+function useOriginalMedia(media: Media, artifact: MediaArtifact, enabled: boolean) {
+  return useQuery({
+    queryKey: ["media-original", artifact.digest],
+    enabled,
+    staleTime: Infinity,
+    gcTime: 60_000,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      const headers = new Headers({ Accept: artifact.mediaType });
+      const token = getApiToken();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+      const response = await fetch(`${controllerBaseUrl.replace(/\/$/, "")}/media/${encodeURIComponent(media.id)}/content`, { headers, credentials: "omit", signal });
+      if (!response.ok) throw new ApiRequestError(response.status, "The original could not be fetched.");
       const blob = await response.blob();
-      if (controller.signal.aborted) return;
-      const typedBlob = blob.type === media.artifact.mediaType ? blob : blob.slice(0, blob.size, media.artifact.mediaType);
-      objectUrl = URL.createObjectURL(typedBlob);
-      setPreview({ status: "ready", url: objectUrl });
-    }).catch((error: unknown) => {
-      if (controller.signal.aborted) return;
-      setPreview({ status: "error", message: error instanceof Error ? error.message : "The preview could not be fetched." });
-    });
-
-    return () => {
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [attempt, media.artifact.mediaType, media.id, media.version, token]);
-
-  return { ...preview, retry: () => setAttempt((value) => value + 1) };
+      return URL.createObjectURL(blob.type === artifact.mediaType ? blob : blob.slice(0, blob.size, artifact.mediaType));
+    },
+  });
 }
 
-function AuthenticatedMediaPreview({ media, hero = false, onDimensions }: { media: Media; hero?: boolean; onDimensions?: (dimensions?: PixelDimensions) => void }) {
-  const preview = useAuthenticatedPreview(media);
-  const container = React.useRef<HTMLDivElement>(null);
-  const kind = mediaKind(media.artifact.mediaType);
-  const reportDimensions = React.useCallback(() => {
-    const element = container.current?.querySelector("img, video");
-    if (element instanceof HTMLImageElement && element.naturalWidth > 0 && element.naturalHeight > 0) {
-      onDimensions?.({ width: element.naturalWidth, height: element.naturalHeight });
-    } else if (element instanceof HTMLVideoElement && element.videoWidth > 0 && element.videoHeight > 0) {
-      onDimensions?.({ width: element.videoWidth, height: element.videoHeight });
-    }
-  }, [onDimensions]);
+/** Poster first, original second: the page is usable as soon as the thumbnail lands. */
+function MediaHeroPreview({ media, artifact, playback, onDimensions }: { media: Media; artifact: MediaArtifact; playback: MediaPlayback; onDimensions: (dimensions: PixelDimensions) => void }) {
+  const kind = previewKind(artifact.mediaType);
+  const [playRequested, setPlayRequested] = React.useState(false);
+  const thumbnail = useMediaThumbnail(media);
+  const original = useOriginalMedia(media, artifact, kind === "image" || playRequested);
+  const fit = playback.fit === "fill" ? "cover" : "contain";
+  const frame = "bg-[repeating-conic-gradient(hsl(var(--muted))_0%_25%,transparent_0%_50%)] bg-[length:20px_20px]";
 
-  if (!kind) {
+  if (!kind) return <PreviewSurface state="empty" emptyTitle="No visual preview" emptyDescription={artifact.mediaType} />;
+  if (kind === "video" && playRequested && original.data) {
     return <PreviewSurface
-      state="empty"
-      aspectRatio="16 / 9"
-      emptyTitle="Preview not supported"
-      emptyDescription={media.artifact.mediaType}
+      aria-label={`${media.title} player`}
+      fit={fit}
+      media={{ kind: "video", src: original.data, label: `${media.title} player`, poster: thumbnail.url, controls: true, autoPlay: true, muted: playback.muted, loop: playback.loop }}
+      className="bg-black"
     />;
   }
-
-  const mediaSource = preview.url
-    ? kind === "image"
-      ? { kind: "image" as const, src: preview.url, alt: `${media.title} preview`, loading: hero ? "eager" as const : "lazy" as const, onLoad: reportDimensions }
-      : { kind: "video" as const, src: preview.url, label: `${media.title} preview`, controls: hero, muted: media.playback.muted, loop: media.playback.loop, autoPlay: false, onLoad: reportDimensions }
-    : undefined;
-
-  return <div ref={container}>
+  const still = kind === "image" ? original.data ?? thumbnail.url : thumbnail.url;
+  return <div className="relative">
     <PreviewSurface
-      media={mediaSource}
-      state={preview.status}
-      aspectRatio="16 / 9"
-      fit={media.playback.fit === "fill" ? "cover" : "contain"}
-      className={hero ? "max-h-[70vh]" : undefined}
-      loadingLabel={`Loading ${media.title} preview…`}
-      errorDescription={preview.message}
-      onRetry={preview.retry}
-      aria-label={`${media.title} visual preview`}
+      aria-label={`${media.title} preview`}
+      fit={fit}
+      className={frame}
+      media={still ? { kind: "image", src: still, alt: `${media.title} preview`, loading: "eager" } : undefined}
+      state={still ? "ready" : original.isError ? "error" : thumbnail.status === "empty" && kind === "video" ? "empty" : "loading"}
+      loadingLabel="Loading preview…"
+      emptyTitle="No poster yet"
+      emptyDescription="Play the video to preview it."
+      errorDescription={original.error?.message}
     />
+    {kind === "image" && original.data && <img className="hidden" src={original.data} alt="" onLoad={(event) => onDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />}
+    {kind === "video" && <div className="absolute inset-0 flex items-center justify-center">
+      <Button type="button" size="lg" className="shadow-lg" disabled={playRequested && original.isFetching} onClick={() => setPlayRequested(true)}>
+        {playRequested && original.isFetching ? "Loading video…" : original.isError ? "Retry video" : "▶ Play video"}
+      </Button>
+    </div>}
   </div>;
 }
 
@@ -188,8 +161,11 @@ async function listMedia(search: MediaLibrarySearch): Promise<MediaPage> {
         cursor: search.cursor,
         limit: search.limit,
         search: search.search,
+        sort: search.sort ?? "createdAt",
+        order: search.order ?? "desc",
         playable: true,
-        kind: search.type === "all" ? undefined : search.type,
+        kind: search.type === "web" ? "web" : undefined,
+        mediaType: search.type === "image" || search.type === "video" ? search.type : undefined,
       },
     },
   }));
@@ -205,28 +181,50 @@ async function getMediaUsage(mediaId: string): Promise<UsagePage> {
   return readApiResult(await api.GET("/usage/{kind}/{id}", { params: { path: { kind: "media", id: mediaId }, query: { limit: 100 } } }));
 }
 
+export function webHost(url: string | undefined): string {
+  if (!url) return "";
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 function MediaLibraryCard({ media }: { media: Media }) {
-  const [dimensions, setDimensions] = React.useState<PixelDimensions>();
-  const kind = mediaKind(media.artifact.mediaType);
   return <MediaCard
     title={media.title}
-    artist={media.artist}
-    description={media.description}
-    preview={<AuthenticatedMediaPreview media={media} onDimensions={setDimensions} />}
-    dimensions={dimensions}
-    metadata={<><span>{kind === "image" ? "Image" : kind === "video" ? "Video" : media.artifact.mediaType}</span><span>{formatBytes(media.artifact.size)}</span></>}
-    status={media.artifact.state ?? "ready"}
-    titleHref={`/media/${media.id}`}
+    artist={media.kind === "web" ? (media.deploymentId ? "Hosted Cable guide" : webHost(media.url)) : media.artist}
+    preview={<MediaThumbnail media={media} />}
+    metadata={media.kind === "web"
+      ? <span className="inline-flex items-center gap-1.5">{media.faviconUrl && <img src={media.faviconUrl} alt="" className="h-3.5 w-3.5 rounded-sm" loading="lazy" referrerPolicy="no-referrer" />}{mediaKindLabel(media)}</span>
+      : <><span>{mediaKindLabel(media)}</span>{media.artifact && <span>{formatBytes(media.artifact.size)}</span>}</>}
+    status={media.artifact?.state && media.artifact.state !== "ready" ? media.artifact.state : undefined}
+    titleHref={`/library/media/${media.id}`}
     linkComponent={RouterLink}
-    actions={<Button asChild size="sm"><Link to="/media/$mediaId" params={{ mediaId: media.id }}>Open</Link></Button>}
   />;
 }
 
+function AddWebPageForm({ onAdded }: { onAdded: (media: Media) => void }) {
+  const [url, setUrl] = React.useState("");
+  const [title, setTitle] = React.useState("");
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const value = url.trim();
+      if (!/^https?:\/\//i.test(value)) throw new Error("Enter a web page URL starting with http:// or https://.");
+      return readApiResult(await api.POST("/media", { params: { header: { "Idempotency-Key": crypto.randomUUID() } }, body: { kind: "web", url: value, title: title.trim() || undefined } }));
+    },
+    onSuccess: onAdded,
+  });
+  return <form className="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end" onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
+    <label className="block text-sm font-medium">Page URL<input className={fieldClass} type="url" inputMode="url" required placeholder="https://example.com" value={url} onChange={(event) => setUrl(event.currentTarget.value)} /></label>
+    <label className="block text-sm font-medium">Title <span className="font-normal text-muted-foreground">(optional)</span><input className={fieldClass} value={title} maxLength={300} placeholder="Uses the page title" onChange={(event) => setTitle(event.currentTarget.value)} /></label>
+    <Button type="submit" disabled={mutation.isPending || !url.trim()}>{mutation.isPending ? "Adding…" : "Add web page"}</Button>
+    {mutation.error instanceof Error && <p role="alert" className="text-sm text-destructive sm:col-span-3">{mutation.error.message}</p>}
+  </form>;
+}
+
 function LibraryPending() {
-  return <PageFrame breadcrumbs={[{ label: "Library" }, { label: "Media" }]}>
-    <div className="space-y-3" aria-busy="true"><Skeleton className="h-8 w-48" /><Skeleton className="h-10 w-full max-w-md" /></div>
-    <PreviewMosaic label="Loading media" columns={4}>{Array.from({ length: 8 }, (_, index) => <Skeleton className="aspect-video w-full" key={index} />)}</PreviewMosaic>
-  </PageFrame>;
+  return <PreviewMosaic label="Loading media" columns={4}>{Array.from({ length: 8 }, (_, index) => <Skeleton className="aspect-video w-full" key={index} />)}</PreviewMosaic>;
 }
 
 export function MediaLibraryPage() {
@@ -235,64 +233,102 @@ export function MediaLibraryPage() {
   const queryClient = useQueryClient();
   const auth = useAuth();
   const [searchDraft, setSearchDraft] = React.useState(search.search ?? "");
-  const [adding, setAdding] = React.useState(false);
-  const query = useQuery({ queryKey: ["controller", "media", search], queryFn: () => listMedia(search) });
+  const query = useQuery({
+    queryKey: ["controller", "media", search],
+    queryFn: () => listMedia(search),
+    placeholderData: keepPreviousData,
+    // Web pages still being captured poll until their thumbnail lands.
+    refetchInterval: (current) => current.state.data?.items.some((item) => item.kind === "web" && !item.deploymentId && !item.thumbnail && !item.thumbnailError) ? 3000 : false,
+  });
   const canAdd = Boolean(auth.operator && hasCapability(auth.operator, "media_write", "media_write"));
+  const adding = search.add;
+  const setAdding = (add: MediaLibrarySearch["add"]) => void navigate({ to: "/library/media", search: { ...search, add } });
 
   React.useEffect(() => setSearchDraft(search.search ?? ""), [search.search]);
-  if (query.isPending) return <LibraryPending />;
 
   const updateSearch = (patch: Partial<MediaLibrarySearch>) => void navigate({
-    to: "/media",
-    search: (previous) => ({ ...previous, ...patch, cursor: undefined, limit: patch.limit ?? previous.limit ?? 24, type: patch.type ?? previous.type ?? "all" }),
+    to: "/library/media",
+    search: { ...search, ...patch, cursor: undefined, add: undefined },
   });
 
-  if (query.isError) {
-    return <PageFrame breadcrumbs={[{ label: "Library" }, { label: "Media" }]}><QueryError error={query.error} retry={() => void query.refetch()} /></PageFrame>;
-  }
+  const items = query.data?.items ?? [];
+  const hasFilters = Boolean(search.search || search.type !== "all");
+  const clearSearch = () => {
+    setSearchDraft("");
+    updateSearch({ search: undefined, type: "all" });
+  };
 
-  const items = query.data.items.filter((item) => search.type === "all" || mediaKind(item.artifact.mediaType) === search.type);
-  return <PageFrame breadcrumbs={[{ label: "Library" }, { label: "Media" }]}>
-    <PageHeader title="Media Library" description="Find the image or video you want by sight, then open it to edit or publish.">
-      {canAdd && <Button type="button" aria-expanded={adding} onClick={() => setAdding((value) => !value)}>{adding ? "Close upload" : "Add media"}</Button>}
+  return <PageFrame>
+    <PageHeader title="Media">
+      {canAdd && <Button type="button" variant={adding === "web" ? "secondary" : "ghost"} aria-expanded={adding === "web"} aria-controls="media-add-web" onClick={() => setAdding(adding === "web" ? undefined : "web")}>{adding === "web" ? "Close" : "Add web page"}</Button>}
+      {canAdd && <Button type="button" variant={adding === "upload" ? "secondary" : "primary"} aria-expanded={adding === "upload"} aria-controls="media-upload" onClick={() => setAdding(adding === "upload" ? undefined : "upload")}>{adding === "upload" ? "Close upload" : "Add media"}</Button>}
     </PageHeader>
 
-    {adding && canAdd && <Card>
+    {adding === "upload" && canAdd && <Card id="media-upload">
       <CardHeader><CardTitle>Add an image or video</CardTitle></CardHeader>
       <CardContent><MediaDropzone onUploaded={(media) => {
         void queryClient.invalidateQueries({ queryKey: ["controller", "media"] });
-        void navigate({ to: "/media/$mediaId", params: { mediaId: media.id } });
+        void navigate({ to: "/library/media/$mediaId", params: { mediaId: media.id } });
+      }} /></CardContent>
+    </Card>}
+    {adding === "web" && canAdd && <Card id="media-add-web">
+      <CardHeader><CardTitle>Add a web page</CardTitle></CardHeader>
+      <CardContent><AddWebPageForm onAdded={(media) => {
+        void queryClient.invalidateQueries({ queryKey: ["controller", "media"] });
+        void navigate({ to: "/library/media/$mediaId", params: { mediaId: media.id } });
       }} /></CardContent>
     </Card>}
 
-    <form className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-end" role="search" onSubmit={(event) => {
-      event.preventDefault();
-      updateSearch({ search: searchDraft.trim() || undefined });
-    }}>
-      <label className="min-w-0 flex-1 text-sm font-medium">Search media
-        <input className={fieldClass} type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.currentTarget.value)} placeholder="Title, artist, or tag" />
-      </label>
-      <label className="text-sm font-medium">Type
-        <select className={`${fieldClass} sm:w-40`} value={search.type} onChange={(event) => updateSearch({ type: event.currentTarget.value as MediaTypeFilter })}>
-          <option value="all">Images and videos</option>
-          <option value="image">Images</option>
-          <option value="video">Videos</option>
-        </select>
-      </label>
-      <Button type="submit" variant="secondary">Search</Button>
-    </form>
+    <div className="space-y-2">
+      <form className="flex flex-wrap items-center gap-2" role="search" aria-label="Filter media" onSubmit={(event) => {
+        event.preventDefault();
+        updateSearch({ search: searchDraft.trim() || undefined });
+      }}>
+        <label className="min-w-0 basis-full sm:basis-64 sm:flex-1">
+          <span className="sr-only">Search media</span>
+          <input className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring" type="search" value={searchDraft} onChange={(event) => {
+            const value = event.currentTarget.value;
+            setSearchDraft(value);
+            if (!value && search.search) updateSearch({ search: undefined });
+          }} placeholder="Search title, artist, or URL" />
+        </label>
+        <label className="min-w-0 flex-1 sm:flex-none">
+          <span className="sr-only">Media type</span>
+          <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring sm:w-44" value={search.type} onChange={(event) => updateSearch({ type: event.currentTarget.value as MediaTypeFilter })}>
+            <option value="all">All media</option>
+            <option value="image">Images</option>
+            <option value="video">Videos</option>
+            <option value="web">Web pages & Cable</option>
+          </select>
+        </label>
+        <label className="min-w-0 flex-1 sm:flex-none">
+          <span className="sr-only">Sort media</span>
+          <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring sm:w-44" value={`${search.sort ?? "createdAt"}:${search.order ?? "desc"}`} onChange={(event) => {
+            const option = mediaSortOptions.find((candidate) => candidate.value === event.currentTarget.value);
+            updateSearch({ sort: option?.sort, order: option?.order });
+          }}>
+            {mediaSortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
+        <Button type="submit" variant="secondary">Search</Button>
+        {(hasFilters || searchDraft || search.cursor) && <Button type="button" variant="ghost" onClick={clearSearch}>Reset</Button>}
+      </form>
+      <p role="status" className="text-xs text-muted-foreground">
+        {query.isFetching ? "Updating media…" : query.isError ? "Media could not be loaded" : `${items.length.toLocaleString()} ${items.length === 1 ? "item" : "items"} on this page`}
+      </p>
+    </div>
 
-    {items.length > 0 ? <>
-      <PreviewMosaic label="Playable media" columns={4}>{items.map((media) => <MediaLibraryCard media={media} key={media.id} />)}</PreviewMosaic>
-      <Pagination
+    {query.isError ? <QueryError error={query.error} retry={() => void query.refetch()} /> : query.isPending || (query.isPlaceholderData && items.length === 0) ? <LibraryPending /> : items.length > 0 ? <>
+      <div aria-busy={query.isFetching}><PreviewMosaic label="Media" columns={4}>{items.map((media) => <MediaLibraryCard media={media} key={media.id} />)}</PreviewMosaic></div>
+      {!query.isPlaceholderData && <Pagination
         page={query.data.page}
-        onPrevious={() => void navigate({ to: "/media", search: (previous) => ({ ...previous, cursor: query.data.page.previousCursor ?? undefined, limit: previous.limit ?? 24, type: previous.type ?? "all" }) })}
-        onNext={() => void navigate({ to: "/media", search: (previous) => ({ ...previous, cursor: query.data.page.nextCursor ?? undefined, limit: previous.limit ?? 24, type: previous.type ?? "all" }) })}
-      />
+        onPrevious={() => void navigate({ to: "/library/media", search: { ...search, cursor: query.data.page.previousCursor ?? undefined } })}
+        onNext={() => void navigate({ to: "/library/media", search: { ...search, cursor: query.data.page.nextCursor ?? undefined } })}
+      />}
     </> : <EmptyState
-      title={search.search || search.type !== "all" ? "No matching media" : "Build your visual library"}
-      description={search.search || search.type !== "all" ? "Try a different title, artist, tag, or media type." : "Add an image or video to make it available for playlists and displays."}
-      action={canAdd && !adding ? <Button type="button" onClick={() => setAdding(true)}>Add your first media</Button> : undefined}
+      title={hasFilters ? "No matching media" : "No media yet"}
+      description={hasFilters ? "Try another search or reset your filters." : canAdd ? "Use Add media to upload an image or video, or Add web page to put a site on a screen." : "Images, videos, and web pages will appear here when they are added."}
+      action={hasFilters ? <Button type="button" variant="secondary" onClick={clearSearch}>Reset filters</Button> : undefined}
     />}
   </PageFrame>;
 }
@@ -315,12 +351,13 @@ function formFromMedia(media: Media): MediaFormState {
     artist: media.artist ?? "",
     description: media.description ?? "",
     tags: media.tags.join(", "),
-    ...media.playback,
+    ...media.playback!,
   };
 }
 
 function MediaEditor({ media, etag }: { media: Media; etag: string }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [form, setForm] = React.useState<MediaFormState>(() => formFromMedia(media));
   React.useEffect(() => setForm(formFromMedia(media)), [media]);
   const mutation = useMutation({
@@ -335,12 +372,14 @@ function MediaEditor({ media, etag }: { media: Media; etag: string }) {
     onSuccess: (updated) => {
       queryClient.setQueryData(["controller", "media-detail", media.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["controller", "media"] });
+      toast.success("Changes saved.");
     },
   });
   const set = <K extends keyof MediaFormState>(key: K, value: MediaFormState[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const isVideo = previewKind(media.artifact!.mediaType) === "video";
 
   return <Card>
-    <CardHeader><CardTitle>Media details</CardTitle></CardHeader>
+    <CardHeader><CardTitle>Details & playback</CardTitle></CardHeader>
     <CardContent>
       <form className="space-y-5" onSubmit={(event) => {
         event.preventDefault();
@@ -358,21 +397,20 @@ function MediaEditor({ media, etag }: { media: Media; etag: string }) {
         </div>
         <label className="block text-sm font-medium">Description<textarea className={textareaClass} value={form.description} onChange={(event) => set("description", event.currentTarget.value)} /></label>
         <label className="block text-sm font-medium">Tags<input className={fieldClass} value={form.tags} onChange={(event) => set("tags", event.currentTarget.value)} placeholder="lobby, seasonal, portrait" /><span className="mt-1 block text-xs font-normal text-muted-foreground">Separate tags with commas.</span></label>
-        <fieldset className="space-y-4 rounded-md border border-border p-4">
-          <legend className="px-1 text-sm font-semibold">Playback defaults</legend>
-          <div className="grid gap-4 sm:grid-cols-3">
+        <fieldset className="space-y-4 border-t border-border pt-4">
+          <legend className="pr-3 text-sm font-semibold">Playback defaults</legend>
+          <div className={`grid gap-4 ${isVideo ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
             <label className="text-sm font-medium">Fit<select className={fieldClass} value={form.fit} onChange={(event) => set("fit", event.currentTarget.value as "fit" | "fill")}><option value="fit">Fit entire frame</option><option value="fill">Fill frame</option></select></label>
             <label className="text-sm font-medium">Orientation<select className={fieldClass} value={form.orientation} onChange={(event) => set("orientation", Number(event.currentTarget.value) as MediaFormState["orientation"])}><option value={0}>0°</option><option value={90}>90°</option><option value={180}>180°</option><option value={270}>270°</option></select></label>
-            <label className="text-sm font-medium">Volume<input className={fieldClass} type="number" min={0} max={100} step={1} disabled={form.muted} value={form.volume} onChange={(event) => set("volume", Number(event.currentTarget.value))} /></label>
+            {isVideo && <label className="text-sm font-medium">Volume<input className={fieldClass} type="number" min={0} max={100} step={1} disabled={form.muted} value={form.volume} onChange={(event) => set("volume", Number(event.currentTarget.value))} /></label>}
           </div>
-          <div className="flex flex-wrap gap-5">
-            <label className="inline-flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={form.loop} onChange={(event) => set("loop", event.currentTarget.checked)} />Loop playback</label>
-            <label className="inline-flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={form.muted} onChange={(event) => set("muted", event.currentTarget.checked)} />Muted</label>
-          </div>
+          {isVideo && <div className="flex flex-wrap gap-5">
+            <label className="inline-flex items-center gap-2 text-sm font-medium"><input className="h-4 w-4 accent-primary" type="checkbox" checked={form.loop} onChange={(event) => set("loop", event.currentTarget.checked)} />Loop playback</label>
+            <label className="inline-flex items-center gap-2 text-sm font-medium"><input className="h-4 w-4 accent-primary" type="checkbox" checked={form.muted} onChange={(event) => set("muted", event.currentTarget.checked)} />Muted</label>
+          </div>}
         </fieldset>
         {mutation.isError && <ErrorState title={mutation.error instanceof ApiRequestError && mutation.error.status === 412 ? "Media changed elsewhere" : "Could not save changes"} description={mutation.error.message} />}
-        {mutation.isSuccess && <p role="status" className="text-sm font-medium text-status-success">Changes saved.</p>}
-        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={mutation.isPending || !form.title.trim()}>{mutation.isPending ? "Saving…" : "Save changes"}</Button><Button type="button" variant="secondary" disabled={mutation.isPending} onClick={() => setForm(formFromMedia(media))}>Reset</Button></div>
+        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={mutation.isPending || !form.title.trim()}>{mutation.isPending ? "Saving…" : "Save changes"}</Button><Button type="button" variant="ghost" disabled={mutation.isPending} onClick={() => { setForm(formFromMedia(media)); mutation.reset(); }}>Discard changes</Button></div>
       </form>
     </CardContent>
   </Card>;
@@ -387,10 +425,7 @@ function UsageSummary({ usage, pending, error, retry }: { usage?: UsagePage; pen
   return <Card>
     <CardHeader><CardTitle>Used in</CardTitle></CardHeader>
     <CardContent className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div><p className="text-2xl font-semibold tabular-nums">{playlists}</p><p className="text-sm text-muted-foreground">Playlists</p></div>
-        <div><p className="text-2xl font-semibold tabular-nums">{blocks}</p><p className="text-sm text-muted-foreground">Blocks</p></div>
-      </div>
+      {references.length > 0 && <p className="text-sm text-muted-foreground">{playlists} {playlists === 1 ? "playlist" : "playlists"} · {blocks} {blocks === 1 ? "block" : "blocks"}</p>}
       {references.length > 0
         ? <ul className="space-y-2 border-t border-border pt-4">{references.map((reference) => <li key={`${reference.kind}:${reference.id}`}><a className="text-sm font-medium text-primary hover:underline" href={reference.href}>{reference.name}</a><span className="ml-2 text-xs capitalize text-muted-foreground">{reference.kind}</span></li>)}</ul>
         : <p className="text-sm text-muted-foreground">Not used by any playlist or block.</p>}
@@ -401,6 +436,7 @@ type CablePlaylist = components["schemas"]["CablePlaylist"];
 
 function MediaPlaylistAdder({ media }: { media: Media }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const playlists = useQuery({
     queryKey: ["controller", "media-playlist-options"],
     queryFn: async () => readApiResult(await api.GET("/cable/playlists", { params: { query: { limit: 100 } } })),
@@ -425,7 +461,7 @@ function MediaPlaylistAdder({ media }: { media: Media }) {
               title: item.title,
               subtitle: item.subtitle,
             })),
-            { assetId: media.assetId, position, durationSeconds, title: media.title },
+            { assetId: media.assetId!, position, durationSeconds, title: media.title },
           ],
         },
       }));
@@ -433,6 +469,7 @@ function MediaPlaylistAdder({ media }: { media: Media }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["authoring", "playlists"] });
       void queryClient.invalidateQueries({ queryKey: ["authoring", "playlist", playlistId] });
+      toast.success("Added to playlist.");
     },
   });
 
@@ -450,8 +487,7 @@ function MediaPlaylistAdder({ media }: { media: Media }) {
       </label>
       {playlists.isError && <ErrorState title="Playlists unavailable" description={playlists.error.message} onRetry={() => void playlists.refetch()} />}
       {mutation.isError && <ErrorState title="Could not add media" description={mutation.error.message} />}
-      {mutation.isSuccess && <p role="status" className="text-sm font-medium text-status-success">Added to playlist.</p>}
-      <Button type="button" onClick={() => mutation.mutate()} disabled={!playlistId || mutation.isPending}>{mutation.isPending ? "Adding…" : "Add to playlist"}</Button>
+      <Button type="button" variant="secondary" onClick={() => mutation.mutate()} disabled={!playlistId || mutation.isPending}>{mutation.isPending ? "Adding…" : "Add to playlist"}</Button>
     </CardContent>
   </Card>;
 }
@@ -459,41 +495,151 @@ function MediaPlaylistAdder({ media }: { media: Media }) {
 
 export function MediaDetailPage() {
   const { mediaId = "" } = useParams({ strict: false });
+  const mediaQuery = useQuery({
+    queryKey: ["controller", "media-detail", mediaId],
+    queryFn: () => getMedia(mediaId),
+    refetchInterval: (current) => { const media = current.state.data?.media; return media?.kind === "web" && !media.deploymentId && !media.thumbnail && !media.thumbnailError ? 3000 : false; },
+  });
+  if (mediaQuery.isPending) return <PageFrame><Skeleton className="h-8 w-48" /><Skeleton className="aspect-video w-full" /></PageFrame>;
+  if (mediaQuery.isError) return <PageFrame><QueryError error={mediaQuery.error} retry={() => void mediaQuery.refetch()} /></PageFrame>;
+  const { media, etag } = mediaQuery.data;
+  if (media.kind === "web") return <WebMediaDetail media={media} etag={etag} />;
+  if (!media.artifact || !media.playback) return <PageFrame><ErrorState title="Media file unavailable" description="This media has no file attached." /></PageFrame>;
+  return <FileMediaDetail media={media} artifact={media.artifact} playback={media.playback} etag={etag} />;
+}
+
+function relativeTime(value: string): string {
+  const seconds = Math.round((Date.now() - new Date(value).getTime()) / 1000);
+  if (!Number.isFinite(seconds)) return "";
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86_400)}d ago`;
+}
+
+/** A web page or hosted Cable guide: capture preview, assignment, and (for pages) title/recapture/remove. */
+function WebMediaDetail({ media, etag }: { media: Media; etag: string }) {
   const auth = useAuth();
-  const mediaQuery = useQuery({ queryKey: ["controller", "media-detail", mediaId], queryFn: () => getMedia(mediaId) });
-  const usageQuery = useQuery({ queryKey: ["controller", "media-usage", mediaId], queryFn: () => getMediaUsage(mediaId), enabled: Boolean(mediaId) });
-  const [dimensions, setDimensions] = React.useState<PixelDimensions>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const isCable = Boolean(media.deploymentId);
+  const canWrite = !isCable && Boolean(auth.operator && hasCapability(auth.operator, "media_write", "media_write"));
+  const canAssign = Boolean(auth.operator && hasCapability(auth.operator, "assignment_write", "assignment_write"));
+  const [title, setTitle] = React.useState(media.title);
+  React.useEffect(() => setTitle(media.title), [media.title]);
+  const store = (updated: Media, nextEtag?: string) => {
+    queryClient.setQueryData(["controller", "media-detail", media.id], { media: updated, etag: nextEtag ?? `"media:${updated.id}:${updated.version}"` });
+    void queryClient.invalidateQueries({ queryKey: ["controller", "media"] });
+  };
+  const refresh = useMutation({
+    mutationFn: async () => readApiResult(await api.POST("/media/{mediaId}/refresh", { params: { path: { mediaId: media.id } } })),
+    onSuccess: (updated) => store(updated),
+  });
+  const rename = useMutation({
+    mutationFn: async () => {
+      const result = await api.PATCH("/media/{mediaId}", { params: { path: { mediaId: media.id }, header: { "If-Match": etag, "Idempotency-Key": crypto.randomUUID() } }, body: { title: title.trim() } });
+      return { media: readApiResult(result), etag: result.response.headers.get("ETag") ?? undefined };
+    },
+    onSuccess: (updated) => { store(updated.media, updated.etag); toast.success("Title saved."); },
+  });
+  const remove = useMutation({
+    mutationFn: async () => {
+      const result = await api.DELETE("/media/{mediaId}", { params: { path: { mediaId: media.id } } });
+      if (!result.response.ok) throw new ApiRequestError(result.response.status, "The web page could not be removed.");
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["controller", "media"] });
+      toast.success("Web page removed.");
+      void navigate({ to: "/library/media", search: { limit: 24, type: "all" } });
+    },
+  });
+  const error = refresh.error ?? rename.error ?? remove.error;
+
+  return <PageFrame>
+    <PageHeader title={media.title} description={isCable ? "Hosted Cable guide, kept in sync with its deployment." : media.url} meta={<p className="text-sm text-muted-foreground">{mediaKindLabel(media)} · Added {new Date(media.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}</p>}>
+      {media.url && <Button type="button" variant="secondary" onClick={() => window.open(media.url, "_blank", "noopener,noreferrer")}>Open page</Button>}
+      {canWrite && <Button type="button" variant="secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isPending ? "Capturing…" : "Recapture"}</Button>}
+    </PageHeader>
+    <MediaThumbnail media={media} label={`${media.title} page capture`} className="max-h-[70vh]" />
+    <p className="text-xs text-muted-foreground">
+      {media.thumbnail
+        ? <>Captured {media.thumbnail.capturedAt ? relativeTime(media.thumbnail.capturedAt) : ""} {media.thumbnail.source === "node" ? "from a screen playing this page" : "by the controller at 1920×1080"}.</>
+        : media.thumbnailError ? <>Last capture failed: {media.thumbnailError}</> : "Capturing the page…"}
+    </p>
+    <div className="grid items-start gap-4 lg:grid-cols-2">
+      {canAssign && <NodeAssignmentComposer title="Show on a screen" fixedMedia={media} />}
+      <Card>
+        <CardHeader><CardTitle>Details</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+            {media.url && <><dt className="text-muted-foreground">URL</dt><dd className="break-all"><a className="hover:text-primary" href={media.url} target="_blank" rel="noreferrer noopener">{media.url}</a></dd></>}
+            {media.deploymentId && <><dt className="text-muted-foreground">Deployment</dt><dd><Link className="text-primary hover:underline" to="/programming/deployments/$deploymentId" params={{ deploymentId: media.deploymentId }}>Edit channels and schedule</Link></dd></>}
+            <dt className="text-muted-foreground">Added</dt><dd>{new Date(media.createdAt).toLocaleString()}</dd>
+          </dl>
+          {canWrite && <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); rename.mutate(); }}>
+            <label className="block text-sm font-medium">Title<input className={fieldClass} value={title} maxLength={300} required onChange={(event) => setTitle(event.currentTarget.value)} /></label>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" variant="secondary" disabled={rename.isPending || !title.trim() || title.trim() === media.title}>{rename.isPending ? "Saving…" : "Save title"}</Button>
+              <Button type="button" variant="ghost" disabled={remove.isPending} onClick={() => { if (window.confirm("Remove this web page from the library? Screens already showing it keep playing.")) remove.mutate(); }}>Remove from library</Button>
+            </div>
+          </form>}
+          {isCable && <p className="text-sm text-muted-foreground">Cable guides are created, renamed, and removed with their deployment.</p>}
+          {error instanceof Error && <p role="alert" className="text-sm text-destructive">{error.message}</p>}
+        </CardContent>
+      </Card>
+    </div>
+  </PageFrame>;
+}
+
+function FileMediaDetail({ media, artifact, playback, etag }: { media: Media; artifact: MediaArtifact; playback: MediaPlayback; etag: string }) {
+  const auth = useAuth();
+  const usageQuery = useQuery({ queryKey: ["controller", "media-usage", media.id], queryFn: () => getMediaUsage(media.id) });
+  const [measured, setMeasured] = React.useState<PixelDimensions>();
   const [assigning, setAssigning] = React.useState(false);
   const [addingToPlaylist, setAddingToPlaylist] = React.useState(false);
-  if (mediaQuery.isPending) return <LibraryPending />;
-  if (mediaQuery.isError) return <PageFrame breadcrumbs={[{ label: "Library", href: "/media" }, { label: "Media" }]}><QueryError error={mediaQuery.error} retry={() => void mediaQuery.refetch()} /></PageFrame>;
-
-  const { media, etag } = mediaQuery.data;
   const canEdit = Boolean(auth.operator && hasCapability(auth.operator, "media_write", "media_write"));
   const canAuthor = Boolean(auth.operator && hasCapability(auth.operator, "cable_write", "cable_write"));
-  return <PageFrame breadcrumbs={[{ label: "Library" }, { label: "Media", href: "/media" }, { label: media.title }]}>
-    <PageHeader title={media.title} description={media.artist || media.description}>
-      {canAuthor && <Button type="button" variant="secondary" onClick={() => setAddingToPlaylist((value) => !value)}>{addingToPlaylist ? "Close playlist picker" : "Add to playlist"}</Button>}
-      <Button type="button" onClick={() => setAssigning((value) => !value)}>{assigning ? "Close assignment" : "Assign"}</Button>
+  const kind = previewKind(artifact.mediaType);
+  const dimensions = measured;
+  const format = artifact.mediaType.split("/")[1]?.toUpperCase() ?? artifact.mediaType;
+  const summary = [kind === "image" ? "Image" : kind === "video" ? "Video" : "File", format, formatBytes(artifact.size), dimensions && `${dimensions.width.toLocaleString()} × ${dimensions.height.toLocaleString()} px`, `Added ${new Date(media.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}`].filter(Boolean);
+  return <PageFrame>
+    <PageHeader
+      title={media.title}
+      description={media.artist}
+      meta={<p className="text-sm text-muted-foreground">{summary.join(" · ")}</p>}
+    >
+      {canAuthor && <Button type="button" variant="secondary" aria-expanded={addingToPlaylist} aria-controls="media-playlist-picker" onClick={() => { setAddingToPlaylist((value) => !value); setAssigning(false); }}>{addingToPlaylist ? "Close playlist picker" : "Add to playlist"}</Button>}
+      <Button type="button" variant={assigning ? "secondary" : "primary"} aria-expanded={assigning} aria-controls="media-assignment" onClick={() => { setAssigning((value) => !value); setAddingToPlaylist(false); }}>{assigning ? "Close assignment" : "Assign to display"}</Button>
     </PageHeader>
-    {addingToPlaylist && <MediaPlaylistAdder media={media} />}
-    {assigning && <NodeAssignmentComposer fixedAsset={{ id: media.assetId, name: media.title, playback: media.playback }} title="Assign media" />}
+    {addingToPlaylist && <div id="media-playlist-picker"><MediaPlaylistAdder media={media} /></div>}
+    {assigning && <div id="media-assignment"><NodeAssignmentComposer fixedMedia={media} title="Assign media" /></div>}
 
-    <AuthenticatedMediaPreview media={media} hero onDimensions={setDimensions} />
-
-    <div className="grid gap-6 lg:grid-cols-3">
-      <div className="lg:col-span-2">{canEdit ? <MediaEditor media={media} etag={etag} /> : <Card><CardHeader><CardTitle>Media details</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">You can view this media, but your operator permissions do not allow editing.</p>{media.description && <p>{media.description}</p>}{media.tags.length > 0 && <div className="flex flex-wrap gap-2">{media.tags.map((tag) => <span className="rounded-full bg-muted px-2 py-1 text-xs" key={tag}>{tag}</span>)}</div>}</CardContent></Card>}</div>
-      <div className="space-y-6">
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(17rem,1fr)]">
+      <div className="min-w-0 space-y-6">
+        <MediaHeroPreview media={media} artifact={artifact} playback={playback} onDimensions={setMeasured} />
+        {artifact.state && artifact.state !== "ready" && <ErrorState title={artifact.state === "missing" ? "Media file missing" : "Media file quarantined"} description="This media file is not available for playback." />}
+        {canEdit ? <MediaEditor media={media} etag={etag} /> : <Card>
+          <CardHeader><CardTitle>Media details</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {media.description && <p className="text-sm">{media.description}</p>}
+            {media.tags.length > 0 && <div className="flex flex-wrap gap-2">{media.tags.map((tag) => <span className="rounded-full bg-muted px-2 py-1 text-xs" key={tag}>{tag}</span>)}</div>}
+            <p className="text-sm text-muted-foreground">Your operator permissions allow viewing, but not editing this media.</p>
+          </CardContent>
+        </Card>}
+      </div>
+      <aside className="min-w-0 space-y-4 lg:sticky lg:top-6" aria-label="Media context">
         <UsageSummary usage={usageQuery.data} pending={usageQuery.isPending} error={usageQuery.error ?? undefined} retry={() => void usageQuery.refetch()} />
         <TechnicalDetails items={[
-          { label: "Asset", value: media.assetId },
-          { label: "Digest", value: <span className="font-mono text-xs">{media.artifact.digest}</span> },
-          { label: "MIME type", value: media.artifact.mediaType },
-          { label: "Size", value: formatBytes(media.artifact.size) },
+          { label: "MIME type", value: artifact.mediaType },
+          { label: "Size", value: `${formatBytes(artifact.size)} (${artifact.size.toLocaleString()} bytes)` },
           ...(dimensions ? [{ label: "Pixels", value: `${dimensions.width.toLocaleString()} × ${dimensions.height.toLocaleString()} px` }] : []),
           { label: "Version", value: media.version.toLocaleString() },
+          { label: "Asset", value: <span className="font-mono text-xs break-all">{media.assetId}</span> },
+          { label: "Digest", value: <span className="font-mono text-xs break-all">{artifact.digest}</span> },
         ]} />
-      </div>
+      </aside>
     </div>
   </PageFrame>;
 }

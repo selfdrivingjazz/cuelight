@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -20,7 +21,6 @@ var (
 	ErrInvalid        = errors.New("invalid remote input request")
 	ErrUnauthorized   = errors.New("remote session authorization failed")
 	ErrExpired        = errors.New("remote session expired")
-	ErrReplay         = errors.New("remote event sequence is not newer")
 	ErrRateLimited    = errors.New("remote input rate limit exceeded")
 	ErrSessionMissing = errors.New("remote session not found")
 )
@@ -63,7 +63,9 @@ type EventPage struct {
 type session struct {
 	id, nodeID    string
 	generation    int64
-	tokenHash     [32]byte
+	tokenHashes   [][32]byte
+	guideToken    string
+	guideHash     [32]byte
 	showQR        bool
 	expiresAt     time.Time
 	lastSequence  int64
@@ -130,7 +132,10 @@ func (s *Service) Create(ctx context.Context, nodeID string, generation int64) (
 	id := base64.RawURLEncoding.EncodeToString(idBytes)
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 	now := s.Now().UTC()
-	value := &session{id: id, nodeID: nodeID, generation: generation, tokenHash: sha256.Sum256([]byte(token)), showQR: policy.ShowQR, expiresAt: now.Add(s.TTL), events: []Event{}, wake: make(chan struct{}), windowStarted: now}
+	// Sequences start at the creation time in microseconds so they stay
+	// monotonic across session renewals and control-plane restarts; consumers
+	// holding an older cursor keep receiving the new session's events.
+	value := &session{id: id, nodeID: nodeID, generation: generation, tokenHashes: [][32]byte{sha256.Sum256([]byte(token))}, showQR: policy.ShowQR, expiresAt: now.Add(s.TTL), events: []Event{}, wake: make(chan struct{}), windowStarted: now, lastSequence: now.UnixMicro()}
 	s.mutex.Lock()
 	for sessionID, existing := range s.sessions {
 		if existing.nodeID == nodeID {
@@ -140,8 +145,106 @@ func (s *Service) Create(ctx context.Context, nodeID string, generation int64) (
 	}
 	s.sessions[id] = value
 	s.mutex.Unlock()
+	return s.created(id, token, policy.ShowQR, value.expiresAt), nil
+}
+
+func (s *Service) created(id, token string, showQR bool, expiresAt time.Time) SessionCreated {
 	base := strings.TrimSuffix(s.PublicURL, "/")
-	return SessionCreated{ID: id, Token: token, RemoteURL: base + "/remote/" + url.PathEscape(id) + "#token=" + url.QueryEscape(token), ShowQR: policy.ShowQR, ExpiresAt: value.expiresAt}, nil
+	return SessionCreated{ID: id, Token: token, RemoteURL: base + "/remote/" + url.PathEscape(id) + "#token=" + url.QueryEscape(token), ShowQR: showQR, ExpiresAt: expiresAt}
+}
+
+// maxSessionTokens bounds the hashes a session accepts: the node-issued token
+// plus operator-minted links (oldest minted evicted first).
+const maxSessionTokens = 8
+
+// Link mints an additional phone token for the node's active session so an
+// operator can obtain a remote URL without seeing the on-screen QR code.
+func (s *Service) Link(ctx context.Context, nodeID string) (SessionCreated, error) {
+	if nodeID == "" {
+		return SessionCreated{}, ErrInvalid
+	}
+	if err := s.normalized(); err != nil {
+		return SessionCreated{}, err
+	}
+	s.mutex.Lock()
+	value := s.activeSession(nodeID)
+	if value == nil {
+		s.mutex.Unlock()
+		return SessionCreated{}, ErrSessionMissing
+	}
+	id, generation := value.id, value.generation
+	s.mutex.Unlock()
+	policy, err := s.Policies.RemotePolicy(ctx, nodeID, generation)
+	if err != nil {
+		return SessionCreated{}, err
+	}
+	if !policy.Enabled {
+		return SessionCreated{}, ErrDisabled
+	}
+	tokenBytes := make([]byte, 32)
+	if _, err := io.ReadFull(s.Random, tokenBytes); err != nil {
+		return SessionCreated{}, err
+	}
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	value = s.sessions[id]
+	if value == nil || !s.Now().UTC().Before(value.expiresAt) {
+		return SessionCreated{}, ErrSessionMissing
+	}
+	if len(value.tokenHashes) >= maxSessionTokens {
+		value.tokenHashes = append(value.tokenHashes[:1], value.tokenHashes[2:]...)
+	}
+	value.tokenHashes = append(value.tokenHashes, sha256.Sum256([]byte(token)))
+	return s.created(id, token, value.showQR, value.expiresAt), nil
+}
+
+func (s *Service) activeSession(nodeID string) *session {
+	now := s.Now().UTC()
+	for _, value := range s.sessions {
+		if value.nodeID == nodeID && now.Before(value.expiresAt) {
+			return value
+		}
+	}
+	return nil
+}
+
+// Guide returns the node's active session with a phone URL for an in-page
+// guide (hosted Cable) to display. The guide token is minted once per session
+// and kept apart from operator links so link eviction never invalidates it.
+func (s *Service) Guide(nodeID string) (SessionCreated, error) {
+	if nodeID == "" {
+		return SessionCreated{}, ErrInvalid
+	}
+	if err := s.normalized(); err != nil {
+		return SessionCreated{}, err
+	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	value := s.activeSession(nodeID)
+	if value == nil {
+		return SessionCreated{}, ErrSessionMissing
+	}
+	if value.guideToken == "" {
+		tokenBytes := make([]byte, 32)
+		if _, err := io.ReadFull(s.Random, tokenBytes); err != nil {
+			return SessionCreated{}, err
+		}
+		value.guideToken = base64.RawURLEncoding.EncodeToString(tokenBytes)
+		value.guideHash = sha256.Sum256([]byte(value.guideToken))
+	}
+	return s.created(value.id, value.guideToken, value.showQR, value.expiresAt), nil
+}
+
+func (value *session) authorized(hash [32]byte) bool {
+	matched := 0
+	for _, stored := range value.tokenHashes {
+		matched |= subtle.ConstantTimeCompare(hash[:], stored[:])
+	}
+	if value.guideToken != "" {
+		matched |= subtle.ConstantTimeCompare(hash[:], value.guideHash[:])
+	}
+	return matched == 1
 }
 
 func (s *Service) Post(ctx context.Context, id, token string, event Event) error {
@@ -159,27 +262,27 @@ func (s *Service) Post(ctx context.Context, id, token string, event Event) error
 	if !now.Before(value.expiresAt) {
 		return ErrExpired
 	}
-	if hash != value.tokenHash {
+	if !value.authorized(hash) {
 		return ErrUnauthorized
 	}
 	policy, err := s.Policies.RemotePolicy(ctx, value.nodeID, value.generation)
 	if err != nil || !policy.Enabled {
 		return ErrDisabled
 	}
-	if event.Sequence <= value.lastSequence {
-		return ErrReplay
-	}
 	if now.Sub(value.windowStarted) >= time.Minute {
 		value.windowStarted, value.windowCount = now, 0
 	}
-	if value.windowCount >= 120 {
+	if value.windowCount >= maxEventsPerMinute {
 		return ErrRateLimited
 	}
 	value.windowCount++
-	value.lastSequence = event.Sequence
+	// Phones, operator links and scripts share one session with independent
+	// clocks, so the server orders accepted events; the client value is ignored.
+	value.lastSequence++
+	event.Sequence = value.lastSequence
 	value.events = append(value.events, event)
-	if len(value.events) > 256 {
-		value.events = append([]Event(nil), value.events[len(value.events)-256:]...)
+	if len(value.events) > maxBufferedEvents {
+		value.events = append([]Event(nil), value.events[len(value.events)-maxBufferedEvents:]...)
 	}
 	close(value.wake)
 	value.wake = make(chan struct{})
@@ -229,6 +332,11 @@ func (s *Service) Poll(ctx context.Context, nodeID, id string, after int64, wait
 	}
 }
 
+const (
+	maxEventsPerMinute = 1200
+	maxBufferedEvents  = 1024
+)
+
 func validateEvent(event Event) error {
 	if event.Sequence <= 0 {
 		return ErrInvalid
@@ -236,7 +344,8 @@ func validateEvent(event Event) error {
 	switch event.Type {
 	case "key":
 		switch event.Key {
-		case "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Backspace", "Tab", "VolumeUp", "VolumeDown", "Mute", "ChannelUp", "ChannelDown", "Guide", "Info":
+		case "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Backspace", "Tab", "VolumeUp", "VolumeDown", "Mute", "ChannelUp", "ChannelDown", "Guide", "Info",
+			"Delete", "Home", "End", "PageUp", "PageDown", "Space", "BrowserBack", "BrowserForward", "BrowserReload":
 		default:
 			const channelPrefix = "ChannelNumber:"
 			number, err := strconv.Atoi(strings.TrimPrefix(event.Key, channelPrefix))

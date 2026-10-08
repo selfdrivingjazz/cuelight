@@ -88,66 +88,82 @@ func TestStreamAndCacheThenPlayMaterialization(t *testing.T) {
 	})
 }
 
-func TestCableReleaseMaterializesExactClosureForChromium(t *testing.T) {
+func TestMediaScheduleWebItemsMaterializeWithoutArtifacts(t *testing.T) {
 	h := newHarness(t, []byte("bootstrap"), DeliveryCacheThenPlay)
-	h.runtime.config.Features = append(h.runtime.config.Features, "chromium")
-	shell := []byte("shell tar")
-	revision := []byte(`{"schema":"cable.revision.v1"}`)
 	media := []byte("program media")
-	digest := func(content []byte) string {
-		sum := sha256.Sum256(content)
-		return hex.EncodeToString(sum[:])
-	}
-	shellDigest, revisionDigest, mediaDigest := digest(shell), digest(revision), digest(media)
-	closure := []string{shellDigest, revisionDigest, mediaDigest}
-	slices.Sort(closure)
-	artifacts := []release.Artifact{
-		{Digest: shellDigest, Size: int64(len(shell)), MediaType: "application/vnd.cable.shell+tar"},
-		{Digest: revisionDigest, Size: int64(len(revision)), MediaType: "application/vnd.cable.revision+json"},
-		{Digest: mediaDigest, Size: int64(len(media)), MediaType: "video/mp4"},
-	}
-	slices.SortFunc(artifacts, func(a, b release.Artifact) int { return strings.Compare(a.Digest, b.Digest) })
-	envelope, err := release.Sign("cable-release", "publisher-1", release.PayloadV1{
+	sum := sha256.Sum256(media)
+	mediaDigest := hex.EncodeToString(sum[:])
+	envelope, err := release.Sign("schedule-release", "publisher-1", release.PayloadV1{
 		SchemaVersion: release.SchemaVersion, MinimumProtocolVersion: release.ProtocolV1,
-		Presentation: release.Presentation{Kind: release.PresentationCable, Cable: &release.CablePresentation{
-			ShellBuildDigest: shellDigest, RevisionArtifactDigest: revisionDigest, Entrypoint: "index.html",
-			BridgeProtocol: "1", ArtifactClosure: closure,
+		Presentation: release.Presentation{Kind: release.PresentationMediaSchedule, MediaSchedule: &release.MediaSchedulePresentation{
+			Timezone: "UTC",
+			Window:   release.MediaScheduleWindow{StartsAt: "2026-10-04T00:00:00Z", EndsAt: "2026-10-04T00:02:00Z"},
+			Items: []release.MediaScheduleItem{
+				{ID: "file", StartsAt: "2026-10-04T00:00:00Z", EndsAt: "2026-10-04T00:01:00Z", ArtifactDigest: mediaDigest, MediaType: "video/mp4", Fit: "fit"},
+				{ID: "page", StartsAt: "2026-10-04T00:01:00Z", EndsAt: "2026-10-04T00:02:00Z", Web: &release.MediaScheduleWebItem{URL: "https://example.com/page"}},
+			},
+			ArtifactClosure: []string{mediaDigest}, AllowedDeliveryModes: []string{DeliveryCacheThenPlay},
 		}},
-		Artifacts: artifacts, RequiredFeatures: []string{"chromium"},
+		Artifacts:        []release.Artifact{{Digest: mediaDigest, Size: int64(len(media)), MediaType: "video/mp4"}},
+		RequiredFeatures: []string{release.FeatureWeb},
 	}, h.private)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.controller.envelope = envelope
-	h.controller.artifacts = map[string][]byte{shellDigest: shell, revisionDigest: revision, mediaDigest: media}
-	assignment := h.assignment(1, DeliveryCacheThenPlay)
-	assignment.PresentationKind = release.PresentationCable
+	h.controller.artifacts = map[string][]byte{mediaDigest: media}
+	// A node without the web feature (appliance mpv) must refuse the release.
+	if err := h.runtime.Reconcile(context.Background(), h.assignment(1, DeliveryCacheThenPlay)); !errors.Is(err, ErrIncompatibleRelease) {
+		t.Fatalf("non-web node error = %v", err)
+	}
+	h.runtime.config.Features = append(h.runtime.config.Features, release.FeatureWeb)
+	if err := h.runtime.Reconcile(context.Background(), h.assignment(2, DeliveryCacheThenPlay)); err != nil {
+		t.Fatal(err)
+	}
+	if h.cas.puts != 1 {
+		t.Fatalf("cached artifacts = %d, want 1", h.cas.puts)
+	}
+	schedule := h.renderer.commits[len(h.renderer.commits)-1].Schedule
+	if len(schedule) != 2 || schedule[0].Source != "/cas/"+mediaDigest || schedule[0].WebURL != "" || schedule[1].WebURL != "https://example.com/page" || schedule[1].Source != "" {
+		t.Fatalf("schedule = %#v", schedule)
+	}
+}
+
+func TestWebReleaseCreatesRemoteSessionWithoutArtifacts(t *testing.T) {
+	h := newHarness(t, []byte("bootstrap"), DeliveryStream)
+	h.runtime.config.Features = append(h.runtime.config.Features, "chromium")
+	envelope, err := release.Sign("web-release", "publisher-1", release.PayloadV1{
+		SchemaVersion: release.SchemaVersion, MinimumProtocolVersion: release.ProtocolV1,
+		Presentation:     release.Presentation{Kind: release.PresentationWeb, Web: &release.WebPresentation{URL: "https://example.com/app"}},
+		RequiredFeatures: []string{"chromium"},
+	}, h.private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.controller.envelope = envelope
+	assignment := h.assignment(1, DeliveryStream)
+	assignment.PresentationKind = release.PresentationWeb
 	assignment.RemoteInput = true
-	assignment.ShowQR = true
 	if err := h.runtime.Reconcile(context.Background(), assignment); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.runtime.flush(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if h.cas.puts != 3 {
-		t.Fatalf("cached artifacts = %d, want 3", h.cas.puts)
-	}
 	candidate := h.renderer.commits[0]
-	if candidate.Kind != release.PresentationCable || candidate.ShellBuildDigest != shellDigest || candidate.RevisionArtifactDigest != revisionDigest || len(candidate.ArtifactPaths) != 3 || candidate.Remote == nil || !candidate.Remote.ShowQR {
-		t.Fatalf("Chromium candidate = %#v", candidate)
+	if candidate.Kind != release.PresentationWeb || candidate.WebURL != "https://example.com/app" || candidate.Remote == nil {
+		t.Fatalf("web candidate = %#v", candidate)
 	}
-	if h.controller.remoteCreates != 1 {
-		t.Fatalf("remote sessions = %d", h.controller.remoteCreates)
+	if h.controller.remoteCreates != 1 || h.controller.downloads != 0 || h.cas.puts != 0 {
+		t.Fatalf("remote=%d downloads=%d puts=%d", h.controller.remoteCreates, h.controller.downloads, h.cas.puts)
 	}
-	if report := h.controller.reports[len(h.controller.reports)-1]; report.PresentationKind != release.PresentationCable || report.ObservedGeneration != 1 {
-		t.Fatalf("Cable report = %#v", report)
+	cached := h.assignment(2, DeliveryCacheThenPlay)
+	cached.PresentationKind = release.PresentationWeb
+	if err := h.runtime.Reconcile(context.Background(), cached); !errors.Is(err, ErrIncompatibleRelease) {
+		t.Fatalf("cache_then_play web = %v", err)
 	}
 }
 
 func TestPresentationModeRejectsOtherReleaseKind(t *testing.T) {
 	h := newHarness(t, []byte("media"), DeliveryStream)
-	h.runtime.config.PresentationMode = release.PresentationCable
+	h.runtime.config.PresentationMode = release.PresentationWeb
 	err := h.runtime.Reconcile(context.Background(), h.assignment(1, DeliveryStream))
 	if !errors.Is(err, ErrIncompatibleRelease) || !errors.Is(err, ErrSafeMode) {
 		t.Fatalf("error = %v", err)

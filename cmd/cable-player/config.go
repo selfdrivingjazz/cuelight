@@ -125,8 +125,8 @@ func (c playerConfig) validate() error {
 	if len(c.AcceptedMediaTypes) == 0 {
 		return &configError{"CABLE_PLAYER_ACCEPTED_MEDIA_TYPES", "must contain at least one media type"}
 	}
-	if c.PresentationMode != "automatic" && c.PresentationMode != release.PresentationMedia && c.PresentationMode != release.PresentationMediaSchedule && c.PresentationMode != release.PresentationCable {
-		return &configError{"CABLE_PLAYER_PRESENTATION_MODE", "must be automatic, media, media-schedule, or cable"}
+	if c.PresentationMode != "automatic" && c.PresentationMode != release.PresentationMedia && c.PresentationMode != release.PresentationMediaSchedule && c.PresentationMode != release.PresentationWeb {
+		return &configError{"CABLE_PLAYER_PRESENTATION_MODE", "must be automatic, media, media-schedule, or web"}
 	}
 	if c.Probation <= 0 || c.PollWait < 0 || c.ReconnectMinimum <= 0 || c.ReconnectMaximum < c.ReconnectMinimum || c.PartialGrace < 0 || c.StreamTTL <= c.Probation || c.MPVTimeout <= 0 || c.ChromiumTimeout <= 0 {
 		return &configError{"timing", "durations must be positive, reconnect max must be at least min, and stream TTL must exceed probation"}

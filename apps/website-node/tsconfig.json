@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "types": ["vite/client", "react", "react-dom"], "lib": ["ES2024", "DOM", "DOM.Iterable"] },
+  "compilerOptions": { "types": ["vite/client", "react", "react-dom"], "lib": ["ES2019", "DOM", "DOM.Iterable"] },
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
 }

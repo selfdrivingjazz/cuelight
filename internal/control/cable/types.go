@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 )
@@ -19,8 +18,7 @@ var (
 	ErrArtifactUnavailable = errors.New("cable artifact unavailable")
 	ErrArtifactMissing     = ErrArtifactUnavailable
 	ErrArtifactQuarantined = ErrArtifactUnavailable
-	ErrBuildUnavailable    = errors.New("cable shell build unavailable")
-	ErrImmutable           = errors.New("cable revision is immutable")
+	ErrImmutable           = errors.New("cable resource is immutable")
 	ErrForbidden           = errors.New("cable action is forbidden")
 )
 
@@ -61,24 +59,12 @@ type ProgramPage struct {
 	Items []ProgramEntry
 	Page  Page
 }
-type RevisionPage struct {
-	Items []CableRevision
-	Page  Page
-}
-type ShellBuildPage struct {
-	Items []ShellBuild
-	Page  Page
-}
 type PlaylistPage struct {
 	Items []Playlist
 	Page  Page
 }
 type BlockPage struct {
 	Items []Block
-	Page  Page
-}
-type ProfilePage struct {
-	Items []Profile
 	Page  Page
 }
 
@@ -151,7 +137,8 @@ type Playlist struct {
 type PlaylistItem struct {
 	ID              string `json:"id"`
 	PlaylistID      string `json:"playlistId"`
-	AssetID         string `json:"assetId"`
+	AssetID         string `json:"assetId,omitempty"`
+	MediaID         string `json:"mediaId,omitempty"`
 	Position        int    `json:"position"`
 	DurationSeconds int    `json:"durationSeconds"`
 	Title           string `json:"title"`
@@ -169,112 +156,13 @@ type Block struct {
 	CreatedBy  string    `json:"createdBy"`
 	CreatedAt  time.Time `json:"createdAt"`
 }
-type Profile struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description"`
-	DeploymentID string    `json:"deploymentId"`
-	ShellBuildID string    `json:"shellBuildId"`
-	ReleaseID    string    `json:"releaseId,omitempty"`
-	Version      int64     `json:"version"`
-	CreatedBy    string    `json:"createdBy"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
-}
 
 type Artifact struct {
 	AssetID, Digest, MediaType string
 	Size                       int64
 	State                      string
 }
-type ShellBuild struct {
-	ID, Digest, Entrypoint string
-	ArtifactDigests        []string
-	VersionMetadata        map[string]string
-	BridgeProtocol         string
-	CreatedBy              string
-	CreatedAt              time.Time
-}
 
-type RevisionWindow struct {
-	StartsAt time.Time `json:"startsAt"`
-	EndsAt   time.Time `json:"endsAt"`
-}
-type RevisionChannel struct {
-	ID            string            `json:"id"`
-	Number        int               `json:"number"`
-	Name          string            `json:"name"`
-	Callsign      string            `json:"callsign,omitempty"`
-	Description   string            `json:"description,omitempty"`
-	Accent        string            `json:"accent,omitempty"`
-	ArtworkDigest string            `json:"artworkDigest,omitempty"`
-	Enabled       bool              `json:"enabled"`
-	Standby       bool              `json:"standby"`
-	Blocks        []RevisionBlock   `json:"blocks"`
-	Programs      []RevisionProgram `json:"programs"`
-}
-type RevisionBlock struct {
-	ID         string            `json:"id"`
-	StartsAt   time.Time         `json:"startsAt"`
-	EndsAt     time.Time         `json:"endsAt"`
-	PlaylistID string            `json:"playlistId,omitempty"`
-	AssetID    string            `json:"assetId,omitempty"`
-	Title      string            `json:"title,omitempty"`
-	Loop       bool              `json:"loop"`
-	Items      []RevisionProgram `json:"items"`
-}
-type RevisionProgram struct {
-	ID                 string    `json:"id"`
-	BlockID            string    `json:"blockId,omitempty"`
-	ItemID             string    `json:"itemId,omitempty"`
-	ItemPosition       int       `json:"itemPosition,omitempty"`
-	Occurrence         int       `json:"occurrence,omitempty"`
-	StartsAt           time.Time `json:"startsAt"`
-	EndsAt             time.Time `json:"endsAt"`
-	AssetID            string    `json:"assetId"`
-	ArtifactDigest     string    `json:"artifactDigest"`
-	MediaType          string    `json:"mediaType"`
-	Title              string    `json:"title,omitempty"`
-	Subtitle           string    `json:"subtitle,omitempty"`
-	Tag                string    `json:"tag,omitempty"`
-	Artist             string    `json:"artist,omitempty"`
-	Description        string    `json:"description,omitempty"`
-	ArtworkDigest      string    `json:"artworkDigest,omitempty"`
-	Fit                string    `json:"fit,omitempty"`
-	PlacardPolicy      string    `json:"placardPolicy,omitempty"`
-	AvailabilityPolicy string    `json:"availabilityPolicy,omitempty"`
-	Loop               bool      `json:"loop"`
-	Mute               bool      `json:"mute"`
-	Volume             float64   `json:"volume"`
-}
-type CableRevision struct {
-	ID                string            `json:"id"`
-	DeploymentID      string            `json:"deploymentId"`
-	ShellBuildID      string            `json:"shellBuildId"`
-	DeploymentVersion int64             `json:"deploymentVersion"`
-	Digest            string            `json:"digest"`
-	ShellBuildDigest  string            `json:"shellBuildDigest"`
-	Entrypoint        string            `json:"entrypoint"`
-	BridgeProtocol    string            `json:"bridgeProtocol"`
-	Timezone          string            `json:"timezone"`
-	Theme             string            `json:"theme"`
-	GuideDensity      string            `json:"guideDensity"`
-	Window            RevisionWindow    `json:"window"`
-	Channels          []RevisionChannel `json:"channels"`
-	ArtifactDigests   []string          `json:"artifactDigests"`
-	JSON              []byte            `json:"json"`
-	Errors            []string          `json:"errors,omitempty"`
-	Warnings          []string          `json:"warnings,omitempty"`
-	CreatedBy         string            `json:"createdBy"`
-	CreatedAt         time.Time         `json:"createdAt"`
-	GeneratedAt       time.Time         `json:"generatedAt"`
-}
-
-// RevisionArtifactStore makes the immutable revision document available from
-// the content-addressed store before its database metadata is published.
-type RevisionArtifactStore interface {
-	PutRevisionArtifact(context.Context, string, []byte) error
-}
 type DeploymentInput struct {
 	Name, Timezone, Theme             string
 	GuideHorizonSeconds               int64
@@ -295,27 +183,19 @@ type ProgramInput struct {
 	Loop, Mute                                                bool
 	Volume                                                    float64
 }
-type ShellBuildInput struct {
-	Digest, Entrypoint string
-	ArtifactDigests    []string
-	VersionMetadata    map[string]string
-	BridgeProtocol     string
-}
 type PlaylistInput struct {
 	Name, Description string
 	Items             []PlaylistItemInput
 }
+// PlaylistItemInput holds a file asset or, via MediaID, a web media item.
 type PlaylistItemInput struct {
-	AssetID, Title, Subtitle string
+	AssetID, MediaID, Title, Subtitle string
 	Position                 int
 	DurationSeconds          int
 }
 type BlockInput struct {
 	ChannelID, PlaylistID, AssetID, Title string
 	StartsAt, EndsAt                      time.Time
-}
-type ProfileInput struct {
-	Name, Description, DeploymentID, ShellBuildID, ReleaseID string
 }
 
 type Authorizer interface {
@@ -343,12 +223,6 @@ type Repository interface {
 	UpdateProgramEntry(context.Context, Mutation, string, ProgramInput) (ProgramEntry, error)
 	ListProgramEntries(context.Context, string, string, int) (ProgramPage, error)
 	DeleteProgramEntry(context.Context, Mutation, string) error
-	RegisterShellBuild(context.Context, Mutation, ShellBuildInput) (ShellBuild, error)
-	ShellBuild(context.Context, string) (ShellBuild, error)
-	ListShellBuilds(context.Context, string, int) (ShellBuildPage, error)
-	CreateRevision(context.Context, CableRevision) error
-	Revision(context.Context, string) (CableRevision, error)
-	ListRevisions(context.Context, string, string, int) (RevisionPage, error)
 }
 type ProgrammingRepository interface {
 	CreatePlaylist(context.Context, Mutation, PlaylistInput) (Playlist, error)
@@ -356,9 +230,6 @@ type ProgrammingRepository interface {
 	ListPlaylists(context.Context, string, int) (PlaylistPage, error)
 	CreateBlock(context.Context, Mutation, BlockInput) (Block, error)
 	ListBlocks(context.Context, string, string, int) (BlockPage, error)
-	CreateProfile(context.Context, Mutation, ProfileInput) (Profile, error)
-	Profile(context.Context, string) (Profile, error)
-	ListProfiles(context.Context, string, int) (ProfilePage, error)
 }
 
 // ProgrammingDetailRepository provides canonical block detail reads without
@@ -372,7 +243,6 @@ type ProgrammingDetailRepository interface {
 type ProgrammingMutationRepository interface {
 	UpdatePlaylist(context.Context, Mutation, string, PlaylistInput) (Playlist, error)
 	UpdateBlock(context.Context, Mutation, string, BlockInput) (Block, error)
-	UpdateProfile(context.Context, Mutation, string, ProfileInput) (Profile, error)
 }
 
 func (s Service) Deployment(ctx context.Context, id string) (CableDeployment, error) {
@@ -416,22 +286,8 @@ func (s Service) Block(ctx context.Context, id string) (Block, error) {
 	return detail.Block(ctx, id)
 }
 
-func (s Service) Profile(ctx context.Context, id string) (Profile, error) {
-	repository, err := s.programming()
-	if err != nil {
-		return Profile{}, err
-	}
-	return repository.Profile(ctx, id)
-}
-
 type ArtifactRepository interface {
 	CableArtifactsForAsset(context.Context, string) ([]Artifact, error)
-}
-type ArtifactByDigestRepository interface {
-	CableArtifactByDigest(context.Context, string) (Artifact, error)
-}
-type ShellBuildRepository interface {
-	ShellBuild(context.Context, string) (ShellBuild, error)
 }
 
 const (
@@ -474,18 +330,6 @@ func NormalizeTimezone(timezone string) (string, error) {
 	return loc.String(), nil
 }
 
-func NormalizeEntrypoint(entrypoint string) (string, error) {
-	entrypoint = strings.TrimSpace(strings.ReplaceAll(entrypoint, `\`, "/"))
-	if entrypoint == "" || strings.IndexByte(entrypoint, 0) >= 0 || strings.HasPrefix(entrypoint, "/") {
-		return "", &ValidationError{"entrypoint", "must be a safe relative path"}
-	}
-	clean := path.Clean(entrypoint)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", &ValidationError{"entrypoint", "must be a safe relative path"}
-	}
-	return clean, nil
-}
-
 func NormalizePlacardPolicy(policy string) (string, error) {
 	policy = strings.ToLower(strings.TrimSpace(policy))
 	switch policy {
@@ -506,44 +350,6 @@ func NormalizeAvailabilityPolicy(policy string) (string, error) {
 	}
 }
 
-func NormalizeMediaType(mediaType string) (string, error) {
-	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
-	if mediaType == "" || strings.ContainsAny(mediaType, " \t\r\n") {
-		return "", &ValidationError{"mediaType", "is invalid"}
-	}
-	if !supportedMedia(mediaType) {
-		return "", &ValidationError{"mediaType", "must be video, image, or audio"}
-	}
-	return mediaType, nil
-}
-
-func validDigest(digest string) bool {
-	if len(digest) != 64 {
-		return false
-	}
-	for _, r := range digest {
-		if !(r >= '0' && r <= '9') && !(r >= 'a' && r <= 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func NormalizeWindow(w RevisionWindow) (RevisionWindow, error) {
-	if err := ValidateWindow(w); err != nil {
-		return RevisionWindow{}, err
-	}
-	w.StartsAt = w.StartsAt.UTC()
-	w.EndsAt = w.EndsAt.UTC()
-	return w, nil
-}
-
-func ValidateWindow(w RevisionWindow) error {
-	if w.StartsAt.IsZero() || w.EndsAt.IsZero() || !w.EndsAt.After(w.StartsAt) {
-		return &ValidationError{"window", "endsAt must be after startsAt"}
-	}
-	return nil
-}
 func ValidateProgram(p ProgramInput) error {
 	if p.ChannelID == "" {
 		return &ValidationError{"channelId", "is required"}
@@ -654,13 +460,6 @@ func (s Service) DeleteProgramEntry(ctx context.Context, m Mutation, id string) 
 	}
 	return s.Repository.DeleteProgramEntry(ctx, m, id)
 }
-func (s Service) RegisterShellBuild(ctx context.Context, m Mutation, in ShellBuildInput) (ShellBuild, error) {
-	if e := s.allow(ctx, m, "cable.shell_build.create", "shell_build", ""); e != nil {
-		return ShellBuild{}, e
-	}
-	return s.Repository.RegisterShellBuild(ctx, m, in)
-}
-
 func (s Service) programming() (ProgrammingRepository, error) {
 	if s.Programming == nil {
 		return nil, errors.New("Cable programming repository is required")
@@ -686,16 +485,6 @@ func (s Service) CreateBlock(ctx context.Context, m Mutation, in BlockInput) (Bl
 		return Block{}, err
 	}
 	return repository.CreateBlock(ctx, m, in)
-}
-func (s Service) CreateProfile(ctx context.Context, m Mutation, in ProfileInput) (Profile, error) {
-	if e := s.allow(ctx, m, "cable.profile.create", "profile", ""); e != nil {
-		return Profile{}, e
-	}
-	repository, err := s.programming()
-	if err != nil {
-		return Profile{}, err
-	}
-	return repository.CreateProfile(ctx, m, in)
 }
 func (s Service) UpdatePlaylist(ctx context.Context, m Mutation, id string, in PlaylistInput) (Playlist, error) {
 	if e := s.allow(ctx, m, "cable.playlist.update", "playlist", id); e != nil {
@@ -725,19 +514,4 @@ func (s Service) UpdateBlock(ctx context.Context, m Mutation, id string, in Bloc
 		return Block{}, errors.New("Cable block mutation repository is required")
 	}
 	return mutator.UpdateBlock(ctx, m, id, in)
-}
-
-func (s Service) UpdateProfile(ctx context.Context, m Mutation, id string, in ProfileInput) (Profile, error) {
-	if e := s.allow(ctx, m, "cable.profile.update", "profile", id); e != nil {
-		return Profile{}, e
-	}
-	repository, err := s.programming()
-	if err != nil {
-		return Profile{}, err
-	}
-	mutator, ok := repository.(ProgrammingMutationRepository)
-	if !ok {
-		return Profile{}, errors.New("Cable profile mutation repository is required")
-	}
-	return mutator.UpdateProfile(ctx, m, id, in)
 }

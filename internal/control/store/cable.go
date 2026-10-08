@@ -3,18 +3,16 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jmill/cable/internal/control/cable"
-	"strings"
 	"time"
+
+	"github.com/jmill/cable/internal/control/cable"
 )
 
 var _ cable.Repository = (*Store)(nil)
 var _ cable.ArtifactRepository = (*Store)(nil)
-var _ cable.ArtifactByDigestRepository = (*Store)(nil)
 
 func ct(m cable.Mutation) time.Time {
 	if m.Now.IsZero() {
@@ -60,14 +58,6 @@ func normalizeProgramInput(in cable.ProgramInput) (cable.ProgramInput, error) {
 	return in, nil
 }
 
-func validCableDigest(digest string) bool {
-	if len(digest) != 64 {
-		return false
-	}
-	_, err := hex.DecodeString(digest)
-	return err == nil && digest == strings.ToLower(digest)
-}
-
 func cl(n int) int {
 	if n <= 0 {
 		return 25
@@ -107,9 +97,14 @@ func (s *Store) CreateDeployment(ctx context.Context, m cable.Mutation, in cable
 	}
 	p, _ := cj(in.PlacardDefaults)
 	f, _ := cj(in.FallbackMetadata)
-	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_deployments(id,name,timezone,theme,guide_horizon_seconds,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$9,$10,$10)`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizonSeconds, in.GuideDensity, p, f, m.ActorID, ct(m))
+	e = s.inTransaction(ctx, func(txCtx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txCtx, `INSERT INTO cable_deployments(id,name,timezone,theme,guide_horizon_seconds,guide_density,placard_defaults,fallback_metadata,version,created_by,updated_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$9,$10,$10)`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizonSeconds, in.GuideDensity, p, f, m.ActorID, ct(m)); err != nil {
+			return ce("create cable deployment", err)
+		}
+		return s.syncDeploymentMedia(txCtx, tx, id, in.Name, m.ActorID, ct(m))
+	})
 	if e != nil {
-		return cable.CableDeployment{}, ce("create cable deployment", e)
+		return cable.CableDeployment{}, e
 	}
 	return s.Deployment(ctx, id)
 }
@@ -137,15 +132,37 @@ func (s *Store) UpdateDeployment(ctx context.Context, m cable.Mutation, id strin
 	}
 	p, _ := cj(in.PlacardDefaults)
 	f, _ := cj(in.FallbackMetadata)
-	r, e := s.q(ctx).ExecContext(ctx, `UPDATE cable_deployments SET name=$2,timezone=$3,theme=$4,guide_horizon_seconds=$5,guide_density=$6,placard_defaults=$7,fallback_metadata=$8,version=version+1,updated_by=$9,updated_at=$10 WHERE id=$1 AND version=$11`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizonSeconds, in.GuideDensity, p, f, m.ActorID, ct(m), m.ExpectedVersion)
+	var updated int64
+	e := s.inTransaction(ctx, func(txCtx context.Context, tx *sql.Tx) error {
+		r, err := tx.ExecContext(txCtx, `UPDATE cable_deployments SET name=$2,timezone=$3,theme=$4,guide_horizon_seconds=$5,guide_density=$6,placard_defaults=$7,fallback_metadata=$8,version=version+1,updated_by=$9,updated_at=$10 WHERE id=$1 AND version=$11`, id, in.Name, in.Timezone, in.Theme, in.GuideHorizonSeconds, in.GuideDensity, p, f, m.ActorID, ct(m), m.ExpectedVersion)
+		if err != nil {
+			return ce("update cable deployment", err)
+		}
+		if updated, _ = r.RowsAffected(); updated != 1 {
+			return cable.ErrConflict
+		}
+		return s.syncDeploymentMedia(txCtx, tx, id, in.Name, m.ActorID, ct(m))
+	})
 	if e != nil {
-		return cable.CableDeployment{}, ce("update cable deployment", e)
-	}
-	n, _ := r.RowsAffected()
-	if n != 1 {
-		return cable.CableDeployment{}, cable.ErrConflict
+		return cable.CableDeployment{}, e
 	}
 	return s.Deployment(ctx, id)
+}
+
+// CableMediaTitle is the title of the media item that represents a deployment.
+func CableMediaTitle(deploymentName string) string { return "Cable · " + deploymentName }
+
+// syncDeploymentMedia upserts the deployment's Cable media item (kind web,
+// URL resolved from deployment_id at publish time) so its title tracks the
+// deployment name. Deleting the deployment cascades to the media row.
+func (s *Store) syncDeploymentMedia(ctx context.Context, tx *sql.Tx, deploymentID, name, actorID string, at time.Time) error {
+	id, err := s.newUUID()
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO media(id,kind,title,deployment_id,created_by,updated_by,created_at,updated_at) VALUES($1,'web',$2,$3,$4,$4,$5,$5)
+ON CONFLICT (deployment_id) DO UPDATE SET title=EXCLUDED.title,version=media.version+1,updated_by=EXCLUDED.updated_by,updated_at=EXCLUDED.updated_at WHERE media.title<>EXCLUDED.title`, id, CableMediaTitle(name), deploymentID, actorID, at)
+	return ce("sync cable deployment media", err)
 }
 func (s *Store) ListDeployments(ctx context.Context, cursor string, limit int) (cable.DeploymentPage, error) {
 	limit = cl(limit)
@@ -382,221 +399,6 @@ func (s *Store) DeleteProgramEntry(ctx context.Context, m cable.Mutation, id str
 	return nil
 }
 
-func (s *Store) RegisterShellBuild(ctx context.Context, m cable.Mutation, in cable.ShellBuildInput) (cable.ShellBuild, error) {
-	if m.ActorID == "" || !validCableDigest(strings.TrimSpace(in.Digest)) {
-		return cable.ShellBuild{}, cable.ErrInvalidArgument
-	}
-	var err error
-	in.Digest = strings.TrimSpace(in.Digest)
-	if in.Entrypoint, err = cable.NormalizeEntrypoint(in.Entrypoint); err != nil {
-		return cable.ShellBuild{}, fmt.Errorf("%w: %v", cable.ErrInvalidArgument, err)
-	}
-	in.BridgeProtocol = strings.TrimSpace(in.BridgeProtocol)
-	if in.BridgeProtocol == "" {
-		return cable.ShellBuild{}, cable.ErrInvalidArgument
-	}
-	seen := map[string]bool{}
-	for i, digest := range in.ArtifactDigests {
-		digest = strings.TrimSpace(digest)
-		if !validCableDigest(digest) {
-			return cable.ShellBuild{}, cable.ErrInvalidArgument
-		}
-		if seen[digest] {
-			return cable.ShellBuild{}, cable.ErrInvalidArgument
-		}
-		seen[digest] = true
-		in.ArtifactDigests[i] = digest
-	}
-	if !seen[in.Digest] {
-		return cable.ShellBuild{}, cable.ErrInvalidArgument
-	}
-	meta, _ := cj(in.VersionMetadata)
-	id, e := s.newUUID()
-	if e != nil {
-		return cable.ShellBuild{}, e
-	}
-	_, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_shell_builds(id,digest,entrypoint,version_metadata,bridge_protocol,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, id, in.Digest, in.Entrypoint, meta, in.BridgeProtocol, m.ActorID, ct(m))
-	if e != nil {
-		if pgConflict(e) {
-			return cable.ShellBuild{}, cable.ErrConflict
-		}
-		return cable.ShellBuild{}, ce("register shell build", e)
-	}
-	for _, d := range in.ArtifactDigests {
-		if _, e = s.q(ctx).ExecContext(ctx, `INSERT INTO cable_shell_build_artifacts(shell_build_id,artifact_digest) VALUES($1,$2)`, id, d); e != nil {
-			return cable.ShellBuild{}, ce("bind shell build artifact", e)
-		}
-	}
-	return s.ShellBuild(ctx, id)
-}
-func (s *Store) ShellBuild(ctx context.Context, id string) (cable.ShellBuild, error) {
-	var b cable.ShellBuild
-	var meta []byte
-	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,digest,entrypoint,version_metadata,bridge_protocol,created_by,created_at FROM cable_shell_builds WHERE id=$1`, id).Scan(&b.ID, &b.Digest, &b.Entrypoint, &meta, &b.BridgeProtocol, &b.CreatedBy, &b.CreatedAt)
-	if e != nil {
-		return b, ce("get shell build", e)
-	}
-	dj(meta, &b.VersionMetadata)
-	rows, e := s.q(ctx).QueryContext(ctx, `SELECT artifact_digest FROM cable_shell_build_artifacts WHERE shell_build_id=$1 ORDER BY artifact_digest`, id)
-	if e != nil {
-		return b, ce("list shell build artifacts", e)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var d string
-		if e = rows.Scan(&d); e != nil {
-			return b, e
-		}
-		b.ArtifactDigests = append(b.ArtifactDigests, d)
-	}
-	return b, rows.Err()
-}
-func (s *Store) ListShellBuilds(ctx context.Context, cursor string, limit int) (cable.ShellBuildPage, error) {
-	limit = cl(limit)
-	q := `SELECT id FROM cable_shell_builds`
-	args := []any{}
-	if cursor != "" {
-		q += ` WHERE id>$1`
-		args = append(args, cursor)
-	}
-	q += fmt.Sprintf(` ORDER BY id LIMIT $%d`, len(args)+1)
-	args = append(args, limit+1)
-	rows, e := s.q(ctx).QueryContext(ctx, q, args...)
-	if e != nil {
-		return cable.ShellBuildPage{}, ce("list shell builds", e)
-	}
-	defer rows.Close()
-	out := cable.ShellBuildPage{Items: []cable.ShellBuild{}}
-	for rows.Next() {
-		var id string
-		if e = rows.Scan(&id); e != nil {
-			return out, e
-		}
-		b, e := s.ShellBuild(ctx, id)
-		if e != nil {
-			return out, e
-		}
-		out.Items = append(out.Items, b)
-	}
-	if len(out.Items) > limit {
-		out.Items = out.Items[:limit]
-		out.Page.HasMore = true
-		out.Page.NextCursor = out.Items[limit-1].ID
-	}
-	return out, rows.Err()
-}
-func (s *Store) CreateRevision(ctx context.Context, r cable.CableRevision) error {
-	if !validCableDigest(r.Digest) || len(r.JSON) == 0 || !validCableDigest(r.ShellBuildDigest) || r.Theme == "" || r.Timezone == "" || r.GeneratedAt.IsZero() {
-		return cable.ErrInvalidArgument
-	}
-	if _, err := cable.NormalizeTheme(r.Theme); err != nil {
-		return cable.ErrInvalidArgument
-	}
-	if _, err := cable.NormalizeTimezone(r.Timezone); err != nil {
-		return cable.ErrInvalidArgument
-	}
-	if _, err := cable.NormalizeEntrypoint(r.Entrypoint); err != nil {
-		return cable.ErrInvalidArgument
-	}
-	if _, err := cable.NormalizeWindow(r.Window); err != nil {
-		return cable.ErrInvalidArgument
-	}
-	foundShell := false
-	for _, digest := range r.ArtifactDigests {
-		if digest == r.ShellBuildDigest {
-			foundShell = true
-			break
-		}
-	}
-	if !foundShell {
-		return cable.ErrInvalidArgument
-	}
-	if r.ID == "" {
-		r.ID = r.Digest
-	}
-	errorItems := r.Errors
-	if errorItems == nil {
-		errorItems = []string{}
-	}
-	warningItems := r.Warnings
-	if warningItems == nil {
-		warningItems = []string{}
-	}
-	_, e := s.q(ctx).ExecContext(ctx, `INSERT INTO cable_revisions(id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,theme,generated_at,window_start,window_end,document,artifact_digests,errors,warnings,created_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, r.ID, r.DeploymentID, r.DeploymentVersion, r.ShellBuildID, r.Digest, r.ShellBuildDigest, r.Entrypoint, r.BridgeProtocol, r.Timezone, r.Theme, r.GeneratedAt.UTC(), r.Window.StartsAt.UTC(), r.Window.EndsAt.UTC(), r.JSON, r.ArtifactDigests, errorItems, warningItems, r.CreatedBy, r.CreatedAt.UTC())
-	if e != nil {
-		if pgConflict(e) {
-			return cable.ErrConflict
-		}
-		return ce("create cable revision", e)
-	}
-	return nil
-}
-func (s *Store) Revision(ctx context.Context, id string) (cable.CableRevision, error) {
-	var r cable.CableRevision
-	var document, artifactDigests, errorItems, warningItems []byte
-	e := s.q(ctx).QueryRowContext(ctx, `SELECT id,deployment_id,deployment_version,shell_build_id,digest,shell_build_digest,entrypoint,bridge_protocol,timezone,theme,generated_at,window_start,window_end,document,array_to_json(artifact_digests),array_to_json(errors),array_to_json(warnings),created_by,created_at FROM cable_revisions WHERE id=$1`, id).Scan(&r.ID, &r.DeploymentID, &r.DeploymentVersion, &r.ShellBuildID, &r.Digest, &r.ShellBuildDigest, &r.Entrypoint, &r.BridgeProtocol, &r.Timezone, &r.Theme, &r.GeneratedAt, &r.Window.StartsAt, &r.Window.EndsAt, &document, &artifactDigests, &errorItems, &warningItems, &r.CreatedBy, &r.CreatedAt)
-	if e != nil {
-		return r, ce("get cable revision", e)
-	}
-	for name, value := range map[string]struct {
-		data   []byte
-		target *[]string
-	}{
-		"artifact digests": {artifactDigests, &r.ArtifactDigests},
-		"errors":           {errorItems, &r.Errors},
-		"warnings":         {warningItems, &r.Warnings},
-	} {
-		if err := json.Unmarshal(value.data, value.target); err != nil {
-			return r, fmt.Errorf("decode cable revision %s: %w", name, err)
-		}
-	}
-	r.JSON = document
-	var revisionDocument struct {
-		Channels []cable.RevisionChannel `json:"channels"`
-	}
-	if err := json.Unmarshal(document, &revisionDocument); err != nil {
-		return r, fmt.Errorf("decode cable revision document: %w", err)
-	}
-	r.Channels = revisionDocument.Channels
-	if r.Channels == nil {
-		r.Channels = []cable.RevisionChannel{}
-	}
-	return r, nil
-}
-func (s *Store) ListRevisions(ctx context.Context, did, cursor string, limit int) (cable.RevisionPage, error) {
-	limit = cl(limit)
-	q := `SELECT id FROM cable_revisions WHERE deployment_id=$1`
-	args := []any{did}
-	if cursor != "" {
-		q += ` AND id>$2`
-		args = append(args, cursor)
-	}
-	q += fmt.Sprintf(` ORDER BY id LIMIT $%d`, len(args)+1)
-	args = append(args, limit+1)
-	rows, e := s.q(ctx).QueryContext(ctx, q, args...)
-	if e != nil {
-		return cable.RevisionPage{}, ce("list cable revisions", e)
-	}
-	defer rows.Close()
-	out := cable.RevisionPage{Items: []cable.CableRevision{}}
-	for rows.Next() {
-		var id string
-		if e = rows.Scan(&id); e != nil {
-			return out, e
-		}
-		r, e := s.Revision(ctx, id)
-		if e != nil {
-			return out, e
-		}
-		out.Items = append(out.Items, r)
-	}
-	if len(out.Items) > limit {
-		out.Items = out.Items[:limit]
-		out.Page.HasMore = true
-		out.Page.NextCursor = out.Items[limit-1].ID
-	}
-	return out, rows.Err()
-}
 func (s *Store) CableArtifactsForAsset(ctx context.Context, id string) ([]cable.Artifact, error) {
 	rows, e := s.q(ctx).QueryContext(ctx, `SELECT aa.asset_id,a.digest,a.size_bytes,a.media_type,a.state FROM asset_artifacts aa JOIN artifacts a ON a.digest=aa.artifact_digest WHERE aa.asset_id=$1 ORDER BY a.digest`, id)
 	if e != nil {
@@ -612,26 +414,4 @@ func (s *Store) CableArtifactsForAsset(ctx context.Context, id string) ([]cable.
 		out = append(out, a)
 	}
 	return out, rows.Err()
-}
-func (s *Store) CableArtifactByDigest(ctx context.Context, digest string) (cable.Artifact, error) {
-	var a cable.Artifact
-	e := s.q(ctx).QueryRowContext(ctx, `SELECT digest,size_bytes,media_type,state FROM artifacts WHERE digest=$1`, digest).Scan(&a.Digest, &a.Size, &a.MediaType, &a.State)
-	if e != nil {
-		return a, ce("get cable artifact", e)
-	}
-	return a, nil
-}
-
-// RegisterCableRevisionArtifact records the already-written immutable revision
-// document in the artifact catalog. The CAS write itself is deliberately owned
-// by the composition adapter.
-func (s *Store) RegisterCableRevisionArtifact(ctx context.Context, digest string, size int64) error {
-	if !validCableDigest(digest) || size <= 0 {
-		return cable.ErrInvalidArgument
-	}
-	_, err := s.q(ctx).ExecContext(ctx, `INSERT INTO artifacts(digest,size_bytes,media_type,state) VALUES($1,$2,'application/vnd.cable.revision+json','ready') ON CONFLICT(digest) DO UPDATE SET size_bytes=EXCLUDED.size_bytes,media_type=EXCLUDED.media_type,state='ready'`, digest, size)
-	if err != nil {
-		return ce("register cable revision artifact", err)
-	}
-	return nil
 }

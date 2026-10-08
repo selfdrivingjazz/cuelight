@@ -17,7 +17,9 @@ import (
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
+	"github.com/jmill/cable/internal/control/profile"
 	"github.com/jmill/cable/internal/control/release"
+	"github.com/jmill/cable/internal/control/remote"
 	playerclient "github.com/jmill/cable/internal/player/client"
 )
 
@@ -28,6 +30,7 @@ var OperationScopes = map[string]string{
 	"revokeAdminToken": ScopeSecurityAdmin, "listNodes": ScopeNodeRead,
 	"getNode": ScopeNodeRead, "updateNode": ScopeNodeWrite, "unregisterNode": ScopeSecurityAdmin,
 	"getNodeStatus": ScopeNodeRead, "getNodeCapabilities": ScopeNodeRead, "createNodeRecoveryToken": ScopeSecurityAdmin,
+	"createNodeRemoteLink": ScopeAssignmentWrite,
 	"getNodeAssignment": ScopeAssignmentRead, "putNodeAssignment": ScopeAssignmentWrite,
 	"listNodeEvents": ScopeNodeRead, "createUpload": ScopeMediaWrite,
 	"listUploads": ScopeMediaRead, "headUpload": ScopeMediaWrite,
@@ -36,6 +39,10 @@ var OperationScopes = map[string]string{
 	"getAsset": ScopeMediaRead, "publishRelease": ScopeReleaseWrite,
 	"listReleases": ScopeReleaseRead, "getRelease": ScopeReleaseRead,
 	"listAssignments":      ScopeAssignmentRead,
+	"listProfiles": ScopeAssignmentRead, "createProfile": ScopeAssignmentWrite,
+	"getProfile": ScopeAssignmentRead, "updateProfile": ScopeAssignmentWrite,
+	"deleteProfile": ScopeAssignmentWrite, "activateProfile": ScopeAssignmentWrite,
+	"getActiveProfile": ScopeAssignmentRead,
 	"listCableDeployments": ScopeCableRead, "createCableDeployment": ScopeCableWrite,
 	"getCableDeployment": ScopeCableRead, "updateCableDeployment": ScopeCableWrite,
 	"deleteCableDeployment": ScopeCableWrite, "listCableChannels": ScopeCableRead,
@@ -43,13 +50,9 @@ var OperationScopes = map[string]string{
 	"updateCableChannel": ScopeCableWrite, "deleteCableChannel": ScopeCableWrite,
 	"listCablePrograms": ScopeCableRead, "createCableProgram": ScopeCableWrite,
 	"getCableProgram": ScopeCableRead, "updateCableProgram": ScopeCableWrite,
-	"deleteCableProgram": ScopeCableWrite, "listCableShellBuilds": ScopeCableRead,
-	"registerCableShellBuild": ScopeCableWrite, "getCableShellBuild": ScopeCableRead,
-	"listCableRevisions": ScopeCableRead, "getCableRevision": ScopeCableRead,
-	"previewCableCompile": ScopeCableRead, "publishCableRevision": ScopeCableWrite,
-	"publishCableRelease": ScopeCableWrite,
-	"getCableBlock":       ScopeCableRead, "updateCablePlaylist": ScopeCableWrite,
-	"updateCableBlock": ScopeCableWrite, "updateCableProfile": ScopeCableWrite,
+	"deleteCableProgram": ScopeCableWrite,
+	"getCableBlock":      ScopeCableRead, "updateCablePlaylist": ScopeCableWrite,
+	"updateCableBlock": ScopeCableWrite,
 }
 
 type Handler struct{ deps Dependencies }
@@ -69,6 +72,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("GET /nodes/{nodeId}/status", h.authorized(ScopeNodeRead, h.getNodeStatus))
 	mux.Handle("GET /nodes/{nodeId}/capabilities", h.authorized(ScopeNodeRead, h.getNodeCapabilities))
 	mux.Handle("POST /nodes/{nodeId}/recovery-tokens", h.authorized(ScopeSecurityAdmin, h.createNodeRecoveryToken))
+	mux.Handle("POST /nodes/{nodeId}/remote-link", h.authorized(ScopeAssignmentWrite, h.createNodeRemoteLink))
 	mux.Handle("GET /nodes/{nodeId}/assignment", h.authorized(ScopeAssignmentRead, h.getNodeAssignment))
 	mux.Handle("PUT /nodes/{nodeId}/assignment", h.authorized(ScopeAssignmentWrite, h.putNodeAssignment))
 	mux.Handle("GET /nodes/{nodeId}/events", h.authorized(ScopeNodeRead, h.listNodeEvents))
@@ -85,6 +89,13 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("GET /releases/{releaseId}", h.authorized(ScopeReleaseRead, h.getRelease))
 	mux.Handle("GET /assignments", h.authorized(ScopeAssignmentRead, h.listAssignments))
 	mux.Handle("GET /operator/me", h.authorized("", h.getOperatorMe))
+	mux.Handle("GET /profiles", h.authorized(ScopeAssignmentRead, h.listProfiles))
+	mux.Handle("POST /profiles", h.authorized(ScopeAssignmentWrite, h.createProfile))
+	mux.Handle("GET /profiles/active", h.authorized(ScopeAssignmentRead, h.getActiveProfile))
+	mux.Handle("GET /profiles/{profileId}", h.authorized(ScopeAssignmentRead, h.getProfile))
+	mux.Handle("PUT /profiles/{profileId}", h.authorized(ScopeAssignmentWrite, h.updateProfile))
+	mux.Handle("DELETE /profiles/{profileId}", h.authorized(ScopeAssignmentWrite, h.deleteProfile))
+	mux.Handle("POST /profiles/{profileId}/activate", h.authorized(ScopeAssignmentWrite, h.activateProfile))
 
 	mux.Handle("GET /cable/deployments", h.authorized(ScopeCableRead, h.listCableDeployments))
 	mux.Handle("POST /cable/deployments", h.authorized(ScopeCableWrite, h.createCableDeployment))
@@ -109,18 +120,6 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("POST /cable/channels/{channelId}/blocks", h.authorized(ScopeCableWrite, h.createCableBlock))
 	mux.Handle("GET /cable/blocks/{blockId}", h.authorized(ScopeCableRead, h.getCableBlock))
 	mux.Handle("PATCH /cable/blocks/{blockId}", h.authorized(ScopeCableWrite, h.updateCableBlock))
-	mux.Handle("GET /cable/profiles", h.authorized(ScopeCableRead, h.listCableProfiles))
-	mux.Handle("POST /cable/profiles", h.authorized(ScopeCableWrite, h.createCableProfile))
-	mux.Handle("GET /cable/profiles/{profileId}", h.authorized(ScopeCableRead, h.getCableProfile))
-	mux.Handle("PATCH /cable/profiles/{profileId}", h.authorized(ScopeCableWrite, h.updateCableProfile))
-	mux.Handle("GET /cable/shell-builds", h.authorized(ScopeCableRead, h.listCableShellBuilds))
-	mux.Handle("POST /cable/shell-builds", h.authorized(ScopeCableWrite, h.registerCableShellBuild))
-	mux.Handle("GET /cable/shell-builds/{shellBuildId}", h.authorized(ScopeCableRead, h.getCableShellBuild))
-	mux.Handle("GET /cable/deployments/{deploymentId}/revisions", h.authorized(ScopeCableRead, h.listCableRevisions))
-	mux.Handle("GET /cable/revisions/{revisionId}", h.authorized(ScopeCableRead, h.getCableRevision))
-	mux.Handle("POST /cable/deployments/{deploymentId}/compile-preview", h.authorized(ScopeCableRead, h.previewCableCompile))
-	mux.Handle("POST /cable/deployments/{deploymentId}/publish", h.authorized(ScopeCableWrite, h.publishCableRevision))
-	mux.Handle("POST /cable/revisions/{revisionId}/release", h.authorized(ScopeCableWrite, h.publishCableRelease))
 	return mux
 }
 
@@ -189,14 +188,12 @@ func resourceType(r *http.Request) string {
 		return "channel"
 	case r.PathValue("programId") != "":
 		return "program"
-	case r.PathValue("shellBuildId") != "":
-		return "shell_build"
-	case r.PathValue("revisionId") != "":
-		return "revision"
 	case strings.HasPrefix(r.URL.Path, "/cable"):
 		return "cable"
 	case strings.HasPrefix(r.URL.Path, "/assignments"):
 		return "assignment"
+	case strings.HasPrefix(r.URL.Path, "/profiles"):
+		return "profile"
 	case strings.HasPrefix(r.URL.Path, "/admin-tokens"):
 		return "token"
 	case strings.HasPrefix(r.URL.Path, "/enrollment-tokens"):
@@ -208,7 +205,7 @@ func resourceType(r *http.Request) string {
 	}
 }
 func resourceID(r *http.Request) string {
-	for _, key := range []string{"nodeId", "uploadId", "assetId", "releaseId", "deploymentId", "channelId", "programId", "shellBuildId", "revisionId", "tokenId"} {
+	for _, key := range []string{"nodeId", "uploadId", "assetId", "releaseId", "deploymentId", "channelId", "programId", "tokenId", "profileId"} {
 		if value := r.PathValue(key); value != "" {
 			return value
 		}
@@ -472,6 +469,18 @@ func (h *Handler) createNodeRecoveryToken(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusCreated, EnrollmentTokenCreated{ID: v.ID, Secret: v.Secret, ExpiresAt: v.ExpiresAt})
 }
+func (h *Handler) createNodeRemoteLink(w http.ResponseWriter, r *http.Request) {
+	if h.deps.RemoteLinks == nil {
+		writeError(w, errors.New("remote link service is not configured"))
+		return
+	}
+	v, err := h.deps.RemoteLinks.Link(r.Context(), r.PathValue("nodeId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, RemoteLink{SessionID: v.ID, RemoteURL: v.RemoteURL, ExpiresAt: v.ExpiresAt})
+}
 
 func (h *Handler) getNodeAssignment(w http.ResponseWriter, r *http.Request) {
 	if _, err := parseWait(r.URL.Query().Get("wait")); err != nil {
@@ -500,17 +509,20 @@ func (h *Handler) putNodeAssignment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	var in assignment.PutInput
+	var in AssignmentInput
 	if err := decodeJSON(w, r, h.jsonLimit(), &in); err != nil {
 		writeError(w, err)
 		return
 	}
 	actor, _ := auth.ActorFromContext(r.Context())
-	if h.deps.Assignments == nil {
+	if h.deps.Assigner == nil {
 		writeError(w, errors.New("assignment service is not configured"))
 		return
 	}
-	result, err := h.deps.Assignments.PutAssignment(r.Context(), r.PathValue("nodeId"), assignment.Mutation{ActorID: actor.ID, IdempotencyKey: key}, in)
+	result, err := h.deps.Assigner.AssignTarget(r.Context(), assignment.Mutation{ActorID: actor.ID, IdempotencyKey: key}, r.PathValue("nodeId"), assignment.Target{
+		MediaID: in.MediaID, PlaylistID: in.PlaylistID, DeliveryMode: in.DeliveryMode,
+		RemoteInput: in.RemoteInput, ShowQR: in.ShowQR, ExpectedGeneration: &in.ExpectedGeneration,
+	})
 	if err != nil {
 		writeError(w, err)
 		return
@@ -909,22 +921,24 @@ func statusFor(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, ErrBodyTooLarge), errors.Is(err, ErrChunkTooLarge), errors.Is(err, media.ErrChunkTooLarge):
 		return http.StatusRequestEntityTooLarge
-	case errors.Is(err, ErrPrecondition), errors.Is(err, assignment.ErrGenerationConflict), errors.Is(err, cable.ErrConflict):
+	case errors.Is(err, ErrPrecondition), errors.Is(err, assignment.ErrGenerationConflict), errors.Is(err, cable.ErrConflict), errors.Is(err, profile.ErrVersionConflict):
 		return http.StatusPreconditionFailed
 	case errors.Is(err, media.ErrOffsetMismatch), errors.Is(err, ErrOffsetMismatch),
-		errors.Is(err, cable.ErrImmutable), errors.Is(err, cable.ErrArtifactUnavailable), errors.Is(err, cable.ErrBuildUnavailable),
+		errors.Is(err, cable.ErrImmutable), errors.Is(err, cable.ErrArtifactUnavailable),
 		errors.Is(err, release.ErrArtifactMissing), errors.Is(err, release.ErrArtifactQuarantined),
-		errors.Is(err, release.ErrArtifactIncompatible), errors.Is(err, release.ErrCableRevisionInvalid):
+		errors.Is(err, release.ErrArtifactIncompatible),
+		errors.Is(err, remote.ErrDisabled):
 		return http.StatusConflict
-	case errors.Is(err, auth.ErrNotFound), errors.Is(err, pki.ErrNodeNotFound), errors.Is(err, pki.ErrTokenNotFound), errors.Is(err, media.ErrNotFound), errors.Is(err, cable.ErrNotFound):
+	case errors.Is(err, auth.ErrNotFound), errors.Is(err, pki.ErrNodeNotFound), errors.Is(err, pki.ErrTokenNotFound), errors.Is(err, media.ErrNotFound), errors.Is(err, assignment.ErrTargetNotFound), errors.Is(err, cable.ErrNotFound), errors.Is(err, profile.ErrNotFound),
+		errors.Is(err, remote.ErrSessionMissing):
 		return http.StatusNotFound
-	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrCursorInvalid), errors.Is(err, ErrWaitInvalid),
+	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrCursorInvalid), errors.Is(err, ErrWaitInvalid), errors.Is(err, profile.ErrInvalid),
 		errors.Is(err, page.ErrCursorInvalid), errors.Is(err, page.ErrCursorTampered), errors.Is(err, page.ErrLimitInvalid),
 		errors.Is(err, page.ErrSortInvalid), errors.Is(err, page.ErrOrderInvalid),
 		errors.Is(err, media.ErrInvalidArgument), errors.Is(err, assignment.ErrInvalidAssignment), errors.Is(err, release.ErrInvalidMutation),
-		errors.Is(err, cable.ErrInvalidArgument), errors.Is(err, cable.ErrOverlap):
+		errors.Is(err, cable.ErrInvalidArgument), errors.Is(err, cable.ErrOverlap), errors.Is(err, remote.ErrInvalid):
 		return http.StatusBadRequest
-	case errors.Is(err, assignment.ErrIdempotencyConflict), errors.Is(err, release.ErrIdempotencyConflict), errors.Is(err, pki.ErrIdempotencyConflict):
+	case errors.Is(err, assignment.ErrIdempotencyConflict), errors.Is(err, release.ErrIdempotencyConflict), errors.Is(err, pki.ErrIdempotencyConflict), errors.Is(err, profile.ErrNameConflict):
 		return http.StatusConflict
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return 499
@@ -937,7 +951,7 @@ func setNodeETag(w http.ResponseWriter, n Node) {
 }
 func assignmentETag(generation int64) string { return fmt.Sprintf("\"generation:%d\"", generation) }
 func assignmentJSON(v assignment.Assignment) Assignment {
-	return Assignment{ID: v.ID, NodeID: v.NodeID, ReleaseID: v.ReleaseID, ReleaseDigest: v.ReleaseDigest, DeliveryMode: v.DeliveryMode, ExpectedGeneration: v.ExpectedGeneration, DesiredGeneration: v.DesiredGeneration, RemoteInput: v.RemoteInput, ShowQR: v.ShowQR}
+	return Assignment{ID: v.ID, NodeID: v.NodeID, MediaID: v.MediaID, PlaylistID: v.PlaylistID, ReleaseID: v.ReleaseID, ReleaseDigest: v.ReleaseDigest, DeliveryMode: v.DeliveryMode, ExpectedGeneration: v.ExpectedGeneration, DesiredGeneration: v.DesiredGeneration, RemoteInput: v.RemoteInput, ShowQR: v.ShowQR}
 }
 func uploadJSON(v media.Upload) Upload {
 	return Upload{ID: v.ID, Name: v.Name, Length: v.DeclaredLength, Offset: v.ReceivedLength, MediaType: v.MediaType, State: string(v.State), ArtifactDigest: v.ArtifactDigest}

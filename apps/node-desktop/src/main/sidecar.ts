@@ -84,7 +84,7 @@ export class SidecarManager {
       CABLE_PLAYER_DESKTOP_RENDERER_TOKEN: this.renderer.token,
       CABLE_PLAYER_CHROMIUM_RUNTIME_ROOT: path.join(this.stateDirectory(), "runtime"),
       CABLE_PLAYER_LOOPBACK_ADDR: "127.0.0.1:0",
-      CABLE_PLAYER_FEATURES: "chromium",
+      CABLE_PLAYER_FEATURES: "chromium,web",
       CABLE_PLAYER_ACCEPTED_MEDIA_TYPES: "video/mp4,image/jpeg,image/png,image/webp",
       CABLE_PLAYER_PRESENTATION_MODE: this.settings.presentationMode,
       CABLE_PLAYER_PROBATION: "2s",

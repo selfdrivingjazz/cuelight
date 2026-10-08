@@ -13,7 +13,7 @@ func TestMigrationsHaveOrderedReversibleDirections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := []string{"0001_initial.sql", "0002_control_store.sql", "0003_cable.sql", "0004_programming.sql", "0005_cable_blocks.sql", "0006_remote_input.sql", "0007_media.sql", "0008_screenshot_jobs.sql"}
+	expected := []string{"0001_initial.sql", "0002_control_store.sql", "0003_cable.sql", "0004_programming.sql", "0005_cable_blocks.sql", "0006_remote_input.sql", "0007_media.sql", "0008_screenshot_jobs.sql", "0009_browser_nodes.sql", "0010_media_thumbnails.sql", "0011_web_items.sql", "0012_unified_media.sql", "0013_hosted_cable.sql", "0014_profiles.sql"}
 	if len(migrations) != len(expected) {
 		t.Fatalf("got %d migrations, want %d", len(migrations), len(expected))
 	}

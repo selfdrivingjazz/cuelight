@@ -173,3 +173,9 @@ type ArtifactContent struct {
 	ContentRange string
 	Partial      bool
 }
+
+// CableGuideToken authorises a hosted Cable guide page for one deployment.
+type CableGuideToken struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}

@@ -12,7 +12,7 @@ export type ProvisionInput = z.infer<typeof provisionInputSchema>;
 export const settingsSchema = z.object({
   autoStart: z.boolean().default(false),
   fullScreen: z.boolean().default(true),
-  presentationMode: z.enum(["automatic", "media", "cable"]).default("automatic"),
+  presentationMode: z.enum(["automatic", "media", "media-schedule", "web"]).default("automatic"),
 });
 export type DesktopSettings = z.infer<typeof settingsSchema>;
 

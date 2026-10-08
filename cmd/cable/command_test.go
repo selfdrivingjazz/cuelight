@@ -35,19 +35,19 @@ func TestAssignmentCommandMapsRequest(t *testing.T) {
 		if err := json.Unmarshal(body, &input); err != nil {
 			t.Error(err)
 		}
-		if input.ReleaseID != "release-1" || input.ReleaseDigest != "sha256:abc" || input.ExpectedGeneration != 4 || input.DeliveryMode != "cache_then_play" {
+		if input.MediaID != "media-1" || input.PlaylistID != "" || input.ExpectedGeneration != 4 || input.DeliveryMode != "cache_then_play" || !input.RemoteInput {
 			t.Errorf("input = %#v", input)
 		}
 		response.Header().Set("Content-Type", "application/json")
 		response.WriteHeader(http.StatusCreated)
-		fmt.Fprint(response, `{"releaseId":"release-1","releaseDigest":"sha256:abc","deliveryMode":"cache_then_play","expectedGeneration":4,"desiredGeneration":5}`)
+		fmt.Fprint(response, `{"mediaId":"media-1","releaseId":"release-1","releaseDigest":"sha256:abc","deliveryMode":"cache_then_play","expectedGeneration":4,"desiredGeneration":5}`)
 	}))
 	defer server.Close()
 
 	result := executeCLI(t, server, nil,
 		"assignment", "set",
-		"--release-id", "release-1",
-		"--release-digest", "sha256:abc",
+		"--media-id", "media-1",
+		"--remote-input",
 		"--delivery-mode", "cache_then_play",
 		"--expected-generation", "4",
 		"--if-match", `"generation-4"`,

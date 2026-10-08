@@ -125,9 +125,20 @@ func validateCandidate(candidate renderer.Candidate) error {
 	if candidate.ReleaseDigest == "" {
 		return errors.New("fake candidate release digest is required")
 	}
-	if candidate.Kind == release.PresentationCable {
-		if candidate.ShellPath == "" || candidate.RevisionPath == "" || candidate.ShellBuildDigest == "" || candidate.RevisionArtifactDigest == "" || candidate.Entrypoint == "" || len(candidate.ArtifactPaths) < 2 {
-			return errors.New("fake Cable candidate is incomplete")
+	if candidate.Kind == release.PresentationMediaSchedule {
+		if len(candidate.Schedule) == 0 {
+			return errors.New("fake schedule candidate items are required")
+		}
+		for _, item := range candidate.Schedule {
+			if item.Source == "" && item.WebURL == "" {
+				return errors.New("fake schedule item needs a source or web URL")
+			}
+		}
+		return nil
+	}
+	if candidate.Kind == release.PresentationWeb {
+		if candidate.WebURL == "" {
+			return errors.New("fake web candidate URL is required")
 		}
 		return nil
 	}

@@ -19,6 +19,7 @@ export default {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",
           border: "hsl(var(--sidebar-border))",
+          accent: "hsl(var(--sidebar-accent))",
         },
         overlay: "hsl(var(--overlay))",
         "status-success": "hsl(var(--status-success))",
@@ -26,6 +27,7 @@ export default {
         "status-danger": "hsl(var(--status-danger))",
         "status-info": "hsl(var(--status-info))",
       },
+      fontFamily: { sans: ["var(--font-sans)"], mono: ["var(--font-mono)"] },
       boxShadow: {
         sm: "0 1px 2px 0 hsl(var(--shadow) / .12)",
         xl: "0 20px 25px -5px hsl(var(--shadow) / .28), 0 8px 10px -6px hsl(var(--shadow) / .22)",

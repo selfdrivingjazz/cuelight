@@ -1,610 +1,373 @@
-// Package webnode contains the transport-independent domain used by browser nodes.
-// It deliberately has no HTTP, SQL, or framework dependencies. Controllers can
-// implement Repository and EventStream with their own persistence and transport.
+// Package webnode pairs browser nodes (TV and desktop web browsers) with the
+// control plane. A browser starts a claim and displays its short code; an
+// operator redeems the code, which creates a node of class "browser"; the
+// browser then collects a scoped bearer credential exactly once and uses it
+// in place of mTLS for the player API.
 package webnode
 
 import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"math/big"
+	"net/url"
 	"strings"
-	"sync"
 	"time"
 )
 
 var (
-	ErrInvalidNode            = errors.New("node ID is required")
-	ErrInvalidCode            = errors.New("claim code is required")
-	ErrActiveClaim            = errors.New("node already has an active claim")
-	ErrClaimNotFound          = errors.New("claim code was not found")
-	ErrClaimConsumed          = errors.New("claim code has already been consumed")
-	ErrClaimExpired           = errors.New("claim code has expired")
-	ErrCredentialNotFound     = errors.New("browser credential was not found")
-	ErrCredentialRevoked      = errors.New("browser credential has been revoked")
-	ErrCredentialExpired      = errors.New("browser credential has expired")
-	ErrCredentialScope        = errors.New("browser credential scope is invalid")
-	ErrCredentialNotRenewable = errors.New("credential is not renewable yet")
-	ErrNodeMismatch           = errors.New("credential is bound to a different node")
-	ErrAssignmentNotFound     = errors.New("assignment was not found")
-	ErrAssignmentIsolation    = errors.New("assignment belongs to a different node")
-	ErrInvalidAssignment      = errors.New("assignment node ID is required")
-	ErrInvalidReport          = errors.New("playback report is invalid")
+	ErrInvalidRequest  = errors.New("invalid browser node request")
+	ErrUnauthorized    = errors.New("browser node credential is not valid")
+	ErrClaimNotFound   = errors.New("claim code is unknown or expired")
+	ErrClaimConflict   = errors.New("claim code was already redeemed")
+	ErrClaimGone       = errors.New("claim is expired or its credential was already delivered")
+	ErrNodeNotFound    = errors.New("browser node not found")
+	ErrCodeCollision   = errors.New("claim code collision")
+	ErrNotConfigured   = errors.New("browser node service is not configured")
+	errEmptyRandomness = errors.New("random source returned no data")
 )
 
-const CredentialScopeBrowser = "browser-node"
+const (
+	NodeClassBrowser = "browser"
+	NodeClassNative  = "native"
 
-// Clock and IDGenerator make expiry and persistence tests deterministic.
-type Clock interface{ Now() time.Time }
-type IDGenerator interface {
-	NewID() (string, error)
-	NewToken() (string, error)
+	codeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+	codeLength   = 8
+	maxNameBytes = 120
+	maxUAChars   = 300
+)
+
+type Claim struct {
+	ID            string
+	CodeHash      []byte
+	PollTokenHash []byte
+	UserAgent     string
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+	NodeID        string
+	Delivered     bool
 }
-type realClock struct{}
 
-func (realClock) Now() time.Time { return time.Now().UTC() }
+type Credential struct {
+	ID         string
+	NodeID     string
+	TokenHash  []byte
+	ExpiresAt  time.Time
+	RenewAfter time.Time
+	CreatedAt  time.Time
+	// EventEpoch is the node's report epoch; filled on reads.
+	EventEpoch string
+}
 
-type randomIDs struct{}
+// Node is the operator-facing view of a browser node.
+type Node struct {
+	ID                  string     `json:"id"`
+	Name                string     `json:"name"`
+	NodeClass           string     `json:"nodeClass"`
+	CredentialState     string     `json:"credentialState"`
+	CredentialExpiresAt *time.Time `json:"credentialExpiresAt,omitempty"`
+	LastSeenAt          *time.Time `json:"lastSeenAt,omitempty"`
+	UserAgent           string     `json:"userAgent,omitempty"`
+	CreatedAt           time.Time  `json:"createdAt"`
+}
 
-func (randomIDs) NewID() (string, error)    { return randomString(18) }
-func (randomIDs) NewToken() (string, error) { return randomString(32) }
+type ClaimStarted struct {
+	ClaimID             string    `json:"claimId"`
+	Code                string    `json:"code"`
+	DisplayCode         string    `json:"displayCode"`
+	PollToken           string    `json:"pollToken"`
+	ExpiresAt           time.Time `json:"expiresAt"`
+	PollIntervalSeconds int       `json:"pollIntervalSeconds"`
+	PairURL             string    `json:"pairUrl,omitempty"`
+}
+
+type IssuedCredential struct {
+	NodeID     string    `json:"nodeId"`
+	Token      string    `json:"token"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	RenewAfter time.Time `json:"renewAfter"`
+	EventEpoch string    `json:"eventEpoch"`
+}
+
+type ClaimStatus struct {
+	Status     string            `json:"status"`
+	ExpiresAt  *time.Time        `json:"expiresAt,omitempty"`
+	Credential *IssuedCredential `json:"credential,omitempty"`
+}
+
+// Repository is the persistence contract. Every method that changes more
+// than one row must be atomic.
+type Repository interface {
+	// CreateBrowserClaim inserts a claim and may purge expired unredeemed
+	// claims. A duplicate code hash must return ErrCodeCollision.
+	CreateBrowserClaim(ctx context.Context, claim Claim, now time.Time) error
+	BrowserClaim(ctx context.Context, id string) (Claim, bool, error)
+	// RedeemBrowserClaim locks the unexpired claim matching codeHash, creates
+	// a browser node, and binds it to the claim.
+	RedeemBrowserClaim(ctx context.Context, codeHash []byte, name, actorID string, now time.Time) (Node, error)
+	// DeliverBrowserCredential inserts the first credential for a redeemed
+	// claim and marks the claim delivered; returns ErrClaimGone if delivered.
+	// It returns the node's event epoch.
+	DeliverBrowserCredential(ctx context.Context, claimID string, credential Credential, now time.Time) (string, error)
+	// BrowserCredential returns an unrevoked, unexpired credential whose node
+	// is an active browser node, and records last-seen time.
+	BrowserCredential(ctx context.Context, tokenHash []byte, now time.Time) (Credential, bool, error)
+	RotateBrowserCredential(ctx context.Context, previousID string, next Credential, now time.Time) error
+	ListBrowserNodes(ctx context.Context, now time.Time) ([]Node, error)
+	RevokeBrowserNode(ctx context.Context, nodeID string, now time.Time) error
+}
 
 type Config struct {
 	ClaimTTL      time.Duration
 	CredentialTTL time.Duration
-	RenewWindow   time.Duration
-	Clock         Clock
-	IDs           IDGenerator
+	RenewAfter    time.Duration
+	PollInterval  time.Duration
+	// PairBaseURL is the operator console origin; pairUrl is
+	// PairBaseURL + "/pair?code=<code>".
+	PairBaseURL string
 }
 
-func (c Config) withDefaults() Config {
+func (c Config) normalized() Config {
 	if c.ClaimTTL <= 0 {
 		c.ClaimTTL = 10 * time.Minute
 	}
 	if c.CredentialTTL <= 0 {
 		c.CredentialTTL = 30 * 24 * time.Hour
 	}
-	if c.RenewWindow <= 0 || c.RenewWindow >= c.CredentialTTL {
-		c.RenewWindow = c.CredentialTTL / 4
+	if c.RenewAfter <= 0 || c.RenewAfter >= c.CredentialTTL {
+		c.RenewAfter = c.CredentialTTL / 2
 	}
-	if c.Clock == nil {
-		c.Clock = realClock{}
-	}
-	if c.IDs == nil {
-		c.IDs = randomIDs{}
+	if c.PollInterval <= 0 {
+		c.PollInterval = 3 * time.Second
 	}
 	return c
 }
 
-type Claim struct {
-	ID           string
-	NodeID       string
-	CodeHash     string
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
-	ConsumedAt   *time.Time
-	CredentialID string
-}
-type ClaimCreated struct {
-	Claim Claim
-	Code  string
-}
-
-type Credential struct {
-	ID        string
-	NodeID    string
-	Hash      string
-	Scope     string
-	IssuedAt  time.Time
-	ExpiresAt time.Time
-	RevokedAt *time.Time
-}
-type CredentialIssued struct {
-	Credential Credential
-	Token      string
-}
-
-type Assignment struct {
-	ID         string
-	NodeID     string
-	Sequence   int64
-	EventEpoch string
-	MediaURL   string
-	MediaType  string
-	DurationMs int64
-	CreatedAt  time.Time
-}
-type AssignmentEvent struct {
-	Assignment  Assignment
-	PublishedAt time.Time
-}
-
-type PlaybackState string
-
-const (
-	PlaybackPlaying           PlaybackState = "playing"
-	PlaybackAutoplaySuspended PlaybackState = "autoplay_suspended"
-	PlaybackOffline           PlaybackState = "offline"
-	PlaybackUnsupported       PlaybackState = "unsupported"
-)
-
-type PlaybackReport struct {
-	AssignmentID string
-	EventEpoch   string
-	Sequence     int64
-	State        PlaybackState
-	PositionMs   int64
-	ObservedAt   time.Time
-}
-
-// Repository is the persistence contract. Implementations must make
-// CreateClaim's active-claim check and insertion atomic per node, and must
-// update credentials by ID. MemoryRepository is provided for local composition
-// and tests; PostgreSQL adapters need not change the service API.
-type Repository interface {
-	CreateClaim(context.Context, Claim) error
-	ClaimByHash(context.Context, string) (Claim, bool, error)
-	ConsumeClaimAndCreateCredential(context.Context, string, string, time.Time, Credential) error
-	CredentialByHash(context.Context, string) (Credential, bool, error)
-	UpdateCredential(context.Context, Credential) error
-	RevokeCredential(context.Context, string, time.Time) error
-	PutAssignment(context.Context, Assignment) error
-	Assignment(context.Context, string) (Assignment, bool, error)
-	LatestReport(context.Context, string) (PlaybackReport, bool, error)
-	PutReport(context.Context, string, PlaybackReport) error
-}
-
-// TimedClaimRepository is optional. It lets an in-memory adapter use the
-// service clock while retaining the small Repository contract for SQL stores.
-type TimedClaimRepository interface {
-	CreateClaimAt(context.Context, Claim, time.Time) error
-}
-
-// EventStream is injectable so the same domain can run over SSE, WebSocket, or
-// a broker. Subscribe must only deliver events for nodeID and newer sequence.
-type EventStream interface {
-	Publish(context.Context, AssignmentEvent) error
-	Subscribe(context.Context, string, int64) (<-chan AssignmentEvent, error)
-}
-
 type Service struct {
-	Repo   Repository
-	Events EventStream
-	Config Config
+	Repository Repository
+	Config     Config
+	Now        func() time.Time
+	NewID      func() (string, error)
 }
 
-func (s Service) normalized() (Service, error) {
-	if s.Repo == nil {
-		return s, errors.New("webnode repository is required")
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC()
 	}
-	if s.Events == nil {
-		return s, errors.New("webnode event stream is required")
-	}
-	s.Config = s.Config.withDefaults()
-	return s, nil
+	return time.Now().UTC()
 }
 
-func (s Service) CreateClaim(ctx context.Context, nodeID string) (ClaimCreated, error) {
-	if strings.TrimSpace(nodeID) == "" {
-		return ClaimCreated{}, ErrInvalidNode
+func (s *Service) ready() error {
+	if s == nil || s.Repository == nil || s.NewID == nil {
+		return ErrNotConfigured
 	}
-	s, err := s.normalized()
-	if err != nil {
-		return ClaimCreated{}, err
-	}
-	now := s.Config.Clock.Now().UTC()
-	// Repository enforces active-claim uniqueness atomically. This method's
-	// interface intentionally avoids a check-then-insert race.
-	id, err := s.Config.IDs.NewID()
-	if err != nil {
-		return ClaimCreated{}, err
-	}
-	code, err := generateClaimCode()
-	if err != nil {
-		return ClaimCreated{}, err
-	}
-	claim := Claim{ID: id, NodeID: nodeID, CodeHash: hash(code), CreatedAt: now, ExpiresAt: now.Add(s.Config.ClaimTTL)}
-	if timed, ok := s.Repo.(TimedClaimRepository); ok {
-		err = timed.CreateClaimAt(ctx, claim, now)
-	} else {
-		err = s.Repo.CreateClaim(ctx, claim)
-	}
-	if err != nil {
-		return ClaimCreated{}, err
-	}
-	return ClaimCreated{Claim: claim, Code: code}, nil
+	return nil
 }
 
-func (s Service) ConsumeClaim(ctx context.Context, nodeID, code string) (CredentialIssued, error) {
-	if strings.TrimSpace(nodeID) == "" {
-		return CredentialIssued{}, ErrInvalidNode
+// StartClaim creates a pending claim. The poll token is the only secret that
+// lets this browser collect the credential later.
+func (s *Service) StartClaim(ctx context.Context, userAgent string) (ClaimStarted, error) {
+	if err := s.ready(); err != nil {
+		return ClaimStarted{}, err
 	}
-	if strings.TrimSpace(code) == "" {
-		return CredentialIssued{}, ErrInvalidCode
+	config := s.Config.normalized()
+	userAgent = truncate(strings.TrimSpace(userAgent), maxUAChars)
+	for range 4 {
+		id, err := s.NewID()
+		if err != nil {
+			return ClaimStarted{}, err
+		}
+		code, err := generateCode()
+		if err != nil {
+			return ClaimStarted{}, err
+		}
+		pollToken, err := randomToken()
+		if err != nil {
+			return ClaimStarted{}, err
+		}
+		now := s.now()
+		claim := Claim{ID: id, CodeHash: Hash(code), PollTokenHash: Hash(pollToken), UserAgent: userAgent, ExpiresAt: now.Add(config.ClaimTTL), CreatedAt: now}
+		err = s.Repository.CreateBrowserClaim(ctx, claim, now)
+		if errors.Is(err, ErrCodeCollision) {
+			continue
+		}
+		if err != nil {
+			return ClaimStarted{}, err
+		}
+		started := ClaimStarted{ClaimID: id, Code: code, DisplayCode: code[:4] + "-" + code[4:], PollToken: pollToken, ExpiresAt: claim.ExpiresAt, PollIntervalSeconds: int(config.PollInterval / time.Second)}
+		if base := strings.TrimRight(config.PairBaseURL, "/"); base != "" {
+			started.PairURL = base + "/pair?code=" + url.QueryEscape(code)
+		}
+		return started, nil
 	}
-	s, err := s.normalized()
-	if err != nil {
-		return CredentialIssued{}, err
-	}
-	claim, ok, err := s.Repo.ClaimByHash(ctx, hash(normalizeCode(code)))
-	if err != nil {
-		return CredentialIssued{}, err
-	}
-	if !ok {
-		return CredentialIssued{}, ErrClaimNotFound
-	}
-	if claim.NodeID != nodeID {
-		return CredentialIssued{}, ErrNodeMismatch
-	}
-	now := s.Config.Clock.Now().UTC()
-	if claim.ConsumedAt != nil {
-		return CredentialIssued{}, ErrClaimConsumed
-	}
-	if !now.Before(claim.ExpiresAt) {
-		return CredentialIssued{}, ErrClaimExpired
-	}
-	id, err := s.Config.IDs.NewID()
-	if err != nil {
-		return CredentialIssued{}, err
-	}
-	token, err := s.Config.IDs.NewToken()
-	if err != nil {
-		return CredentialIssued{}, err
-	}
-	credential := Credential{ID: id, NodeID: nodeID, Hash: hash(token), Scope: CredentialScopeBrowser, IssuedAt: now, ExpiresAt: now.Add(s.Config.CredentialTTL)}
-	// Claim consumption and credential insertion are one repository transaction:
-	// a storage failure cannot burn the one-time claim without issuing a token.
-	if err := s.Repo.ConsumeClaimAndCreateCredential(ctx, claim.ID, nodeID, now, credential); err != nil {
-		return CredentialIssued{}, err
-	}
-	return CredentialIssued{Credential: credential, Token: token}, nil
+	return ClaimStarted{}, ErrCodeCollision
 }
 
-// Authorize validates the scoped credential and returns its persisted record.
-func (s Service) Authorize(ctx context.Context, nodeID, token string) (Credential, error) {
-	if strings.TrimSpace(nodeID) == "" {
-		return Credential{}, ErrInvalidNode
+// PollClaim reports a pending claim or, once redeemed, issues the node's
+// first credential exactly once.
+func (s *Service) PollClaim(ctx context.Context, claimID, pollToken string) (ClaimStatus, error) {
+	if err := s.ready(); err != nil {
+		return ClaimStatus{}, err
 	}
-	if strings.TrimSpace(token) == "" {
-		return Credential{}, ErrCredentialNotFound
+	claim, ok, err := s.Repository.BrowserClaim(ctx, claimID)
+	if err != nil {
+		return ClaimStatus{}, err
 	}
-	s, err := s.normalized()
+	if !ok || pollToken == "" || subtle.ConstantTimeCompare(claim.PollTokenHash, Hash(pollToken)) != 1 {
+		return ClaimStatus{}, ErrUnauthorized
+	}
+	now := s.now()
+	if claim.Delivered {
+		return ClaimStatus{}, ErrClaimGone
+	}
+	if claim.NodeID == "" {
+		if !now.Before(claim.ExpiresAt) {
+			return ClaimStatus{}, ErrClaimGone
+		}
+		expires := claim.ExpiresAt
+		return ClaimStatus{Status: "pending", ExpiresAt: &expires}, nil
+	}
+	issued, credential, err := s.newCredential(claim.NodeID, now)
+	if err != nil {
+		return ClaimStatus{}, err
+	}
+	issued.EventEpoch, err = s.Repository.DeliverBrowserCredential(ctx, claim.ID, credential, now)
+	if err != nil {
+		return ClaimStatus{}, err
+	}
+	return ClaimStatus{Status: "claimed", Credential: &issued}, nil
+}
+
+// RedeemClaim is the operator side of pairing.
+func (s *Service) RedeemClaim(ctx context.Context, actorID, code, name string) (Node, error) {
+	if err := s.ready(); err != nil {
+		return Node{}, err
+	}
+	normalized := NormalizeCode(code)
+	name = strings.TrimSpace(name)
+	if len(normalized) != codeLength || name == "" || len(name) > maxNameBytes {
+		return Node{}, fmt.Errorf("%w: code must be %d characters and name 1-%d bytes", ErrInvalidRequest, codeLength, maxNameBytes)
+	}
+	return s.Repository.RedeemBrowserClaim(ctx, Hash(normalized), name, actorID, s.now())
+}
+
+// Authenticate resolves a bearer token to its node.
+func (s *Service) Authenticate(ctx context.Context, token string) (Credential, error) {
+	if err := s.ready(); err != nil {
+		return Credential{}, err
+	}
+	if token == "" {
+		return Credential{}, ErrUnauthorized
+	}
+	credential, ok, err := s.Repository.BrowserCredential(ctx, Hash(token), s.now())
 	if err != nil {
 		return Credential{}, err
 	}
-	credential, ok, err := s.Repo.CredentialByHash(ctx, hash(token))
-	if err != nil {
-		return Credential{}, err
-	}
 	if !ok {
-		return Credential{}, ErrCredentialNotFound
-	}
-	if credential.NodeID != nodeID {
-		return Credential{}, ErrNodeMismatch
-	}
-	if credential.Scope != CredentialScopeBrowser {
-		return Credential{}, ErrCredentialScope
-	}
-	now := s.Config.Clock.Now().UTC()
-	if credential.RevokedAt != nil {
-		return Credential{}, ErrCredentialRevoked
-	}
-	if !now.Before(credential.ExpiresAt) {
-		return Credential{}, ErrCredentialExpired
+		return Credential{}, ErrUnauthorized
 	}
 	return credential, nil
 }
 
-// Renew rotates a credential only inside its renewable window. The old token
-// stops working as soon as the repository update commits.
-func (s Service) Renew(ctx context.Context, nodeID, token string) (CredentialIssued, error) {
-	credential, err := s.Authorize(ctx, nodeID, token)
+// Renew rotates the presented credential; the old token stops working when
+// the rotation commits.
+func (s *Service) Renew(ctx context.Context, token string) (IssuedCredential, error) {
+	current, err := s.Authenticate(ctx, token)
 	if err != nil {
-		return CredentialIssued{}, err
+		return IssuedCredential{}, err
 	}
-	s, err = s.normalized()
+	now := s.now()
+	issued, next, err := s.newCredential(current.NodeID, now)
 	if err != nil {
-		return CredentialIssued{}, err
+		return IssuedCredential{}, err
 	}
-	now := s.Config.Clock.Now().UTC()
-	if now.Before(credential.ExpiresAt.Add(-s.Config.RenewWindow)) {
-		return CredentialIssued{}, ErrCredentialNotRenewable
+	if err := s.Repository.RotateBrowserCredential(ctx, current.ID, next, now); err != nil {
+		return IssuedCredential{}, err
 	}
-	next, err := s.Config.IDs.NewToken()
-	if err != nil {
-		return CredentialIssued{}, err
-	}
-	credential.Hash, credential.ExpiresAt, credential.IssuedAt = hash(next), now.Add(s.Config.CredentialTTL), now
-	if err := s.Repo.UpdateCredential(ctx, credential); err != nil {
-		return CredentialIssued{}, err
-	}
-	return CredentialIssued{Credential: credential, Token: next}, nil
-}
-func (s Service) Revoke(ctx context.Context, nodeID, token string) error {
-	credential, err := s.Authorize(ctx, nodeID, token)
-	if err != nil {
-		return err
-	}
-	s, err = s.normalized()
-	if err != nil {
-		return err
-	}
-	return s.Repo.RevokeCredential(ctx, credential.ID, s.Config.Clock.Now().UTC())
+	issued.EventEpoch = current.EventEpoch
+	return issued, nil
 }
 
-func (s Service) PublishAssignment(ctx context.Context, assignment Assignment) error {
-	if strings.TrimSpace(assignment.ID) == "" || strings.TrimSpace(assignment.NodeID) == "" {
-		return ErrInvalidAssignment
-	}
-	s, err := s.normalized()
-	if err != nil {
-		return err
-	}
-	if assignment.CreatedAt.IsZero() {
-		assignment.CreatedAt = s.Config.Clock.Now().UTC()
-	}
-	if err := s.Repo.PutAssignment(ctx, assignment); err != nil {
-		return err
-	}
-	return s.Events.Publish(ctx, AssignmentEvent{Assignment: assignment, PublishedAt: s.Config.Clock.Now().UTC()})
-}
-func (s Service) Subscribe(ctx context.Context, nodeID, token string, after int64) (<-chan AssignmentEvent, error) {
-	if _, err := s.Authorize(ctx, nodeID, token); err != nil {
+func (s *Service) ListNodes(ctx context.Context) ([]Node, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	s, err := s.normalized()
-	if err != nil {
-		return nil, err
-	}
-	return s.Events.Subscribe(ctx, nodeID, after)
+	return s.Repository.ListBrowserNodes(ctx, s.now())
 }
 
-func (s Service) Acknowledge(ctx context.Context, nodeID, token string, report PlaybackReport) error {
-	if _, err := s.Authorize(ctx, nodeID, token); err != nil {
+func (s *Service) RevokeNode(ctx context.Context, nodeID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	s, err := s.normalized()
-	if err != nil {
-		return err
+	if strings.TrimSpace(nodeID) == "" {
+		return ErrNodeNotFound
 	}
-	assignment, ok, err := s.Repo.Assignment(ctx, report.AssignmentID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrAssignmentNotFound
-	}
-	if assignment.NodeID != nodeID {
-		return ErrAssignmentIsolation
-	}
-	if !validState(report.State) || report.Sequence < 0 || report.PositionMs < 0 {
-		return ErrInvalidReport
-	}
-	if report.EventEpoch != assignment.EventEpoch || report.Sequence != assignment.Sequence {
-		return ErrInvalidReport
-	}
-	if report.ObservedAt.IsZero() {
-		report.ObservedAt = s.Config.Clock.Now().UTC()
-	}
-	return s.Repo.PutReport(ctx, nodeID, report)
-}
-func (s Service) ReportPresence(ctx context.Context, nodeID, token string, report PlaybackReport) error {
-	return s.Acknowledge(ctx, nodeID, token, report)
+	return s.Repository.RevokeBrowserNode(ctx, nodeID, s.now())
 }
 
-func validState(state PlaybackState) bool {
-	return state == PlaybackPlaying || state == PlaybackAutoplaySuspended || state == PlaybackOffline || state == PlaybackUnsupported
+func (s *Service) newCredential(nodeID string, now time.Time) (IssuedCredential, Credential, error) {
+	config := s.Config.normalized()
+	id, err := s.NewID()
+	if err != nil {
+		return IssuedCredential{}, Credential{}, err
+	}
+	token, err := randomToken()
+	if err != nil {
+		return IssuedCredential{}, Credential{}, err
+	}
+	credential := Credential{ID: id, NodeID: nodeID, TokenHash: Hash(token), ExpiresAt: now.Add(config.CredentialTTL), RenewAfter: now.Add(config.RenewAfter), CreatedAt: now}
+	return IssuedCredential{NodeID: nodeID, Token: token, ExpiresAt: credential.ExpiresAt, RenewAfter: credential.RenewAfter}, credential, nil
 }
-func normalizeCode(code string) string {
-	return strings.ToUpper(strings.Join(strings.Fields(code), ""))
+
+// NormalizeCode accepts codes typed with any case, spaces, or dashes.
+func NormalizeCode(code string) string {
+	var builder strings.Builder
+	for _, r := range strings.ToUpper(code) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
-func hash(value string) string {
+
+func Hash(value string) []byte {
 	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
+	return sum[:]
 }
-func generateClaimCode() (string, error) {
-	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	raw := make([]byte, 8)
-	if _, err := rand.Read(raw); err != nil {
+
+func generateCode() (string, error) {
+	limit := big.NewInt(int64(len(codeAlphabet)))
+	out := make([]byte, codeLength)
+	for index := range out {
+		n, err := rand.Int(rand.Reader, limit)
+		if err != nil {
+			return "", err
+		}
+		out[index] = codeAlphabet[n.Int64()]
+	}
+	return string(out), nil
+}
+
+func randomToken() (string, error) {
+	buffer := make([]byte, 32)
+	n, err := rand.Read(buffer)
+	if err != nil {
 		return "", err
 	}
-	for i := range raw {
-		raw[i] = alphabet[int(raw[i])%len(alphabet)]
+	if n != len(buffer) {
+		return "", errEmptyRandomness
 	}
-	return string(raw[:4]) + "-" + string(raw[4:]), nil
-}
-func randomString(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
+	return base64.RawURLEncoding.EncodeToString(buffer), nil
 }
 
-// MemoryRepository provides transaction-safe semantics for development and
-// focused tests. Values are copied at the boundary so callers cannot mutate
-// state without going through domain methods.
-type MemoryRepository struct {
-	mu          sync.RWMutex
-	claims      map[string]Claim
-	credentials map[string]Credential
-	assignments map[string]Assignment
-	reports     map[string]PlaybackReport
-}
-
-func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{claims: map[string]Claim{}, credentials: map[string]Credential{}, assignments: map[string]Assignment{}, reports: map[string]PlaybackReport{}}
-}
-func (m *MemoryRepository) CreateClaim(ctx context.Context, claim Claim) error {
-	return m.CreateClaimAt(ctx, claim, time.Now().UTC())
-}
-func (m *MemoryRepository) CreateClaimAt(_ context.Context, claim Claim, now time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, c := range m.claims {
-		if c.NodeID == claim.NodeID && c.ConsumedAt == nil && now.Before(c.ExpiresAt) {
-			return ErrActiveClaim
-		}
+func truncate(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
 	}
-	m.claims[claim.CodeHash] = claim
-	return nil
+	return string(runes[:limit])
 }
-func (m *MemoryRepository) ClaimByHash(_ context.Context, codeHash string) (Claim, bool, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	c, ok := m.claims[codeHash]
-	return c, ok, nil
-}
-func (m *MemoryRepository) ConsumeClaimAndCreateCredential(_ context.Context, id, node string, at time.Time, credential Credential) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for key, claim := range m.claims {
-		if claim.ID != id {
-			continue
-		}
-		if claim.NodeID != node {
-			return ErrNodeMismatch
-		}
-		if claim.ConsumedAt != nil {
-			return ErrClaimConsumed
-		}
-		if !at.Before(claim.ExpiresAt) {
-			return ErrClaimExpired
-		}
-		if credential.NodeID != node || credential.Hash == "" {
-			return ErrCredentialScope
-		}
-		if _, exists := m.credentials[credential.Hash]; exists {
-			return ErrActiveClaim
-		}
-		consumedAt := at
-		claim.ConsumedAt = &consumedAt
-		claim.CredentialID = credential.ID
-		m.claims[key] = claim
-		m.credentials[credential.Hash] = credential
-		return nil
-	}
-	return ErrClaimNotFound
-}
-func (m *MemoryRepository) CredentialByHash(_ context.Context, h string) (Credential, bool, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	c, ok := m.credentials[h]
-	return c, ok, nil
-}
-func (m *MemoryRepository) UpdateCredential(_ context.Context, c Credential) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for h, old := range m.credentials {
-		if old.ID == c.ID {
-			delete(m.credentials, h)
-			m.credentials[c.Hash] = c
-			return nil
-		}
-	}
-	return ErrCredentialNotFound
-}
-func (m *MemoryRepository) RevokeCredential(_ context.Context, id string, at time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for h, c := range m.credentials {
-		if c.ID == id {
-			c.RevokedAt = &at
-			m.credentials[h] = c
-			return nil
-		}
-	}
-	return ErrCredentialNotFound
-}
-func (m *MemoryRepository) PutAssignment(_ context.Context, a Assignment) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.assignments[a.ID] = a
-	return nil
-}
-func (m *MemoryRepository) Assignment(_ context.Context, id string) (Assignment, bool, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	a, ok := m.assignments[id]
-	return a, ok, nil
-}
-func (m *MemoryRepository) LatestReport(_ context.Context, node string) (PlaybackReport, bool, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	r, ok := m.reports[node]
-	return r, ok, nil
-}
-func (m *MemoryRepository) PutReport(_ context.Context, node string, r PlaybackReport) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if old, ok := m.reports[node]; ok && old.EventEpoch == r.EventEpoch && old.Sequence > r.Sequence {
-		return ErrInvalidReport
-	}
-	m.reports[node] = r
-	return nil
-}
-
-// MemoryEventStream is a per-node, in-process stream with sequence-based
-// replay. A caller can pass an after sequence and receives only newer events.
-type memorySubscription struct {
-	channel chan AssignmentEvent
-	after   int64
-}
-type MemoryEventStream struct {
-	mu          sync.Mutex
-	subscribers map[string]map[*memorySubscription]struct{}
-	history     []AssignmentEvent
-}
-
-func NewMemoryEventStream() *MemoryEventStream {
-	return &MemoryEventStream{subscribers: map[string]map[*memorySubscription]struct{}{}}
-}
-func (m *MemoryEventStream) Publish(_ context.Context, event AssignmentEvent) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.history = append(m.history, event)
-	for sub := range m.subscribers[event.Assignment.NodeID] {
-		if event.Assignment.Sequence <= sub.after {
-			continue
-		}
-		select {
-		case sub.channel <- event:
-			sub.after = event.Assignment.Sequence
-		default:
-		}
-	}
-	return nil
-}
-func (m *MemoryEventStream) Subscribe(ctx context.Context, node string, after int64) (<-chan AssignmentEvent, error) {
-	sub := &memorySubscription{channel: make(chan AssignmentEvent, 16), after: after}
-	m.mu.Lock()
-	if m.subscribers[node] == nil {
-		m.subscribers[node] = map[*memorySubscription]struct{}{}
-	}
-	m.subscribers[node][sub] = struct{}{}
-	for _, event := range m.history {
-		if event.Assignment.NodeID == node && event.Assignment.Sequence > sub.after {
-			select {
-			case sub.channel <- event:
-				sub.after = event.Assignment.Sequence
-			default:
-			}
-		}
-	}
-	m.mu.Unlock()
-	go func() {
-		<-ctx.Done()
-		m.mu.Lock()
-		if _, ok := m.subscribers[node][sub]; ok {
-			delete(m.subscribers[node], sub)
-			close(sub.channel)
-		}
-		m.mu.Unlock()
-	}()
-	return sub.channel, nil
-}
-
-// Ensure the implementation continues to satisfy the public contracts.
-var _ Repository = (*MemoryRepository)(nil)
-var _ TimedClaimRepository = (*MemoryRepository)(nil)

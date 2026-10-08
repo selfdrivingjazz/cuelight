@@ -130,8 +130,8 @@ func TestAssignmentCarriesReleasePresentationKind(t *testing.T) {
 		Payload: canonical.PayloadV1{
 			SchemaVersion: canonical.SchemaVersion,
 			Presentation: canonical.Presentation{
-				Kind:  canonical.PresentationCable,
-				Cable: &canonical.CablePresentation{},
+				Kind: canonical.PresentationWeb,
+				Web:  &canonical.WebPresentation{URL: "https://control.example/cable/?deployment=d"},
 			},
 		},
 	}}, fakeCAS{body: "abcdef"}, Limits{})
@@ -142,7 +142,7 @@ func TestAssignmentCarriesReleasePresentationKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Assignment.PresentationKind != canonical.PresentationCable {
+	if result.Assignment.PresentationKind != canonical.PresentationWeb {
 		t.Fatalf("presentation kind = %q", result.Assignment.PresentationKind)
 	}
 }

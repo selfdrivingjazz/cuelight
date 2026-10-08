@@ -354,6 +354,22 @@ func TestMutationsRetryOnlyWithIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestPollRemoteEventsReportsGoneSessions(t *testing.T) {
+	status := http.StatusGone
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	if _, err := client.PollRemoteEvents(context.Background(), "session", 0, 0); !errors.Is(err, ErrRemoteSessionGone) {
+		t.Fatalf("410 error = %v", err)
+	}
+	status = http.StatusNotFound
+	if _, err := client.PollRemoteEvents(context.Background(), "session", 0, 0); err == nil || errors.Is(err, ErrRemoteSessionGone) {
+		t.Fatalf("404 error = %v", err)
+	}
+}
+
 func newTestClient(t *testing.T, server *httptest.Server, nodeCertificate *tls.Certificate) *Client {
 	t.Helper()
 	certificate := server.Certificate()

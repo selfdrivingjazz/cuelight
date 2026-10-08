@@ -10,5 +10,6 @@ test("provisioning requires bounded identity and secret inputs", () => {
 
 test("desktop settings preserve explicit output policy", () => {
   expect(settingsSchema.parse({})).toEqual({ autoStart: false, fullScreen: true, presentationMode: "automatic" });
-  expect(settingsSchema.parse({ autoStart: true, fullScreen: false, presentationMode: "cable" })).toEqual({ autoStart: true, fullScreen: false, presentationMode: "cable" });
+  expect(settingsSchema.parse({ autoStart: true, fullScreen: false, presentationMode: "web" })).toEqual({ autoStart: true, fullScreen: false, presentationMode: "web" });
+  expect(settingsSchema.safeParse({ presentationMode: "cable" }).success).toBe(false);
 });

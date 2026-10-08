@@ -14,6 +14,7 @@ import (
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/pki"
 	"github.com/jmill/cable/internal/control/release"
+	"github.com/jmill/cable/internal/control/remote"
 	playerclient "github.com/jmill/cable/internal/player/client"
 	canonical "github.com/jmill/cable/internal/release"
 )
@@ -89,14 +90,16 @@ type testAssignments struct {
 	value    assignment.Assignment
 	result   assignment.PutResult
 	mutation assignment.Mutation
+	target   assignment.Target
 	err      error
 }
 
 func (a *testAssignments) GetAssignment(context.Context, string) (assignment.Assignment, error) {
 	return a.value, nil
 }
-func (a *testAssignments) PutAssignment(_ context.Context, _ string, m assignment.Mutation, _ assignment.PutInput) (assignment.PutResult, error) {
+func (a *testAssignments) AssignTarget(_ context.Context, m assignment.Mutation, _ string, target assignment.Target) (assignment.PutResult, error) {
 	a.mutation = m
+	a.target = target
 	return a.result, a.err
 }
 
@@ -209,14 +212,21 @@ func TestOperatorIfMatchUploadAndMalformedJSON(t *testing.T) {
 
 func TestOperatorAssignmentAndReleaseMappings(t *testing.T) {
 	as := &testAssignments{value: assignment.Assignment{ID: "a", NodeID: "n", DesiredGeneration: 3}, result: assignment.PutResult{Assignment: assignment.Assignment{ID: "a", NodeID: "n", DesiredGeneration: 4}, Created: true}}
-	h := NewHandler(Dependencies{Auth: testAuth{scopes: []string{ScopeAssignmentRead, ScopeAssignmentWrite, ScopeReleaseRead, ScopeReleaseWrite}}, Assignments: as, Releases: testReleases{}})
+	h := NewHandler(Dependencies{Auth: testAuth{scopes: []string{ScopeAssignmentRead, ScopeAssignmentWrite, ScopeReleaseRead, ScopeReleaseWrite}}, Assignments: as, Assigner: as, Releases: testReleases{}})
 	w := request(h, "GET", "/nodes/n/assignment", "tok", nil)
 	if w.Code != 200 || w.Header().Get("ETag") != "\"generation:3\"" {
 		t.Fatalf("assignment=%d etag=%q", w.Code, w.Header().Get("ETag"))
 	}
-	w = withHeader(h, "PUT", "/nodes/n/assignment", "tok", strings.NewReader(`{"releaseId":"r","releaseDigest":"`+strings.Repeat("a", 64)+`","deliveryMode":"stream","expectedGeneration":3}`), map[string]string{"If-Match": "\"generation:3\"", "Idempotency-Key": "0123456789abcdef"})
+	w = withHeader(h, "PUT", "/nodes/n/assignment", "tok", strings.NewReader(`{"mediaId":"m","deliveryMode":"stream","expectedGeneration":3,"remoteInput":true,"showQr":false}`), map[string]string{"If-Match": "\"generation:3\"", "Idempotency-Key": "0123456789abcdef"})
 	if w.Code != 201 {
 		t.Fatalf("assignment put=%d", w.Code)
+	}
+	if as.target.MediaID != "m" || as.target.ExpectedGeneration == nil || *as.target.ExpectedGeneration != 3 || !as.target.RemoteInput {
+		t.Fatalf("assignment target=%#v", as.target)
+	}
+	w = withHeader(h, "PUT", "/nodes/n/assignment", "tok", strings.NewReader(`{"releaseId":"r","expectedGeneration":3}`), map[string]string{"If-Match": "\"generation:3\"", "Idempotency-Key": "0123456789abcdef"})
+	if w.Code != 400 {
+		t.Fatalf("operator-supplied release must be rejected, got %d", w.Code)
 	}
 	as.err = assignment.ErrGenerationConflict
 	w = withHeader(h, "PUT", "/nodes/n/assignment", "tok", strings.NewReader(`{}`), map[string]string{"If-Match": "x", "Idempotency-Key": "0123456789abcdef"})
@@ -248,5 +258,36 @@ func TestOperatorCanUnregisterNode(t *testing.T) {
 	}
 	if pkiService.revokedNode != "node-one" || pkiService.revokeMutation.ActorID != "actor" || pkiService.revokeMutation.IdempotencyKey != "unregister-node-one" {
 		t.Fatalf("node=%q mutation=%#v", pkiService.revokedNode, pkiService.revokeMutation)
+	}
+}
+
+type testRemoteLinks struct {
+	nodeID string
+	err    error
+}
+
+func (l *testRemoteLinks) Link(_ context.Context, nodeID string) (remote.SessionCreated, error) {
+	l.nodeID = nodeID
+	if l.err != nil {
+		return remote.SessionCreated{}, l.err
+	}
+	return remote.SessionCreated{ID: "s", Token: "t", RemoteURL: "https://control.example/remote/s#token=t", ExpiresAt: time.Unix(10, 0).UTC()}, nil
+}
+
+func TestOperatorCreatesNodeRemoteLink(t *testing.T) {
+	links := &testRemoteLinks{}
+	h := NewHandler(Dependencies{Auth: testAuth{scopes: []string{ScopeAssignmentWrite}}, RemoteLinks: links})
+	w := request(h, "POST", "/nodes/n/remote-link", "tok", nil)
+	if w.Code != 201 || links.nodeID != "n" || !strings.Contains(w.Body.String(), `"remoteUrl":"https://control.example/remote/s#token=t"`) || !strings.Contains(w.Body.String(), `"sessionId":"s"`) {
+		t.Fatalf("link=%d %s node=%q", w.Code, w.Body.String(), links.nodeID)
+	}
+	for err, want := range map[error]int{remote.ErrSessionMissing: 404, remote.ErrDisabled: 409} {
+		links.err = err
+		if w := request(h, "POST", "/nodes/n/remote-link", "tok", nil); w.Code != want || w.Header().Get("Content-Type") != "application/problem+json" {
+			t.Fatalf("%v=%d", err, w.Code)
+		}
+	}
+	if w := request(NewHandler(Dependencies{Auth: testAuth{scopes: []string{ScopeAssignmentRead}}, RemoteLinks: links}), "POST", "/nodes/n/remote-link", "tok", nil); w.Code != 403 {
+		t.Fatalf("read scope=%d", w.Code)
 	}
 }

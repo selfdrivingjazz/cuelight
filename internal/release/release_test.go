@@ -143,42 +143,50 @@ func TestEnvelopeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCablePresentationIsTypedAndClosureIsExact(t *testing.T) {
-	shell := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	revision := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+func TestMediaScheduleWebItemsRequireWebFeature(t *testing.T) {
 	media := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	payload := PayloadV1{
 		SchemaVersion:          SchemaVersion,
 		MinimumProtocolVersion: ProtocolV1,
-		Presentation: Presentation{
-			Kind: PresentationCable,
-			Cable: &CablePresentation{
-				ShellBuildDigest: shell, RevisionArtifactDigest: revision,
-				Entrypoint: "index.html", BridgeProtocol: ProtocolV1,
-				ArtifactClosure: []string{shell, revision, media},
+		Presentation: Presentation{Kind: PresentationMediaSchedule, MediaSchedule: &MediaSchedulePresentation{
+			Timezone: "UTC",
+			Window:   MediaScheduleWindow{StartsAt: "2026-10-04T00:00:00Z", EndsAt: "2026-10-04T00:02:00Z"},
+			Items: []MediaScheduleItem{
+				{ID: "a", StartsAt: "2026-10-04T00:00:00Z", EndsAt: "2026-10-04T00:01:00Z", ArtifactDigest: media, MediaType: "video/mp4", Fit: "fit"},
+				{ID: "b", StartsAt: "2026-10-04T00:01:00Z", EndsAt: "2026-10-04T00:02:00Z", Web: &MediaScheduleWebItem{URL: "https://example.com/page"}},
 			},
-		},
-		Artifacts: []Artifact{
-			{Digest: shell, Size: 10, MediaType: "text/html"},
-			{Digest: revision, Size: 20, MediaType: "application/json"},
-			{Digest: media, Size: 30, MediaType: "video/mp4"},
-		},
+			ArtifactClosure:      []string{media},
+			AllowedDeliveryModes: []string{"stream"},
+		}},
+		Artifacts:        []Artifact{{Digest: media, Size: 30, MediaType: "video/mp4"}},
+		RequiredFeatures: []string{FeatureWeb},
 	}
-	digest, encoded, err := Digest(payload)
+	_, encoded, err := Digest(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains([]string{string(PresentationCable)}, string(payload.PresentationMode())) {
-		t.Fatalf("presentation kind = %q", payload.PresentationMode())
+	if !bytes.Contains(encoded, []byte(`"web":{"url":"https://example.com/page"}`)) {
+		t.Fatalf("canonical payload omitted web item: %s", encoded)
 	}
-	if !bytes.Contains(encoded, []byte(`"kind":"cable"`)) {
-		t.Fatalf("canonical payload omitted cable discriminator: %s", encoded)
-	}
-	if digest == "" {
-		t.Fatal("missing cable digest")
-	}
-	payload.Presentation.Cable.ArtifactClosure = payload.Presentation.Cable.ArtifactClosure[:2]
+	payload.RequiredFeatures = nil
 	if _, _, err := Digest(payload); err == nil {
-		t.Fatal("incomplete cable closure accepted")
+		t.Fatal("web schedule item accepted without the web feature")
+	}
+	payload.RequiredFeatures = []string{FeatureWeb}
+	payload.Presentation.MediaSchedule.Items[1].Web.URL = "ftp://example.com"
+	if _, _, err := Digest(payload); err == nil {
+		t.Fatal("non-http web schedule item accepted")
+	}
+	webOnly := payload
+	schedule := *payload.Presentation.MediaSchedule
+	schedule.Items = []MediaScheduleItem{{ID: "w", StartsAt: schedule.Window.StartsAt, EndsAt: schedule.Window.EndsAt, Web: &MediaScheduleWebItem{URL: "https://example.com/"}}}
+	schedule.ArtifactClosure = []string{}
+	webOnly.Presentation.MediaSchedule = &schedule
+	webOnly.Artifacts = nil
+	if _, _, err := Digest(webOnly); err != nil {
+		t.Fatalf("web-only schedule rejected: %v", err)
+	}
+	if slices.Contains([]PresentationKind{PresentationMedia, PresentationWeb}, webOnly.PresentationMode()) {
+		t.Fatal("unexpected presentation kind")
 	}
 }
