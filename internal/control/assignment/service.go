@@ -44,13 +44,15 @@ type Mutation struct {
 // Target is what an operator assigns: exactly one media item or playlist.
 // An empty DeliveryMode selects cache_then_play when the published release
 // allows it and stream otherwise. A nil ExpectedGeneration assigns over
-// whatever generation is current.
+// whatever generation is current. A nil RemoteInput or ShowQR keeps the
+// node's current assignment value (false without one); turning remote input
+// off also turns off an inherited QR code.
 type Target struct {
 	MediaID            string
 	PlaylistID         string
 	DeliveryMode       string
-	RemoteInput        bool
-	ShowQR             bool
+	RemoteInput        *bool
+	ShowQR             *bool
 	ExpectedGeneration *int64
 }
 
@@ -202,6 +204,10 @@ func (s Service) AssignTarget(ctx context.Context, mutation Mutation, nodeID str
 			return fmt.Errorf("%w: %q", ErrDeliveryMode, mode)
 		}
 
+		remoteInput, showQR, err := remoteSettings(tx, target)
+		if err != nil {
+			return err
+		}
 		assignmentID, err := tx.NewAssignmentID()
 		if err != nil {
 			return err
@@ -219,8 +225,8 @@ func (s Service) AssignTarget(ctx context.Context, mutation Mutation, nodeID str
 			DeliveryMode:       mode,
 			ExpectedGeneration: expected,
 			DesiredGeneration:  currentGeneration + 1,
-			RemoteInput:        target.RemoteInput,
-			ShowQR:             target.ShowQR,
+			RemoteInput:        remoteInput,
+			ShowQR:             showQR,
 			CreatedBy:          mutation.ActorID,
 		}
 		if err := tx.InsertAssignment(created); err != nil {
@@ -299,10 +305,38 @@ func validateTarget(nodeID string, target Target) error {
 	if target.DeliveryMode != "" && target.DeliveryMode != DeliveryStream && target.DeliveryMode != DeliveryCacheThenPlay {
 		return fmt.Errorf("%w: %q", ErrDeliveryMode, target.DeliveryMode)
 	}
-	if target.ShowQR && !target.RemoteInput {
+	// An inherited remote input setting is checked in remoteSettings.
+	if target.ShowQR != nil && *target.ShowQR && target.RemoteInput != nil && !*target.RemoteInput {
 		return fmt.Errorf("%w: QR requires remote input", ErrInvalidAssignment)
 	}
 	return nil
+}
+
+// remoteSettings resolves the target's remote input and QR settings, keeping
+// the node's current values for omitted fields.
+func remoteSettings(tx Transaction, target Target) (remoteInput, showQR bool, err error) {
+	if target.RemoteInput == nil || target.ShowQR == nil {
+		current, found, err := tx.CurrentAssignment()
+		if err != nil {
+			return false, false, err
+		}
+		if found {
+			remoteInput, showQR = current.RemoteInput, current.ShowQR
+		}
+	}
+	if target.RemoteInput != nil {
+		remoteInput = *target.RemoteInput
+	}
+	if target.ShowQR != nil {
+		showQR = *target.ShowQR
+	}
+	if showQR && !remoteInput {
+		if target.ShowQR != nil {
+			return false, false, fmt.Errorf("%w: QR requires remote input", ErrInvalidAssignment)
+		}
+		showQR = false
+	}
+	return remoteInput, showQR, nil
 }
 
 func validateReleaseBinding(envelope canonical.EnvelopeV1, releaseID, releaseDigest string) error {

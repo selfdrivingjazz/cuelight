@@ -167,8 +167,8 @@ func (s Service) Activate(ctx context.Context, actorID, idempotencyKey, id strin
 				MediaID:      screen.MediaID,
 				PlaylistID:   screen.PlaylistID,
 				DeliveryMode: screen.DeliveryMode,
-				RemoteInput:  screen.RemoteInput,
-				ShowQR:       screen.ShowQR,
+				RemoteInput:  &screen.RemoteInput,
+				ShowQR:       &screen.ShowQR,
 			})
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {

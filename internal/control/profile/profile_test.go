@@ -48,7 +48,7 @@ func (f *fakeFleet) AssignTarget(_ context.Context, mutation assignment.Mutation
 		mode = assignment.DeliveryCacheThenPlay
 	}
 	previous := f.current[nodeID]
-	next := assignment.Assignment{ID: f.nextID("assignment"), NodeID: nodeID, MediaID: target.MediaID, PlaylistID: target.PlaylistID, DeliveryMode: mode, RemoteInput: target.RemoteInput, ShowQR: target.ShowQR, DesiredGeneration: previous.DesiredGeneration + 1}
+	next := assignment.Assignment{ID: f.nextID("assignment"), NodeID: nodeID, MediaID: target.MediaID, PlaylistID: target.PlaylistID, DeliveryMode: mode, RemoteInput: target.RemoteInput != nil && *target.RemoteInput, ShowQR: target.ShowQR != nil && *target.ShowQR, DesiredGeneration: previous.DesiredGeneration + 1}
 	f.current[nodeID] = next
 	f.replays[mutation.IdempotencyKey] = next
 	return assignment.PutResult{Assignment: next, Created: true}, nil

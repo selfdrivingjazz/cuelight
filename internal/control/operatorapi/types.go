@@ -81,14 +81,15 @@ type Assignment struct {
 }
 
 // AssignmentInput targets exactly one media item or playlist; the server
-// publishes or reuses the release that presents it.
+// publishes or reuses the release that presents it. Omitted RemoteInput and
+// ShowQR keep the node's current assignment values.
 type AssignmentInput struct {
 	MediaID            string `json:"mediaId,omitempty"`
 	PlaylistID         string `json:"playlistId,omitempty"`
 	DeliveryMode       string `json:"deliveryMode,omitempty"`
 	ExpectedGeneration int64  `json:"expectedGeneration"`
-	RemoteInput        bool   `json:"remoteInput"`
-	ShowQR             bool   `json:"showQr"`
+	RemoteInput        *bool  `json:"remoteInput,omitempty"`
+	ShowQR             *bool  `json:"showQr,omitempty"`
 }
 
 type Upload struct {

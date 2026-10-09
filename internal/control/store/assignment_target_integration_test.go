@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
 	"github.com/jmilldotdev/cuelight/internal/control/persistence"
 	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
+	"github.com/jmilldotdev/cuelight/internal/control/remote"
 	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
@@ -247,5 +249,95 @@ func TestPostgresUnifiedMediaMigrationConvertsWebItems(t *testing.T) {
 	var tables int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'web_items'`, schema).Scan(&tables); err != nil || tables != 0 {
 		t.Fatalf("web_items tables = %d, %v; want dropped", tables, err)
+	}
+}
+
+func TestPostgresReassignmentKeepsRemoteSession(t *testing.T) {
+	repository, db := newPostgresTestStore(t)
+	ctx := context.Background()
+	actorID := "00000000-0000-4000-8000-000000000301"
+	nodeID := "00000000-0000-4000-8000-000000000302"
+	if err := repository.EnsureActor(ctx, actorID, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO nodes (id, name, credential_state, event_epoch) VALUES ($1, 'screen', 'active', $1)`, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	board, _, err := repository.CreateWebMedia(ctx, media.Mutation{ActorID: actorID}, media.Media{ID: "00000000-0000-4000-8000-000000000303", URL: "https://example.com/board", Title: "Board"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	menu, _, err := repository.CreateWebMedia(ctx, media.Mutation{ActorID: actorID}, media.Media{ID: "00000000-0000-4000-8000-000000000304", URL: "https://example.com/menu", Title: "Menu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator := operatorapi.NewHandler(operatorapi.Dependencies{
+		Auth:     targetTestAuth{actorID: actorID},
+		Assigner: assignment.Service{Assignments: repository, Releases: targetTestPublisher(t, repository)},
+	})
+	put := func(key, body string) operatorapi.Assignment {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPut, "/nodes/"+nodeID+"/assignment", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer token")
+		request.Header.Set("If-Match", `"generation:0"`)
+		request.Header.Set("Idempotency-Key", key)
+		recorder := httptest.NewRecorder()
+		operator.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("PUT %s = %d %s", body, recorder.Code, recorder.Body.String())
+		}
+		var result operatorapi.Assignment
+		if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	sessions := &remote.Service{Policies: repository, PublicURL: "https://control.example"}
+	phone := remote.NewHandler(sessions, nil)
+	press := func(sessionID, token string) int {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/remote/sessions/"+sessionID+"/events", strings.NewReader(`{"sequence":1,"type":"key","key":"Enter"}`))
+		request.Header.Set("Authorization", "Bearer "+token)
+		recorder := httptest.NewRecorder()
+		phone.ServeHTTP(recorder, request)
+		return recorder.Code
+	}
+
+	first := put("sticky-remote-1-0123456789", `{"mediaId":"`+board.ID+`","expectedGeneration":0,"remoteInput":true,"showQr":true}`)
+	scanned, err := sessions.Create(ctx, nodeID, first.DesiredGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := sessions.Link(ctx, nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second := put("sticky-remote-2-0123456789", `{"mediaId":"`+menu.ID+`","expectedGeneration":1}`)
+	if !second.RemoteInput || !second.ShowQR {
+		t.Fatalf("reassignment without remote fields = %#v; want remote settings kept", second)
+	}
+	if code := press(scanned.ID, scanned.Token); code != http.StatusAccepted {
+		t.Fatalf("scanned phone after reassignment = %d", code)
+	}
+	renewed, err := sessions.Create(ctx, nodeID, second.DesiredGeneration)
+	if err != nil || renewed.ID != scanned.ID || !renewed.ShowQR {
+		t.Fatalf("player session after reassignment = %#v, %v; want the scanned session", renewed, err)
+	}
+	for _, token := range []string{scanned.Token, link.Token, renewed.Token} {
+		if code := press(scanned.ID, token); code != http.StatusAccepted {
+			t.Fatalf("phone after the player renewed its session = %d", code)
+		}
+	}
+
+	third := put("sticky-remote-3-0123456789", `{"mediaId":"`+board.ID+`","expectedGeneration":2,"remoteInput":false}`)
+	if third.RemoteInput || third.ShowQR {
+		t.Fatalf("explicit remoteInput false = %#v; want remote and QR off", third)
+	}
+	if code := press(scanned.ID, renewed.Token); code != http.StatusForbidden {
+		t.Fatalf("phone after remote turned off = %d", code)
+	}
+	if _, err := sessions.Create(ctx, nodeID, third.DesiredGeneration); !errors.Is(err, remote.ErrDisabled) {
+		t.Fatalf("session with remote off = %v", err)
 	}
 }

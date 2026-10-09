@@ -8,9 +8,28 @@ import (
 	"time"
 )
 
+// policies reports a fixed policy for whatever generation is asked about.
 type policies struct{ policy Policy }
 
-func (p policies) RemotePolicy(context.Context, string, int64) (Policy, error) { return p.policy, nil }
+func (p policies) RemotePolicy(_ context.Context, _ string, since int64) (Policy, int64, error) {
+	return p.policy, since, nil
+}
+
+// history models assignment history: remote[i] is generation i+1's remote
+// input and the last entry is current.
+type history struct{ remote []bool }
+
+func (h *history) RemotePolicy(_ context.Context, _ string, since int64) (Policy, int64, error) {
+	current := int64(len(h.remote))
+	if since < 1 || since > current {
+		return Policy{}, 0, ErrDisabled
+	}
+	enabled := true
+	for _, on := range h.remote[since-1:] {
+		enabled = enabled && on
+	}
+	return Policy{Enabled: enabled, ShowQR: enabled}, current, nil
+}
 
 func TestSessionAuthenticatesOrdersAndScopesEvents(t *testing.T) {
 	now := time.Unix(1_000, 0).UTC()
@@ -38,9 +57,9 @@ func TestSessionAuthenticatesOrdersAndScopesEvents(t *testing.T) {
 	if err != nil || len(page.Events) != 2 || page.Events[0].Key != "ArrowDown" || page.Events[0].Sequence != base+1 || page.Events[1].Sequence != base+2 || page.NextSequence != base+2 {
 		t.Fatalf("page=%#v err=%v", page, err)
 	}
-	// A renewed session keeps sequences monotonic, so a consumer holding the
-	// old cursor still receives the new session's events.
-	now = now.Add(time.Second)
+	// A session renewed after expiry keeps sequences monotonic, so a consumer
+	// holding the old cursor still receives the new session's events.
+	now = now.Add(11 * time.Minute)
 	renewed, err := service.Create(context.Background(), "node-one", 4)
 	if err != nil {
 		t.Fatal(err)
@@ -123,8 +142,8 @@ func TestLinkMintsAdditionalSessionTokens(t *testing.T) {
 	if _, err := service.Link(ctx, "other"); !errors.Is(err, ErrSessionMissing) {
 		t.Fatalf("other node = %v", err)
 	}
-	links := make([]SessionCreated, 0, maxSessionTokens)
-	for range maxSessionTokens {
+	links := make([]SessionCreated, 0, maxSessionTokens+1)
+	for range maxSessionTokens + 1 {
 		link, err := service.Link(ctx, "node")
 		if err != nil {
 			t.Fatal(err)
@@ -186,12 +205,86 @@ func TestAppSessionLinkIsStablePerSessionAndSurvivesLinkEviction(t *testing.T) {
 	if err := service.Post(ctx, created.ID, app.Token, Event{Sequence: 1, Type: "key", Key: "Enter"}); err != nil {
 		t.Fatalf("app token after link eviction: %v", err)
 	}
+	rebound, err := service.Create(ctx, "node", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next, err := service.AppSession("node"); err != nil || next.ID != created.ID || rebound.ID != created.ID || next.Token != app.Token {
+		t.Fatalf("rebound app = %#v, %v", next, err)
+	}
+	now = now.Add(2 * time.Hour)
 	renewed, err := service.Create(ctx, "node", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next, err := service.AppSession("node"); err != nil || next.ID != renewed.ID || next.Token == app.Token {
+	if next, err := service.AppSession("node"); err != nil || next.ID != renewed.ID || next.ID == created.ID || next.Token == app.Token {
 		t.Fatalf("renewed app = %#v, %v", next, err)
+	}
+}
+
+func TestSessionSurvivesReassignmentsWhileRemoteStaysOn(t *testing.T) {
+	now := time.Unix(1_000, 0).UTC()
+	policies := &history{remote: []bool{true}}
+	service := &Service{Policies: policies, PublicURL: "https://control.example", TTL: time.Hour, Now: func() time.Time { return now }}
+	ctx := context.Background()
+	first, err := service.Create(ctx, "node", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := service.Link(ctx, "node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(id, token string) error {
+		return service.Post(ctx, id, token, Event{Sequence: 1, Type: "key", Key: "Enter"})
+	}
+	// Reassigned to content that never creates a session (a video).
+	policies.remote = append(policies.remote, true)
+	if err := post(first.ID, first.Token); err != nil {
+		t.Fatalf("scanned token after reassignment: %v", err)
+	}
+	// Reassigned to a web page: the player's new session is the same one.
+	policies.remote = append(policies.remote, true)
+	second, err := service.Create(ctx, "node", 3)
+	if err != nil || second.ID != first.ID || second.Token == first.Token {
+		t.Fatalf("rebound = %#v, %v", second, err)
+	}
+	if page, err := service.Poll(ctx, "node", second.ID, 0, 0); err != nil || len(page.Events) != 0 {
+		t.Fatalf("rebound session replays earlier input: %#v, %v", page, err)
+	}
+	for _, token := range []string{first.Token, link.Token, second.Token} {
+		if err := post(second.ID, token); err != nil {
+			t.Fatalf("token after rebind: %v", err)
+		}
+	}
+	// Turning remote input off ends every phone, and turning it back on
+	// does not revive them.
+	policies.remote = append(policies.remote, false)
+	if err := post(second.ID, second.Token); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("remote off = %v", err)
+	}
+	if _, err := service.Link(ctx, "node"); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("link with remote off = %v", err)
+	}
+	if _, err := service.Create(ctx, "node", 4); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("create with remote off = %v", err)
+	}
+	policies.remote = append(policies.remote, true)
+	if err := post(second.ID, second.Token); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("remote back on revived an old phone: %v", err)
+	}
+	fresh, err := service.Create(ctx, "node", 5)
+	if err != nil || fresh.ID == first.ID {
+		t.Fatalf("fresh = %#v, %v", fresh, err)
+	}
+	if err := post(first.ID, first.Token); !errors.Is(err, ErrSessionMissing) {
+		t.Fatalf("replaced session = %v", err)
+	}
+	if err := post(fresh.ID, fresh.Token); err != nil {
+		t.Fatal(err)
+	}
+	if app, err := service.AppSession("node"); err != nil || app.ID != fresh.ID {
+		t.Fatalf("app session = %#v, %v", app, err)
 	}
 }
 
@@ -209,6 +302,6 @@ func TestLinkRequiresEnabledPolicy(t *testing.T) {
 
 type togglePolicies struct{ enabled bool }
 
-func (p *togglePolicies) RemotePolicy(context.Context, string, int64) (Policy, error) {
-	return Policy{Enabled: p.enabled}, nil
+func (p *togglePolicies) RemotePolicy(_ context.Context, _ string, since int64) (Policy, int64, error) {
+	return Policy{Enabled: p.enabled}, since, nil
 }

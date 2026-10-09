@@ -1991,10 +1991,10 @@ export interface components {
             deliveryMode?: "stream" | "cache_then_play";
             /** Format: int64 */
             expectedGeneration: number;
-            /** @default false */
-            remoteInput: boolean;
-            /** @default false */
-            showQr: boolean;
+            /** @description Omitted keeps the node's current assignment value (false when it has none), so a screen's phone remote survives reassignment. false also turns off an inherited showQr. */
+            remoteInput?: boolean;
+            /** @description Omitted keeps the node's current assignment value (false when it has none). Requires remoteInput to be true after inheritance. */
+            showQr?: boolean;
         };
         /** @description A node with a software target but no content assignment receives an Assignment whose id, releaseId, releaseDigest, presentationKind, and deliveryMode are empty strings; only nodeId and software are meaningful and the node keeps presenting nothing. */
         Assignment: {

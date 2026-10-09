@@ -2698,8 +2698,16 @@ components:
         playlistId: {$ref: "#/components/schemas/Id"}
         deliveryMode: {type: string, enum: [stream, cache_then_play], description: "Defaults to cache_then_play when the release allows it, otherwise stream."}
         expectedGeneration: {type: integer, format: int64, minimum: 0}
-        remoteInput: {type: boolean, default: false}
-        showQr: {type: boolean, default: false}
+        remoteInput:
+          type: boolean
+          description: >-
+            Omitted keeps the node's current assignment value (false when it has none), so a
+            screen's phone remote survives reassignment. false also turns off an inherited showQr.
+        showQr:
+          type: boolean
+          description: >-
+            Omitted keeps the node's current assignment value (false when it has none). Requires
+            remoteInput to be true after inheritance.
     Assignment:
       description: >-
         A node with a software target but no content assignment receives an Assignment whose id,

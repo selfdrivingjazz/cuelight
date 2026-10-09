@@ -221,8 +221,12 @@ func TestOperatorAssignmentAndReleaseMappings(t *testing.T) {
 	if w.Code != 201 {
 		t.Fatalf("assignment put=%d", w.Code)
 	}
-	if as.target.MediaID != "m" || as.target.ExpectedGeneration == nil || *as.target.ExpectedGeneration != 3 || !as.target.RemoteInput {
+	if as.target.MediaID != "m" || as.target.ExpectedGeneration == nil || *as.target.ExpectedGeneration != 3 || as.target.RemoteInput == nil || !*as.target.RemoteInput || as.target.ShowQR == nil || *as.target.ShowQR {
 		t.Fatalf("assignment target=%#v", as.target)
+	}
+	w = withHeader(h, "PUT", "/nodes/n/assignment", "tok", strings.NewReader(`{"mediaId":"m","expectedGeneration":3}`), map[string]string{"If-Match": "\"generation:3\"", "Idempotency-Key": "0123456789abcdef"})
+	if w.Code != 201 || as.target.RemoteInput != nil || as.target.ShowQR != nil {
+		t.Fatalf("omitted remote settings must reach the service unset: %d %#v", w.Code, as.target)
 	}
 	w = withHeader(h, "PUT", "/nodes/n/assignment", "tok", strings.NewReader(`{"releaseId":"r","expectedGeneration":3}`), map[string]string{"If-Match": "\"generation:3\"", "Idempotency-Key": "0123456789abcdef"})
 	if w.Code != 400 {

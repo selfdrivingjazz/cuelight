@@ -374,3 +374,39 @@ func equalAuthorizations(left, right []Authorization) bool {
 	}
 	return true
 }
+
+// Each step reassigns the same node, inheriting from the previous step.
+func TestAssignInheritsOmittedRemoteSettings(t *testing.T) {
+	release := releaseFixture(t, 1, DeliveryStream)
+	tx := newAssignmentTransactionFixture(release)
+	service := serviceFixture(tx, release)
+	on, off := true, false
+	for index, step := range []struct {
+		name                string
+		remoteInput, showQR *bool
+		wantRemote, wantQR  bool
+		wantErr             bool
+	}{
+		{name: "no current assignment"},
+		{name: "explicit QR needs remote", showQR: &on, wantErr: true},
+		{name: "explicit on", remoteInput: &on, showQR: &on, wantRemote: true, wantQR: true},
+		{name: "omitted keeps both", wantRemote: true, wantQR: true},
+		{name: "explicit QR with explicit remote off", remoteInput: &off, showQR: &on, wantErr: true},
+		{name: "remote off drops inherited QR", remoteInput: &off},
+		{name: "omitted keeps off"},
+		{name: "explicit remote without QR", remoteInput: &on, showQR: &off, wantRemote: true},
+		{name: "explicit QR over inherited remote", showQR: &on, wantRemote: true, wantQR: true},
+	} {
+		input := Target{MediaID: "media-" + release.ID, RemoteInput: step.remoteInput, ShowQR: step.showQR}
+		put, err := service.AssignTarget(context.Background(), Mutation{ActorID: "actor", IdempotencyKey: fmt.Sprint("step-", index)}, "node-one", input)
+		if step.wantErr {
+			if !errors.Is(err, ErrInvalidAssignment) {
+				t.Fatalf("%s: err = %v", step.name, err)
+			}
+			continue
+		}
+		if err != nil || put.Assignment.RemoteInput != step.wantRemote || put.Assignment.ShowQR != step.wantQR {
+			t.Fatalf("%s: remote=%v qr=%v err=%v", step.name, put.Assignment.RemoteInput, put.Assignment.ShowQR, err)
+		}
+	}
+}
