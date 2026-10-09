@@ -13,6 +13,8 @@ interface DisplayWindow {
   /** Escape / close hid it; the next on-air change shows it again. */
   userHidden: boolean;
   shownKey?: string;
+  /** Geometry last applied, so display events that don't move it are ignored. */
+  placedBounds: Electron.Rectangle;
 }
 
 /** One output window per display that hosts at least one running membership. */
@@ -48,7 +50,7 @@ export class OutputWindows {
       event.preventDefault();
       this.hide(displayId);
     });
-    this.windows.set(displayId, { window, userHidden: false });
+    this.windows.set(displayId, { window, userHidden: false, placedBounds: bounds });
     return window;
   }
 
@@ -81,7 +83,8 @@ export class OutputWindows {
     for (const [displayId, state] of this.windows) {
       if (state.window.isDestroyed()) continue;
       if (!value) this.leaveFullScreen(state.window);
-      state.window.setBounds(this.bounds(displayId));
+      state.placedBounds = this.bounds(displayId);
+      state.window.setBounds(state.placedBounds);
       if (value && state.window.isVisible()) this.enterFullScreen(state.window);
     }
   }
@@ -105,13 +108,22 @@ export class OutputWindows {
     this.conceal(state);
   }
 
-  /** Keeps windows on their displays after resolution or arrangement changes. */
+  /**
+   * Keeps windows on their displays after resolution or arrangement changes. Only acts when
+   * the target geometry moved: on macOS, entering or leaving simple full screen hides or shows
+   * the menu bar, which itself fires display-metrics-changed (workArea), so re-applying
+   * unconditionally would toggle full screen forever and starve the main process.
+   */
   relocate(): void {
     for (const [displayId, state] of this.windows) {
       if (state.window.isDestroyed()) continue;
+      const next = this.bounds(displayId);
+      const placed = state.placedBounds;
+      if (next.x === placed.x && next.y === placed.y && next.width === placed.width && next.height === placed.height) continue;
+      state.placedBounds = next;
       const fullScreen = this.isFullScreen(state.window);
       if (fullScreen) this.leaveFullScreen(state.window);
-      state.window.setBounds(this.bounds(displayId));
+      state.window.setBounds(next);
       if (fullScreen) this.enterFullScreen(state.window);
     }
   }
