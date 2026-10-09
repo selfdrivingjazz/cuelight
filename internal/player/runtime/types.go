@@ -118,6 +118,27 @@ type Dependencies struct {
 	Streamer StreamSource
 	Renderer renderer.Adapter
 	Clock    Clock
+	Hooks    Hooks
+}
+
+// Hooks observes controller traffic for node concerns outside release
+// reconciliation (software updates, health markers, display arbitration).
+// Calls happen on the runtime goroutine and must return promptly.
+type Hooks interface {
+	// ControllerReachable follows every accepted capability report and
+	// successful assignment poll.
+	ControllerReachable(context.Context)
+	// AssignmentReceived sees each fresh assignment before reconciliation,
+	// including content-less assignments that only carry a software target.
+	AssignmentReceived(context.Context, playerclient.Assignment)
+	// DrainEvents returns node events to report with the next flush.
+	DrainEvents() []ExternalEvent
+}
+
+// ExternalEvent is a node event raised outside the reconciler.
+type ExternalEvent struct {
+	Type string
+	Data map[string]any
 }
 
 type Snapshot struct {

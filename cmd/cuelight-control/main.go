@@ -11,11 +11,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 	"github.com/jmilldotdev/cuelight/internal/control/app"
 	"github.com/jmilldotdev/cuelight/internal/control/composition"
 )
-
-var version = "dev"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -32,16 +31,20 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 			fmt.Fprintln(stderr, "cuelight-control: version does not accept arguments")
 			return 2
 		}
-		fmt.Fprintf(stdout, "cuelight-control %s\n", version)
+		fmt.Fprintln(stdout, buildinfo.String("cuelight-control"))
 		return 0
 	}
 	switch {
 	case args[0] == "serve":
 		return runServe(ctx, args[1:], lookup, stdout, stderr)
+	case args[0] == "init":
+		return runInit(args[1:], stdout, stderr)
 	case len(args) >= 3 && args[0] == "admin" && args[1] == "token" && args[2] == "create":
 		return runAdminToken(ctx, args[3:], lookup, stdout, stderr)
+	case args[0] == "updates":
+		return runUpdates(ctx, args[1:], lookup, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "cuelight-control: usage: cuelight-control serve | admin token create\n")
+		fmt.Fprintf(stderr, "cuelight-control: usage: cuelight-control serve | init --dir DIR | admin token create | updates import DIR\n")
 		return 2
 	}
 }
@@ -56,7 +59,7 @@ func runServe(ctx context.Context, args []string, lookup func(string) (string, b
 		fmt.Fprintf(stderr, "cuelight-control: %v\n", err)
 		return 2
 	}
-	if err := app.Run(ctx, config, app.Options{Version: version, Handler: composition.HandlerFactory, ConfigureTLS: composition.ConfigureTLS(config)}); err != nil {
+	if err := app.Run(ctx, config, app.Options{Handler: composition.HandlerFactory, ConfigureTLS: composition.ConfigureTLS(config)}); err != nil {
 		fmt.Fprintf(stderr, "cuelight-control: %v\n", err)
 		return 1
 	}

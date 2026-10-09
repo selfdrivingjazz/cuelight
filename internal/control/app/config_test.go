@@ -61,7 +61,7 @@ func TestLoadConfigUsesBoundedDefaults(t *testing.T) {
 	if err := config.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if config.ListenAddress != ":8443" || config.MigrationsPath != "migrations" {
+	if config.ListenAddress != ":8443" {
 		t.Fatalf("unexpected defaults: %#v", config)
 	}
 }

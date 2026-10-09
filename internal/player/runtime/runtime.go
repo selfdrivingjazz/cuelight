@@ -166,6 +166,9 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			capabilitiesSent = true
 			r.controllerRestored()
 			backoff = r.config.ReconnectMinimum
+			if r.deps.Hooks != nil {
+				r.deps.Hooks.ControllerReachable(ctx)
+			}
 		}
 
 		result, err := r.deps.Controller.GetAssignment(ctx, r.etag, r.config.PollWait)
@@ -183,7 +186,13 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		if result.ETag != "" {
 			r.etag = result.ETag
 		}
-		if !result.NotModified {
+		if r.deps.Hooks != nil {
+			r.deps.Hooks.ControllerReachable(ctx)
+		}
+		if !result.NotModified && r.deps.Hooks != nil {
+			r.deps.Hooks.AssignmentReceived(ctx, result.Assignment)
+		}
+		if !result.NotModified && result.Assignment.ReleaseID != "" {
 			reconcileErr := r.Reconcile(ctx, result.Assignment)
 			if reconcileErr != nil {
 				var requestErr *playerclient.RequestError
@@ -195,6 +204,11 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			}
 		} else {
 			r.inspectActive(ctx)
+		}
+		if r.deps.Hooks != nil {
+			for _, external := range r.deps.Hooks.DrainEvents() {
+				r.event(external.Type, 0, external.Data)
+			}
 		}
 		if err := r.flush(ctx); err != nil {
 			r.controllerLost(err)

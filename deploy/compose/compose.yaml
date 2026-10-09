@@ -1,0 +1,80 @@
+# Cuelight server: PostgreSQL 17 + cuelight-control.
+#
+#   cd deploy/compose && cp .env.example .env && $EDITOR .env
+#   docker compose up -d --build
+#   docker compose run --rm admin-token      # prints the first operator token
+#
+# The one-shot `init` service generates keys and a TLS certificate into the
+# `control` volume on first start and is a no-op afterwards.
+name: cuelight
+
+x-control: &control
+  image: ${CUELIGHT_IMAGE:-cuelight-control:local}
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  volumes:
+    - control:/var/lib/cuelight-control
+  environment:
+    CUELIGHT_CONTROL_DATABASE_URL: postgres://cuelight:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/cuelight?sslmode=disable
+  # Load the paths `init` wrote, keeping the database URL from this file.
+  entrypoint: ["/bin/sh", "-c", "set -a && . /var/lib/cuelight-control/cuelight-control.env && set +a && exec cuelight-control \"$$@\"", "cuelight-control"]
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cuelight
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: cuelight
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cuelight", "-d", "cuelight"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  init:
+    image: ${CUELIGHT_IMAGE:-cuelight-control:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: "no"
+    volumes:
+      - control:/var/lib/cuelight-control
+    command:
+      - init
+      - --dir=/var/lib/cuelight-control
+      - --exists-ok
+      - --hostname=${CUELIGHT_HOSTNAME:?set CUELIGHT_HOSTNAME in .env}
+      - --ip=${CUELIGHT_IPS:-127.0.0.1}
+      - --public-url=https://${CUELIGHT_HOSTNAME}:${CUELIGHT_PORT:-8443}
+      - --network-name=${CUELIGHT_NETWORK_NAME:-Cuelight}
+
+  control:
+    <<: *control
+    restart: unless-stopped
+    command: ["serve"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "${CUELIGHT_PORT:-8443}:8443"
+
+  # `docker compose run --rm admin-token` mints an operator token (printed once).
+  admin-token:
+    <<: *control
+    profiles: [tools]
+    restart: "no"
+    command: ["admin", "token", "create", "--scopes", "security_admin,node_enroll,node_read,node_write,assignment_read,assignment_write,media_read,media_write,local_media_read,release_read,release_write"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres:
+  control:

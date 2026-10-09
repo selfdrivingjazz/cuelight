@@ -8,7 +8,8 @@ Requires=cuelight-mpv.service
 Type=simple
 User=cuelight
 Group=cuelight
-ExecStart=/usr/bin/cuelight-minimal-node
+ExecStart=/opt/cuelight/current/cuelight-minimal-node
+Environment=CUELIGHT_PLAYER_UPDATE_METHOD=appliance
 EnvironmentFile=/etc/cuelight/minimal-node.env
 Restart=on-failure
 RestartSec=5

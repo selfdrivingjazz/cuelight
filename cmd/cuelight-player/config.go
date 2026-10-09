@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	goruntime "runtime"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
 	playerruntime "github.com/jmilldotdev/cuelight/internal/player/runtime"
+	"github.com/jmilldotdev/cuelight/internal/player/update"
 	"github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/updates"
 )
 
 type playerConfig struct {
@@ -46,6 +50,18 @@ type playerConfig struct {
 	StreamTTL              time.Duration
 	MPVTimeout             time.Duration
 	ChromiumTimeout        time.Duration
+	Channel                string
+	UpdateMethod           string
+	// ApplianceStateDir holds appliance updates/ and health.json.
+	ApplianceStateDir string
+}
+
+// updatesDir is where software updates are staged.
+func (c playerConfig) updatesDir() string {
+	if c.UpdateMethod == update.MethodAppliance {
+		return update.Layout{StateDir: c.ApplianceStateDir}.UpdatesDir()
+	}
+	return filepath.Join(filepath.Dir(c.StatePath), "updates")
 }
 
 type configError struct{ Field, Reason string }
@@ -67,6 +83,8 @@ func loadConfig(lookup func(string) (string, bool)) (playerConfig, error) {
 		PresentationMode: release.PresentationKind(envDefault(lookup, "CUELIGHT_PLAYER_PRESENTATION_MODE", "automatic")),
 		Probation:        30 * time.Second, PollWait: 30 * time.Second, ReconnectMinimum: time.Second, ReconnectMaximum: 30 * time.Second,
 		PartialGrace: time.Hour, StreamTTL: 10 * time.Minute, MPVTimeout: 5 * time.Second, ChromiumTimeout: 15 * time.Second,
+		Channel: envDefault(lookup, "CUELIGHT_PLAYER_CHANNEL", updates.ChannelStable), UpdateMethod: envDefault(lookup, "CUELIGHT_PLAYER_UPDATE_METHOD", update.MethodNone),
+		ApplianceStateDir: envDefault(lookup, "CUELIGHT_PLAYER_APPLIANCE_STATE_DIR", update.DefaultLayout().StateDir),
 	}
 	var err error
 	for _, item := range []struct {
@@ -90,7 +108,7 @@ func loadConfig(lookup func(string) (string, bool)) (playerConfig, error) {
 
 func (c playerConfig) validate() error {
 	required := []struct{ name, value string }{
-		{"CUELIGHT_PLAYER_CONTROL_URL", c.ControlURL}, {"CUELIGHT_PLAYER_SERVER_CA_PATH", c.ServerCAPath},
+		{"CUELIGHT_PLAYER_CONTROL_URL", c.ControlURL},
 		{"CUELIGHT_PLAYER_NODE_CERT_PATH", c.NodeCertificatePath}, {"CUELIGHT_PLAYER_NODE_KEY_PATH", c.NodePrivateKeyPath},
 		{"CUELIGHT_PLAYER_PUBLISHER_KEY_ID", c.PublisherKeyID}, {"CUELIGHT_PLAYER_PUBLISHER_PUBLIC_KEY_PATH", c.PublisherPublicKeyPath},
 		{"CUELIGHT_PLAYER_EVENT_EPOCH", c.EventEpoch}, {"CUELIGHT_PLAYER_PROFILE_ID", c.ProfileID}, {"CUELIGHT_PLAYER_RENDERER_VERSION", c.RendererVersion},
@@ -134,6 +152,22 @@ func (c playerConfig) validate() error {
 	if c.NodeCertificatePath == c.NodePrivateKeyPath {
 		return &configError{"CUELIGHT_PLAYER_NODE_KEY_PATH", "must differ from the certificate path"}
 	}
+	if c.Channel != updates.ChannelStable && c.Channel != updates.ChannelBeta {
+		return &configError{"CUELIGHT_PLAYER_CHANNEL", "must be stable or beta"}
+	}
+	switch c.UpdateMethod {
+	case update.MethodNone:
+	case update.MethodDesktop:
+		if c.RendererMode != "desktop" {
+			return &configError{"CUELIGHT_PLAYER_UPDATE_METHOD", "desktop updates require the desktop renderer mode"}
+		}
+	case update.MethodAppliance:
+		if goruntime.GOOS != "linux" || !filepath.IsAbs(c.ApplianceStateDir) {
+			return &configError{"CUELIGHT_PLAYER_UPDATE_METHOD", "appliance updates require Linux and an absolute CUELIGHT_PLAYER_APPLIANCE_STATE_DIR"}
+		}
+	default:
+		return &configError{"CUELIGHT_PLAYER_UPDATE_METHOD", "must be desktop, appliance, or none"}
+	}
 	return nil
 }
 
@@ -154,7 +188,11 @@ func (c playerConfig) runtimePresentationMode() release.PresentationKind {
 }
 
 func capabilityReport(c playerConfig) playerclient.CapabilityReport {
-	return playerclient.CapabilityReport{Platform: goruntime.GOOS, Architecture: goruntime.GOARCH, ProtocolVersion: release.ProtocolV1, RendererVersion: c.RendererVersion, ProfileID: c.ProfileID, Features: slices.Clone(c.Features), AcceptedMediaTypes: slices.Clone(c.AcceptedMediaTypes), OutputReady: true, ClockReliable: true}
+	return playerclient.CapabilityReport{
+		Platform: goruntime.GOOS, Architecture: goruntime.GOARCH, ProtocolVersion: release.ProtocolV1, RendererVersion: c.RendererVersion, ProfileID: c.ProfileID,
+		Features: slices.Clone(c.Features), AcceptedMediaTypes: slices.Clone(c.AcceptedMediaTypes), OutputReady: true, ClockReliable: true,
+		SoftwareVersion: buildinfo.Version, Channel: c.Channel, UpdateMethod: c.UpdateMethod,
+	}
 }
 
 func env(lookup func(string) (string, bool), name string) string {

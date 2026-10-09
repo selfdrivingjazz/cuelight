@@ -1,12 +1,13 @@
 import * as React from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, FolderArchive, Image, LayoutDashboard, Layers, ListVideo, MonitorPlay, PackageCheck, Search, Settings } from "lucide-react";
+import { Activity, ArrowUpCircle, FolderArchive, Image, LayoutDashboard, Layers, ListVideo, MonitorPlay, PackageCheck, Search, Settings } from "lucide-react";
 import { Breadcrumbs, CommandPalette, MobileNav, MobileSidebar, Sidebar, type CommandItem, type Crumb, type NavigationItem } from "@cuelight/controller-ui";
 import "@cuelight/controller-ui/styles.css";
 import { api, readApiResult } from "./api";
 import { AccessScreen, useAuth } from "./auth";
 import { RouterLink, RoutePending, shortId } from "./kit";
+import { ServerVersionBanner } from "./software";
 
 export const navigation: readonly NavigationItem[] = [
   { label: "Overview", href: "/", section: "Operate", icon: LayoutDashboard },
@@ -17,6 +18,7 @@ export const navigation: readonly NavigationItem[] = [
   { label: "Playlists", href: "/library/playlists", section: "Library", icon: ListVideo },
   { label: "Files", href: "/library/assets", section: "Library", icon: FolderArchive, match: ["/library/uploads"] },
   { label: "Releases", href: "/releases", section: "Delivery", icon: PackageCheck },
+  { label: "Software", href: "/software", section: "Delivery", icon: ArrowUpCircle },
 ];
 
 /** Static labels for URL patterns (`:id` = an entity segment). Patterns without an `href` have no list page. */
@@ -37,6 +39,7 @@ const crumbLabels: Record<string, { label: string; href?: string }> = {
   "/releases": { label: "Releases", href: "/releases" },
   "/activity": { label: "Activity" },
   "/settings": { label: "Settings" },
+  "/software": { label: "Software" },
 };
 
 type EntityKind = "screens" | "media" | "playlists" | "assets" | "profiles" | "releases";
@@ -175,6 +178,7 @@ export function Shell() {
           <div className="min-w-0 flex-1"><EntityCrumbs segments={crumbSegments(pathname)} /></div>
           <button type="button" onClick={() => setPaletteOpen(true)} className="inline-flex h-8 items-center gap-2 rounded-md border border-input bg-card px-2.5 text-sm text-muted-foreground hover:text-foreground" aria-label="Jump to"><Search className="h-4 w-4" aria-hidden /><span className="hidden sm:inline">Jump to…</span><kbd className="hidden rounded border border-border px-1 font-mono text-[10px] md:inline">⌘K</kbd></button>
         </header>
+        <ServerVersionBanner />
         <Outlet />
       </div>
     </div>

@@ -49,7 +49,6 @@ var (
 
 type Config struct {
 	Root             string
-	MigrationsPath   string
 	ControlBinary    string
 	SimulatorBinary  string
 	PostgresImage    string
@@ -78,14 +77,6 @@ func (c Config) normalized() (Config, error) {
 		return Config{}, ErrUnsafeRoot
 	}
 	c.Root = filepath.Clean(root)
-	if c.MigrationsPath == "" {
-		c.MigrationsPath = "migrations"
-	}
-	if !filepath.IsAbs(c.MigrationsPath) {
-		if path, err := filepath.Abs(c.MigrationsPath); err == nil {
-			c.MigrationsPath = path
-		}
-	}
 	if c.ControlBinary == "" {
 		c.ControlBinary = defaultControlBinary
 	}
@@ -681,7 +672,7 @@ type pkiClock struct{ now func() time.Time }
 
 func (c pkiClock) Now() time.Time { return c.now() }
 func (m *Manager) controlEnv(port int, database string) []string {
-	return []string{"CUELIGHT_CONTROL_LISTEN_ADDR=127.0.0.1:" + strconv.Itoa(port), "CUELIGHT_CONTROL_DATABASE_URL=" + database, "CUELIGHT_CONTROL_MIGRATIONS_PATH=" + m.config.MigrationsPath, "CUELIGHT_CONTROL_TLS_CERT_PATH=" + m.path("trust", "server.pem"), "CUELIGHT_CONTROL_TLS_KEY_PATH=" + m.path("trust", "server-key.pem"), "CUELIGHT_CONTROL_PUBLISHER_KEY_PATH=" + m.path("trust", "publisher-key.pem"), "CUELIGHT_CONTROL_PUBLISHER_KEY_ID=dev-publisher", "CUELIGHT_CONTROL_CAS_PATH=" + m.path("cas"), "CUELIGHT_CONTROL_CA_PATH=" + m.path("trust", "ca.pem"), "CUELIGHT_CONTROL_CA_KEY_PATH=" + m.path("trust", "ca-key.pem"), "CUELIGHT_CONTROL_SEAL_KEY_PATH=" + m.path("trust", "seal.key"), "CUELIGHT_CONTROL_TEMP_ROOT=" + m.path("state", "tmp")}
+	return []string{"CUELIGHT_CONTROL_LISTEN_ADDR=127.0.0.1:" + strconv.Itoa(port), "CUELIGHT_CONTROL_DATABASE_URL=" + database, "CUELIGHT_CONTROL_TLS_CERT_PATH=" + m.path("trust", "server.pem"), "CUELIGHT_CONTROL_TLS_KEY_PATH=" + m.path("trust", "server-key.pem"), "CUELIGHT_CONTROL_PUBLISHER_KEY_PATH=" + m.path("trust", "publisher-key.pem"), "CUELIGHT_CONTROL_PUBLISHER_KEY_ID=dev-publisher", "CUELIGHT_CONTROL_CAS_PATH=" + m.path("cas"), "CUELIGHT_CONTROL_CA_PATH=" + m.path("trust", "ca.pem"), "CUELIGHT_CONTROL_CA_KEY_PATH=" + m.path("trust", "ca-key.pem"), "CUELIGHT_CONTROL_SEAL_KEY_PATH=" + m.path("trust", "seal.key"), "CUELIGHT_CONTROL_TEMP_ROOT=" + m.path("state", "tmp")}
 }
 func (m *Manager) waitReady(ctx context.Context, endpoint string) error {
 	probeCtx, cancel := context.WithTimeout(ctx, m.config.ReadinessTimeout)

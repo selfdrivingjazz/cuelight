@@ -20,6 +20,17 @@ tags:
       accepts the token as the access_token query parameter for media elements.
   - name: playlists
     description: Ordered lists of file and web media with per-item durations, assignable to nodes as media-schedule releases.
+  - name: software
+    description: >-
+      Vendor-signed Cuelight software releases. Control imports a release envelope
+      (cuelight-release.json) from the update feed (CUELIGHT_CONTROL_UPDATE_FEED_URL, polled every
+      CUELIGHT_CONTROL_UPDATE_CHECK_INTERVAL unless CUELIGHT_CONTROL_UPDATE_CHECK=off), from
+      `cuelight-control updates import DIR`, or from an operator upload, and verifies it against
+      the vendor keys compiled into control; artifacts are mirrored into control CAS only when
+      their sha256 and size match the signed manifest. Operators choose a target version per
+      node; nodes receive it as Assignment.software and verify the envelope themselves. Every
+      response carries `X-Cuelight-Version: <control version>`; browser nodes reload when it
+      differs from the build they run.
   - name: app
     description: >-
       Web media with appAccess enabled ("Cuelight app") are presented with an app token so the
@@ -1680,6 +1691,275 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
+  /software:
+    get:
+      tags: [operator, software]
+      operationId: getSoftwareOverview
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      responses:
+        "200":
+          description: Control's version, the newest imported release, and feed status.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SoftwareOverview"}
+        default: {$ref: "#/components/responses/Problem"}
+  /software/releases:
+    get:
+      tags: [operator, software]
+      operationId: listSoftwareReleases
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      responses:
+        "200":
+          description: Imported releases, newest version first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/SoftwareRelease"}}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [operator, software]
+      operationId: importSoftwareRelease
+      description: >-
+        Streams a release into control. The first multipart part must be the signed envelope
+        (form field `envelope` or a file named cuelight-release.json); every later file part is an
+        artifact identified by its file name. Artifacts are hashed while they are written, so
+        uploads of any size up to CUELIGHT_CONTROL_MAX_UPLOAD_BYTES are not buffered. Re-uploading
+        a release is idempotent and fills in artifacts that were missing. Files the manifest does
+        not list are ignored and reported. An untrusted signature is 422; artifact bytes that do
+        not match the manifest are 422 (other artifacts still import).
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_write]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [envelope]
+              properties:
+                envelope: {type: string, format: binary}
+                artifacts: {type: array, items: {type: string, format: binary}}
+      responses:
+        "200":
+          description: The release was already imported; artifact outcomes.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SoftwareImportResult"}
+        "201":
+          description: Release imported.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SoftwareImportResult"}
+        default: {$ref: "#/components/responses/Problem"}
+  /software/releases/{version}:
+    get:
+      tags: [operator, software]
+      operationId: getSoftwareRelease
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      parameters: [{$ref: "#/components/parameters/SoftwareVersion"}]
+      responses:
+        "200":
+          description: One imported release.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SoftwareRelease"}
+        default: {$ref: "#/components/responses/Problem"}
+  /software/check:
+    post:
+      tags: [operator, software]
+      operationId: checkSoftwareFeed
+      description: Checks the update feed now and mirrors a new release. Feed failures are reported in lastError, not as an HTTP error.
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_write]
+      responses:
+        "200":
+          description: Feed status after the check.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SoftwareFeedStatus"}
+        default: {$ref: "#/components/responses/Problem"}
+  /software/nodes:
+    get:
+      tags: [operator, software]
+      operationId: listNodeSoftware
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      responses:
+        "200":
+          description: Software status of every unrevoked node.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/NodeSoftwareStatus"}}
+        default: {$ref: "#/components/responses/Problem"}
+  /software/nodes/{nodeId}:
+    get:
+      tags: [operator, software]
+      operationId: getNodeSoftware
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_read]
+      parameters: [{$ref: "#/components/parameters/NodeId"}]
+      responses:
+        "200":
+          description: One node's software status.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NodeSoftwareStatus"}
+        default: {$ref: "#/components/responses/Problem"}
+  /software/nodes/{nodeId}/target:
+    parameters: [{$ref: "#/components/parameters/NodeId"}]
+    put:
+      tags: [operator, software]
+      operationId: setNodeSoftwareTarget
+      description: >-
+        Asks the node to run an imported version. 409 when the version is below the node's running
+        version; 400 when the node has not reported a version, follows control (browser), does not
+        update (none), or the release has no artifact for its update method and platform.
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                version: {type: string}
+      responses:
+        "200":
+          description: Updated software status.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NodeSoftwareStatus"}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [operator, software]
+      operationId: clearNodeSoftwareTarget
+      description: Cancels a pending update; the node stays on what it runs.
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_write]
+      responses:
+        "200":
+          description: Updated software status.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NodeSoftwareStatus"}
+        default: {$ref: "#/components/responses/Problem"}
+  /software/rollouts:
+    post:
+      tags: [operator, software]
+      operationId: rolloutSoftware
+      description: >-
+        Targets a version on the listed nodes, or (allEligible) on every node that can install it
+        and runs an older version. Nodes that cannot take it are skipped with a reason.
+      security: [{operatorToken: []}]
+      x-required-scopes: [node_write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                version: {type: string}
+                nodeIds: {type: array, items: {$ref: "#/components/schemas/Id"}}
+                allEligible: {type: boolean}
+      responses:
+        "200":
+          description: Targeted and skipped nodes.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SoftwareRolloutResult"}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/software/releases/{version}:
+    get:
+      tags: [player, software]
+      operationId: getPlayerSoftwareRelease
+      security: [{nodeMTLS: []}]
+      parameters: [{$ref: "#/components/parameters/SoftwareVersion"}]
+      responses:
+        "200":
+          description: The signed release envelope exactly as imported; verify it before use.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SoftwareReleaseEnvelope"}
+        default: {$ref: "#/components/responses/Problem"}
+  /player/software/artifacts/{sha256}:
+    parameters:
+      - {name: sha256, in: path, required: true, schema: {type: string, pattern: "^[a-f0-9]{64}$"}}
+    head:
+      tags: [player, software]
+      operationId: headPlayerSoftwareArtifact
+      security: [{nodeMTLS: []}]
+      responses:
+        "200":
+          description: Artifact metadata.
+          headers:
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+            Content-Length: {schema: {type: integer, format: int64, minimum: 0}}
+            ETag: {$ref: "#/components/headers/ETag"}
+        default: {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [player, software]
+      operationId: getPlayerSoftwareArtifact
+      description: Bytes of an artifact of any imported release, by sha256. Range and If-Range are supported.
+      security: [{nodeMTLS: []}]
+      parameters:
+        - {name: Range, in: header, schema: {type: string}}
+        - {name: If-Range, in: header, schema: {type: string}}
+      responses:
+        "200":
+          description: Complete artifact.
+          headers:
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "206":
+          description: One satisfiable byte range.
+          headers:
+            Content-Range: {schema: {type: string}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "416": {description: Unsatisfiable byte range.}
+        default: {$ref: "#/components/responses/Problem"}
+  /updates/{version}/{name}:
+    servers:
+      - url: https://localhost:8443
+    parameters:
+      - $ref: "#/components/parameters/SoftwareVersion"
+      - {name: name, in: path, required: true, schema: {type: string}}
+    get:
+      tags: [software]
+      operationId: downloadSoftwareArtifact
+      description: >-
+        Unauthenticated mirror of the artifacts of imported, verified releases (electron-updater
+        feeds, the Android shell's APK, and "Get the app" downloads). Range is supported.
+      security: []
+      responses:
+        "200":
+          description: Artifact bytes.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "206": {description: One satisfiable byte range.}
+        default: {$ref: "#/components/responses/Problem"}
 components:
   securitySchemes:
     operatorToken:
@@ -1744,6 +2024,7 @@ components:
       name: search
       in: query
       schema: {type: string, maxLength: 200}
+    SoftwareVersion: {name: version, in: path, required: true, schema: {type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"}}
     Digest:
       name: digest
       in: path
@@ -2054,6 +2335,15 @@ components:
         id: {$ref: "#/components/schemas/Id"}
         secret: {type: string, writeOnly: true}
         expiresAt: {type: string, format: date-time}
+        joinUrl:
+          type: string
+          description: >-
+            Desktop join link `cuelight://join?v=1&url=…&token=…[&ca=sha256:…]&name=…`.
+            Present for enrollment tokens when CUELIGHT_CONTROL_PUBLIC_URL is configured.
+        caSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 (hex) of the self-signed root DER anchoring control's TLS chain; omitted for publicly trusted chains.
     RemoteLink:
       type: object
       required: [sessionId, remoteUrl, expiresAt]
@@ -2395,6 +2685,10 @@ components:
         remoteInput: {type: boolean, default: false}
         showQr: {type: boolean, default: false}
     Assignment:
+      description: >-
+        A node with a software target but no content assignment receives an Assignment whose id,
+        releaseId, releaseDigest, presentationKind, and deliveryMode are empty strings; only
+        nodeId and software are meaningful and the node keeps presenting nothing.
       type: object
       required: [id, nodeId, releaseId, releaseDigest, deliveryMode, expectedGeneration, desiredGeneration, remoteInput, showQr]
       properties:
@@ -2410,6 +2704,20 @@ components:
         remoteInput: {type: boolean}
         showQr: {type: boolean}
         presentationKind: {type: string, enum: [media, media-schedule, web]}
+        software: {$ref: "#/components/schemas/SoftwareTarget"}
+    SoftwareTarget:
+      type: object
+      description: >-
+        The version control wants the node to run; absent means stay put. Nodes never install a
+        version at or below the one they run. URLs are absolute when CUELIGHT_CONTROL_PUBLIC_URL is
+        set and origin-relative otherwise.
+      required: [version, manifestUrl, artifactsBaseUrl]
+      properties:
+        version: {type: string}
+        manifestUrl: {type: string, description: "GET (mTLS): the signed release envelope."}
+        artifactsBaseUrl: {type: string, description: "Append an artifact's sha256 to download it (mTLS, Range)."}
+        apkUrl: {type: string, description: "Browser nodes in the Android shell (updateMethod android): public APK URL."}
+        apkSha256: {type: string, pattern: "^[a-f0-9]{64}$"}
     RemoteEvent:
       type: object
       additionalProperties: false
@@ -2481,6 +2789,113 @@ components:
         freeBytes: {type: integer, format: int64, minimum: 0}
         outputReady: {type: boolean}
         clockReliable: {type: boolean}
+        softwareVersion: {type: string, description: Semantic version of the software the node runs.}
+        channel: {type: string, enum: [stable, beta]}
+        updateMethod: {type: string, enum: [desktop, appliance, browser, android, none]}
+        outputStandby: {type: boolean, description: "Connected, but the node's shared local display currently shows another Cuelight network."}
+    SoftwareOverview:
+      type: object
+      required: [control, feed]
+      properties:
+        control:
+          type: object
+          required: [version, updateAvailable]
+          properties:
+            version: {type: string}
+            latestAvailable: {type: string, description: Newest imported stable release.}
+            updateAvailable: {type: boolean}
+        feed: {$ref: "#/components/schemas/SoftwareFeedStatus"}
+        latest: {$ref: "#/components/schemas/SoftwareRelease"}
+    SoftwareFeedStatus:
+      type: object
+      required: [enabled, url, intervalSeconds]
+      properties:
+        enabled: {type: boolean}
+        url: {type: string}
+        intervalSeconds: {type: integer, format: int64}
+        lastCheckedAt: {type: string, format: date-time}
+        lastSuccessAt: {type: string, format: date-time}
+        lastError: {type: string}
+        lastVersion: {type: string}
+    SoftwareArtifact:
+      type: object
+      required: [component, os, arch, format, name, size, sha256, available, downloadUrl]
+      properties:
+        component: {type: string, enum: [control, player, cli, minimal-node, desktop, android]}
+        os: {type: string}
+        arch: {type: string}
+        format: {type: string}
+        name: {type: string}
+        size: {type: integer, format: int64, minimum: 1}
+        sha256: {type: string, pattern: "^[a-f0-9]{64}$"}
+        available: {type: boolean, description: The bytes are mirrored in control.}
+        downloadUrl: {type: string, description: "Origin-relative public mirror path, /updates/{version}/{name}."}
+    SoftwareRelease:
+      type: object
+      required: [version, channel, publishedAt, importedAt, source, keyId, minimumProtocolVersion, artifacts]
+      properties:
+        version: {type: string}
+        channel: {type: string, enum: [stable, beta]}
+        publishedAt: {type: string, format: date-time}
+        importedAt: {type: string, format: date-time}
+        source: {type: string, enum: [feed, cli, upload]}
+        keyId: {type: string}
+        minimumProtocolVersion: {type: string}
+        artifacts: {type: array, items: {$ref: "#/components/schemas/SoftwareArtifact"}}
+    SoftwareReleaseEnvelope:
+      type: object
+      required: [manifest, keyId, signature]
+      properties:
+        manifest: {type: string, contentEncoding: base64, description: Exact signed manifest JSON bytes.}
+        keyId: {type: string}
+        signature: {type: string, contentEncoding: base64, description: "Ed25519 over \"cuelight-release-manifest-v1\\n\" + manifest."}
+    SoftwareImportResult:
+      type: object
+      required: [version, created, artifacts]
+      properties:
+        version: {type: string}
+        created: {type: boolean}
+        artifacts:
+          type: array
+          items:
+            type: object
+            required: [name, state]
+            properties:
+              name: {type: string}
+              state: {type: string, enum: [imported, present, missing, rejected]}
+              error: {type: string}
+        ignored: {type: array, items: {type: string}}
+    NodeSoftwareStatus:
+      type: object
+      required: [nodeId, nodeName, status, outputStandby]
+      properties:
+        nodeId: {$ref: "#/components/schemas/Id"}
+        nodeName: {type: string}
+        running: {type: string}
+        target: {type: string}
+        targetRequestedAt: {type: string, format: date-time}
+        latestAvailable: {type: string, description: Newest imported release this node can install (control's version for browser nodes).}
+        status: {type: string, enum: [current, outdated, updating, failed, unknown, unsupported]}
+        detail: {type: string}
+        updateMethod: {type: string}
+        channel: {type: string}
+        outputStandby: {type: boolean}
+        platform: {type: string}
+        architecture: {type: string}
+    SoftwareRolloutResult:
+      type: object
+      required: [version, updated, skipped]
+      properties:
+        version: {type: string}
+        updated: {type: array, items: {$ref: "#/components/schemas/NodeSoftwareStatus"}}
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [nodeId, reason]
+            properties:
+              nodeId: {type: string}
+              reason: {type: string}
     CurrentContent:
       type: object
       additionalProperties: false

@@ -33,6 +33,18 @@ export type Assignment = {
   presentationKind?: PresentationKind;
   remoteInput?: boolean;
   showQr?: boolean;
+  /** The version control wants this node on; absent means stay put. */
+  software?: SoftwareTarget;
+};
+
+/** A software-only assignment (no content) has an empty releaseId. */
+export type SoftwareTarget = {
+  version: string;
+  manifestUrl: string;
+  artifactsBaseUrl: string;
+  /** Set when the node reported updateMethod "android": the APK to hand to the shell. */
+  apkUrl?: string;
+  apkSha256?: string;
 };
 
 export type PlaybackPayload = {
@@ -131,4 +143,7 @@ export type CapabilityReport = {
   acceptedMediaTypes: string[];
   outputReady: boolean;
   clockReliable: boolean;
+  /** The website-node build version, or the Android shell's versionName. */
+  softwareVersion: string;
+  updateMethod: "browser" | "android";
 };

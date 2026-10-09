@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BrowserNodeApi } from "./api";
 import { BrowserNodeController } from "./controller";
-import type { NodeSnapshot } from "./controller";
+import type { ControllerOptions, NodeSnapshot } from "./controller";
 import { isWebItem, nextScheduleChange, scheduledItem, toPresentation } from "./presentation";
 import type { MediaItem } from "./presentation";
 import { MemoryCredentialStorage } from "./storage";
@@ -28,7 +28,7 @@ function hang(init: RequestInit): Promise<Response> {
   return new Promise((_, reject) => init.signal && init.signal.addEventListener("abort", () => reject(new Error("aborted"))));
 }
 
-function harness(routes: Record<string, Route>, now = () => Date.parse("2026-10-03T12:00:00Z"), sleep: (ms: number, signal: AbortSignal) => Promise<void> = async () => undefined) {
+function harness(routes: Record<string, Route>, now = () => Date.parse("2026-10-03T12:00:00Z"), sleep: (ms: number, signal: AbortSignal) => Promise<void> = async () => undefined, options: ControllerOptions = {}) {
   const calls: { key: string; auth: string; url: string; body?: unknown }[] = [];
   const fetcher = async (url: string, init: RequestInit = {}) => {
     const path = url.replace("/api/v1/browser-node", "").split("?")[0] || "";
@@ -40,7 +40,7 @@ function harness(routes: Record<string, Route>, now = () => Date.parse("2026-10-
     return route(init, url);
   };
   const storage = new MemoryCredentialStorage();
-  const controller = new BrowserNodeController(new BrowserNodeApi("", fetcher), storage, { now, sleep, assignmentWaitSeconds: 1 });
+  const controller = new BrowserNodeController(new BrowserNodeApi("", fetcher), storage, { now, sleep, assignmentWaitSeconds: 1, buildVersion: "0.2.0", ...options });
   return { controller, storage, calls };
 }
 
@@ -163,6 +163,78 @@ describe("BrowserNodeController", () => {
     expect(presentation).toMatchObject({ appAccess: false, url });
     expect(keys).not.toContain("POST /player/app-tokens");
     expect(keys).toContain("GET /player/remote-sessions/rs-1/events");
+  });
+
+  it("defers the reload for a new control version while pairing, and reloads once per version", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const session = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => { session.set(key, value); } });
+    try {
+      const reloads: string[] = [];
+      const sleeps: (() => void)[] = [];
+      const sleep = () => new Promise<void>((resolve) => { sleeps.push(resolve); });
+      let claimed = false;
+      const versioned = (status: number, body?: unknown) => json(status, body, { "x-cuelight-version": "0.3.0" });
+      const routes: Record<string, Route> = {
+        "POST /claims": () => versioned(201, claim),
+        "GET /claims/claim-1": () => versioned(200, claimed ? { status: "claimed", credential } : { status: "pending" }),
+        "PUT /player/capabilities": () => versioned(204),
+        "GET /player/assignment": () => versioned(404, { detail: "no assignment" }),
+      };
+      const { controller } = harness(routes, undefined, sleep, { reloadDelayMs: 1000, reload: () => { reloads.push(controller.snapshot.view.phase); } });
+      const pairing = waitFor(controller, (snapshot) => snapshot.view.phase === "pairing");
+      controller.start();
+      await pairing;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(reloads).toEqual([]);
+
+      claimed = true;
+      const idle = waitFor(controller, (snapshot) => snapshot.view.phase === "idle");
+      sleeps.splice(0).forEach((resolve) => resolve());
+      await idle;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(reloads).toEqual(["idle"]);
+      controller.stop();
+
+      // The reloaded page still sees 0.3.0 (say control serves an older build): it stays put.
+      const again = harness(routes, undefined, sleep, { reloadDelayMs: 1000, reload: () => { reloads.push("again"); } });
+      again.storage.save(credential);
+      const polled = waitFor(again.controller, (snapshot) => snapshot.view.phase === "idle");
+      again.controller.start();
+      await polled;
+      await vi.advanceTimersByTimeAsync(5000);
+      again.controller.stop();
+      expect(reloads).toEqual(["idle"]);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports the Android shell's version and hands it a newer APK once", async () => {
+    const installs: string[] = [];
+    let assignmentCalls = 0;
+    let thirdPoll = () => undefined as void;
+    const polledThrice = new Promise<void>((resolve) => { thirdPoll = resolve; });
+    const software = { version: "0.3.0", manifestUrl: "/m", artifactsBaseUrl: "/a/", apkUrl: "https://control.example/updates/0.3.0/Cuelight-0.3.0-android.apk", apkSha256: "b".repeat(64) };
+    const softwareOnly = { id: "", nodeId: "node-1", releaseId: "", releaseDigest: "", desiredGeneration: 0, software };
+    const { controller, storage, calls } = harness({
+      "PUT /player/capabilities": () => json(204),
+      "GET /player/assignment": (init) => {
+        assignmentCalls += 1;
+        if (assignmentCalls <= 2) return json(200, softwareOnly, { etag: `"assignment-0-sw-${assignmentCalls}"` });
+        thirdPoll();
+        return hang(init);
+      },
+    }, undefined, undefined, { android: { appVersion: () => "0.2.0", installUpdate: (body) => { installs.push(body); return true; } } });
+    storage.save(credential);
+    controller.start();
+    await polledThrice;
+    controller.stop();
+    expect(JSON.parse(String(calls.find((call) => call.key === "PUT /player/capabilities")!.body))).toMatchObject({ softwareVersion: "0.2.0", updateMethod: "android" });
+    expect(installs.map((body) => JSON.parse(body))).toEqual([{ version: "0.3.0", apkUrl: software.apkUrl, apkSha256: software.apkSha256 }]);
+    expect(calls.some((call) => call.key.startsWith("GET /player/releases"))).toBe(false);
+    expect(controller.snapshot.view.phase).toBe("idle");
   });
 });
 

@@ -12,6 +12,7 @@ object Prefs {
             serverUrl = server,
             nodePath = p.getString("nodePath", null) ?: NodeConfig.DEFAULT_NODE_PATH,
             startOnBoot = p.getBoolean("startOnBoot", false),
+            caSha256 = p.getString("caSha256", null),
         )
     }
 
@@ -20,6 +21,7 @@ object Prefs {
             .putString("serverUrl", config.serverUrl)
             .putString("nodePath", config.nodePath)
             .putBoolean("startOnBoot", config.startOnBoot)
+            .putString("caSha256", config.caSha256)
             .apply()
     }
 }

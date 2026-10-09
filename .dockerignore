@@ -1,0 +1,16 @@
+.git
+**/node_modules
+**/dist
+**/dist-electron
+**/test-results
+**/playwright-report
+bin
+.cuelight-dev
+.cache
+apps/node-android
+apps/node-desktop
+internal/control/webui/assets/controller-web
+internal/control/webui/assets/website-node
+deploy/compose/.env
+*.pem
+*.key

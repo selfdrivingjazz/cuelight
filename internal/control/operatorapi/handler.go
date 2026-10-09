@@ -224,7 +224,7 @@ func (h *Handler) createEnrollmentToken(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, EnrollmentTokenCreated{ID: v.ID, Secret: v.Secret, ExpiresAt: v.ExpiresAt})
+	writeJSON(w, http.StatusCreated, EnrollmentTokenCreated{ID: v.ID, Secret: v.Secret, ExpiresAt: v.ExpiresAt, JoinURL: h.deps.JoinLinks.URL(v.Secret), CASHA256: h.deps.JoinLinks.CASHA256})
 }
 
 func (h *Handler) getOperatorMe(w http.ResponseWriter, r *http.Request) {

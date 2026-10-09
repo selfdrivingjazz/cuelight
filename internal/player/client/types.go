@@ -40,6 +40,16 @@ type CapabilityReport struct {
 	FreeBytes          int64    `json:"freeBytes,omitempty"`
 	OutputReady        bool     `json:"outputReady"`
 	ClockReliable      bool     `json:"clockReliable"`
+	// SoftwareVersion is the semver of the software the node runs.
+	SoftwareVersion string `json:"softwareVersion,omitempty"`
+	// Channel is the release channel the node follows (stable or beta).
+	Channel string `json:"channel,omitempty"`
+	// UpdateMethod is how the node installs software updates:
+	// desktop, appliance, browser, android, or none.
+	UpdateMethod string `json:"updateMethod,omitempty"`
+	// OutputStandby reports a connected node whose shared local display is
+	// currently showing another Cuelight network.
+	OutputStandby bool `json:"outputStandby,omitempty"`
 }
 
 type Assignment struct {
@@ -53,6 +63,21 @@ type Assignment struct {
 	DesiredGeneration  int64                    `json:"desiredGeneration"`
 	RemoteInput        bool                     `json:"remoteInput"`
 	ShowQR             bool                     `json:"showQr"`
+	// Software is the vendor-signed version control wants the node to run;
+	// absent means stay put.
+	Software *SoftwareTarget `json:"software,omitempty"`
+}
+
+// SoftwareTarget points a node at a signed software release mirrored by control.
+type SoftwareTarget struct {
+	Version string `json:"version"`
+	// ManifestURL serves the signed release envelope (mTLS for players).
+	ManifestURL string `json:"manifestUrl"`
+	// ArtifactsBaseURL is joined with an artifact's sha256 to download it.
+	ArtifactsBaseURL string `json:"artifactsBaseUrl"`
+	// APKURL and APKSHA256 are set for browser nodes in the Android shell.
+	APKURL    string `json:"apkUrl,omitempty"`
+	APKSHA256 string `json:"apkSha256,omitempty"`
 }
 
 type AssignmentResult struct {

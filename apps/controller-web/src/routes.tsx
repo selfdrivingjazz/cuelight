@@ -7,6 +7,7 @@ import { ActivityPage, AssetDetailPage, AssetsPage, OverviewPage, ReleaseDetailP
 import { ProfileDetailPage, ProfilesPage } from "./profiles";
 import { AssignPage, PairPage, ScreenDetailPage, ScreensPage, type ScreenTab } from "./screens";
 import { Shell } from "./shell";
+import { SoftwarePage } from "./software";
 import { RouteError, RoutePending, normalizePageSearch, type NodeSearch } from "./kit";
 
 const authoringQuerySeam: AuthoringQuerySeam = {
@@ -56,12 +57,13 @@ const uploadsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/libr
 const releasesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/releases", validateSearch: normalizePageSearch, component: ReleasesPage });
 const releaseDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/releases/$releaseId", component: () => <ReleaseDetailPage releaseId={useParam("releaseId")} /> });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
+const softwareRoute = createRoute({ getParentRoute: () => rootRoute, path: "/software", component: SoftwarePage });
 
 const routeTree = rootRoute.addChildren([
   indexRoute, remoteControlRoute,
   screensRoute, assignRoute, pairRoute, screenRoute, screenAssignmentRoute, screenRemoteRoute, screenEventsRoute, screenSystemRoute, activityRoute, profilesRoute, profileDetailRoute,
   mediaRoute, mediaDetailRoute, playlistsRoute, playlistDetailRoute, assetsRoute, assetDetailRoute, uploadsRoute,
-  releasesRoute, releaseDetailRoute, settingsRoute,
+  releasesRoute, releaseDetailRoute, settingsRoute, softwareRoute,
 ]);
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 declare module "@tanstack/react-router" { interface Register { router: typeof router } }

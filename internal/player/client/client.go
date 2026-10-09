@@ -30,7 +30,8 @@ const (
 )
 
 type Config struct {
-	BaseURL         string
+	BaseURL string
+	// ServerCAPEM pins the control-plane trust anchor; empty uses system roots.
 	ServerCAPEM     []byte
 	NodeCertificate *tls.Certificate
 	RequestTimeout  time.Duration
@@ -54,17 +55,13 @@ func New(config Config) (*Client, error) {
 	if base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return nil, errors.New("control-plane base URL must not contain user information, a query, or a fragment")
 	}
-	if len(config.ServerCAPEM) == 0 {
-		return nil, errors.New("a control-plane server trust anchor is required")
-	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(config.ServerCAPEM) {
-		return nil, errors.New("control-plane server trust anchor is not valid PEM")
-	}
-
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		RootCAs:    roots,
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if len(config.ServerCAPEM) != 0 {
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(config.ServerCAPEM) {
+			return nil, errors.New("control-plane server trust anchor is not valid PEM")
+		}
+		tlsConfig.RootCAs = roots
 	}
 	if config.NodeCertificate != nil {
 		tlsConfig.Certificates = []tls.Certificate{*config.NodeCertificate}
@@ -110,6 +107,13 @@ func New(config Config) (*Client, error) {
 
 func (c *Client) CloseIdleConnections() {
 	c.httpClient.CloseIdleConnections()
+}
+
+// HTTPClient returns the authenticated transport for absolute control URLs the
+// typed API does not wrap (software manifests and artifacts). It has no
+// overall timeout; callers bound requests with their context.
+func (c *Client) HTTPClient() *http.Client {
+	return c.httpClient
 }
 
 // Enroll requires a durable idempotency key. The caller must persist and reuse
@@ -178,7 +182,10 @@ func (c *Client) GetAssignment(ctx context.Context, etag string, wait time.Durat
 	if err := decodeJSON(response.Body, &assignment); err != nil {
 		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid JSON body"}
 	}
-	if assignment.PresentationKind != release.PresentationMedia && assignment.PresentationKind != release.PresentationMediaSchedule && assignment.PresentationKind != release.PresentationWeb {
+	// A node without content but with a software target receives an
+	// assignment whose release fields are empty.
+	contentless := assignment.ReleaseID == "" && assignment.PresentationKind == "" && assignment.Software != nil
+	if !contentless && assignment.PresentationKind != release.PresentationMedia && assignment.PresentationKind != release.PresentationMediaSchedule && assignment.PresentationKind != release.PresentationWeb {
 		return AssignmentResult{}, &ProtocolError{Method: http.MethodGet, Path: "/player/assignment", Reason: "invalid presentation kind"}
 	}
 	return AssignmentResult{Assignment: assignment, ETag: responseETag}, nil

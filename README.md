@@ -8,6 +8,100 @@ The first supported path is a Raspberry Pi-class Linux player controlled through
 
 Early foundation work. No stable release or API compatibility guarantee yet.
 
+## Versions and releases
+
+`VERSION` at the repository root is the release version (currently `0.2.0`). Change it
+only with `node scripts/set-version.mjs X.Y.Z`, which also rewrites every workspace
+`package.json` (the Android build reads `VERSION` directly); `node scripts/check-version.mjs
+[--expect vX.Y.Z]` fails CI when they disagree. Go binaries get it at link time
+(`-X github.com/jmilldotdev/cuelight/internal/buildinfo.Version=…`, unstamped builds say
+`0.0.0-dev`) and print it with `--version`; `cuelight-control` logs it at startup and
+reports it in `GET /health` (`{"status":"ok","version":"0.2.0"}`). Vite builds see it as
+`__CUELIGHT_VERSION__`.
+
+`scripts/build-release.sh 0.2.0 OUTDIR` builds controller-web and website-node, embeds
+them into `cuelight-control`, and runs GoReleaser (`.goreleaser.yaml`, local snapshot
+mode, nothing published) to produce:
+
+- `cuelight-control_<v>_{linux,darwin}_{amd64,arm64}.tar.gz` and `cuelight-control_<v>_{amd64,arm64}.deb`
+- `cuelight_<v>_{linux,darwin}_{amd64,arm64}.tar.gz` (operator CLI)
+- `cuelight-player_<v>_linux_{amd64,arm64}.tar.gz` (appliance bundle: `cuelight-player`,
+  `cuelight-minimal-node`, `install.sh`, `systemd/`) and `cuelight-player_<v>_{amd64,arm64}.deb`
+
+Sign them with `go run ./cmd/cuelight-release manifest --version <v> --dir OUTDIR --out
+OUTDIR/cuelight-release.json --key-file <release key>` and check with `cuelight-release
+verify --manifest OUTDIR/cuelight-release.json --dir OUTDIR`.
+
+## Install a server
+
+A server is one `cuelight-control` binary (API, controller web UI at `/`, browser-node app
+at `/node/`, migrations — all embedded) plus PostgreSQL (17 is tested). `cuelight-control
+init` generates everything else once:
+
+```sh
+cuelight-control init --dir DIR --hostname NAME [--hostname …] [--ip ADDR …] \
+  --public-url https://NAME:8443 [--network-name "Name"] [--database-url postgres://…] \
+  [--listen :8443] [--tls-cert chain.pem --tls-key key.pem]
+```
+
+It writes `DIR/cuelight-control.env` (every `CUELIGHT_CONTROL_*` path), the node-client CA
+(`DIR/pki/node-ca*.pem`), the release publisher key and seal key (`DIR/pki/`), `DIR/cas`,
+`DIR/tmp`, and — unless `--tls-cert/--tls-key` point at an existing chain such as
+`tailscale cert` output — a TLS server certificate: an ECDSA P-256 root valid 10 years
+(`DIR/tls/server-root.pem`) and an ECDSA P-256 leaf for the given names/IPs and the
+public URL host, valid 825 days, stored with the root as the chain `DIR/tls/server.pem`.
+Files are `0600`, directories `0700`. It refuses to overwrite existing material
+(`--exists-ok` turns "already initialized" into a no-op). Browsers and operator machines
+must trust `server-root.pem`; screens get it through `cuelight-player provision --ca-file`
+or a join link's `ca=sha256:` pin. Smart-TV browsers usually cannot add roots, so a
+browser-node TV needs a publicly trusted certificate (`--tls-cert`).
+
+Start with `set -a; . DIR/cuelight-control.env; set +a; cuelight-control serve`, then mint
+the first operator token with `cuelight-control admin token create --scopes …` (same
+environment; prints the secret once) and paste it into the controller at `/`.
+
+**Docker Compose** (PostgreSQL 17 + control, built from this checkout):
+
+```sh
+cd deploy/compose
+cp .env.example .env    # set POSTGRES_PASSWORD, CUELIGHT_HOSTNAME, CUELIGHT_IPS, CUELIGHT_PORT
+docker compose up -d --build --wait
+docker compose run --rm admin-token
+docker compose cp control:/var/lib/cuelight-control/tls/server-root.pem .
+```
+
+The one-shot `init` service fills the `control` volume on first start. The image
+(`Dockerfile`) is Alpine with only `cuelight-control`; web thumbnail capture needs a
+Chromium and is unavailable in it.
+
+**Debian/Ubuntu package** (`cuelight-control_<v>_<arch>.deb`: `/usr/bin/cuelight-control`,
+user `cuelight-control`, state `/var/lib/cuelight-control`, unit `cuelight-control.service`
+that starts once the env file exists):
+
+```sh
+sudo apt install ./cuelight-control_0.2.0_amd64.deb postgresql
+sudo -u postgres psql -c "CREATE ROLE cuelight LOGIN PASSWORD 'PW'" -c "CREATE DATABASE cuelight OWNER cuelight"
+sudo -u cuelight-control cuelight-control init --dir /var/lib/cuelight-control \
+  --hostname NAME --ip ADDR --public-url https://ADDR:8443 --network-name "Name" \
+  --database-url 'postgres://cuelight:PW@127.0.0.1:5432/cuelight?sslmode=disable'
+sudo systemctl start cuelight-control
+sudo -u cuelight-control sh -c 'set -a; . /var/lib/cuelight-control/cuelight-control.env; exec cuelight-control admin token create --scopes security_admin,node_enroll,node_read,node_write,assignment_read,assignment_write,media_read,media_write,local_media_read,release_read,release_write'
+```
+
+**Tarball** (`cuelight-control_<v>_<os>_<arch>.tar.gz`, also macOS): unpack anywhere, run
+`init` as the account that will run the server, and supervise `cuelight-control serve`
+with the env file loaded (`systemd/cuelight-control.service` is the reference unit).
+
+### Install a screen
+
+- **Appliance** (Linux + MPV): unpack `cuelight-player_<v>_linux_<arch>.tar.gz` and run
+  `sudo ./install.sh node.env`, or install `cuelight-player_<v>_<arch>.deb`; both use
+  `/opt/cuelight/versions/<v>` with `/opt/cuelight/current` and take signed updates
+  from control (`deploy/minimal-node/`).
+- **Desktop app** (macOS/Windows/Linux): see "Desktop app: multiple networks" below.
+- **Any browser or smart TV**: open `https://<public origin>/node/` (see "Browser and
+  smart-TV nodes").
+
 ## Development
 
 Requires Go 1.27.
@@ -32,7 +126,7 @@ profile by name; every entity has its own URL and the top bar shows its breadcru
   (`/screens/{id}`) has **Now playing** (screenshot capture), **Assignment** (one media
   picker over files, web pages, and playlists; remote-control and QR toggles), **Remote** (phone link +
   QR), **Events**, and **System** (capabilities, revoke/unregister). **Pair a screen**
-  (`/pair`) claims a browser screen's code or mints a desktop enrollment token.
+  (`/pair`) claims a browser screen's code or mints a desktop join link.
 - **Library**: media (`/library/media`, sortable by date added, name, size, or type via
   `?sort=`/`?order=`, cursor-paginated server-side), playlists (`/api/v1/playlists`,
   `media_read`/`media_write`; ordered file or web media items with per-item durations),
@@ -112,9 +206,11 @@ example app built on this contract.
 
 ## Browser and smart-TV nodes
 
-Any modern browser can be a node: control serves the `apps/website-node` build at
-`https://<public origin>/node/` (set `CUELIGHT_CONTROL_WEB_NODE_DIR` to its `dist`;
-the dev stack does this and rebuilds it on `sdj cuelight-dev apply`).
+Any modern browser can be a node: control serves the `apps/website-node` build embedded
+in its binary at `https://<public origin>/node/`. Local builds embed whatever
+`pnpm build:web` (or `node scripts/embed-web.mjs` after building an app) copied into
+`internal/control/webui/assets/`; a binary built without it serves a "web assets not
+built" page there. The dev stack rebuilds and embeds it on `sdj cuelight-dev apply`.
 
 1. On the TV (Samsung Tizen/LG webOS browser, Fire TV Silk, or any desktop
    browser), open `https://<public origin>/node/`. In dev:
@@ -145,6 +241,101 @@ browser can't send input into a cross-origin iframe, so `web` presentations igno
 remote events unless the Android WebView shell (`window.CuelightAndroid`) is present.
 The build targets ES2019 with ES modules, which means Chromium 61+ or Safari 11+
 (roughly Tizen 5+/2019 and webOS 5+/2020 TVs).
+
+## Desktop app: multiple networks
+
+The Electron app (`apps/node-desktop`, macOS/Windows/Linux) turns a computer into a
+node, and one app can belong to several Cuelight networks at once — e.g. a laptop on
+both a home tailnet control and a venue LAN control.
+
+**Joining.** On a controller's **Pair a screen** page, *Create join link* mints a
+one-time enrollment token and shows `cuelight://join?v=1&url=…&token=…[&ca=sha256:…]&name=…`
+(copy button + QR). Opening the link launches (or focuses) Cuelight, which asks for
+confirmation and this computer's name on that network, then runs
+`cuelight-player provision --control-url … [--ca-sha256 …]` with the token in the
+environment. You can also paste the link into the app. Control needs
+`CUELIGHT_CONTROL_PUBLIC_URL` to emit links; `CUELIGHT_CONTROL_NETWORK_NAME` names the
+network (default: the public URL host). `ca` is included when the last certificate in
+`CUELIGHT_CONTROL_TLS_CERT_PATH` is self-signed — serve the full chain (leaf + root)
+so the player can pin it; publicly trusted chains (e.g. `tailscale cert`) omit it and
+the player uses system roots. Recovery tokens have no link: use *Advanced: recover or
+enroll with a token* (control URL, token, optional CA SHA-256 fingerprint).
+
+**Layout.** `settings.json` in the app's user-data directory holds preferences and the
+membership list (`{id, name, controlUrl, displayBinding, pinned?}`); each membership
+has `networks/<id>/{identity,state,logs}` and its own `cuelight-player` sidecar with its
+own loopback renderer endpoint and token. A pre-multi-network install migrates its
+`identity/`, `state/`, `logs/` into `networks/default` on first launch. Removing a
+network stops its sidecar and deletes its directory (after confirmation). Launch at
+login is a single entry for the app; it starts every network.
+
+**Displays and arbitration.** Each membership binds to `shared` (the primary display)
+or a specific display; bindings to a disconnected display fall back to the primary.
+Cuelight opens one output window per display in use. When several networks share a
+display, the one whose sidecar most recently reported an assignment change
+(`POST /v1/assignment`, ordered by its `changedAt`) is on air; the others are on
+standby — their views stay loaded but hidden and muted, so switching is instant. A
+**pin** (tray menu or setup window) keeps a network on its display regardless of newer
+assignments elsewhere. Sidecars poll `GET /v1/output` and report `outputStandby` in their
+capability report, so each controller can see when its screen is showing another
+network. Esc on an output hides it until something new goes on air.
+
+**Updates.** When control targets a newer version, the sidecar downloads and verifies the
+platform's `latest*.yml` and referenced files into its state directory and calls
+`POST /v1/software-update {version, feedDir}`. The app serves that directory on loopback
+to electron-updater (generic provider), downloads it, and installs once no network is on
+air (or at quit). Requests not newer than the running or already-staged version are ignored.
+
+**Packaging.** `pnpm --filter @cuelight/node-desktop dist` cross-compiles every sidecar
+and runs electron-builder: macOS `zip` + `dmg` per architecture (arm64 and x64 rather than
+universal: half the download, and electron-updater picks the matching zip from
+`latest-mac.yml`), hardened runtime with `build/entitlements.mac.plist`, the bundled
+`cuelight-player` signed with the app, notarization when `APPLE_API_KEY`/`APPLE_ID`/
+`APPLE_KEYCHAIN_PROFILE` credentials are present (unsigned local builds still work);
+Windows NSIS; Linux AppImage + deb. The placeholder `generic` publish URL only makes
+electron-builder emit `latest*.yml`; the app sets its feed at runtime.
+
+## Software updates
+
+Every Cuelight release is a set of artifacts plus `cuelight-release.json`, a manifest
+signed with the vendor release key. Control mirrors releases and decides which version
+each screen should run; screens verify the signature themselves, so a control server can
+choose among signed versions but never supply code.
+
+**Getting releases onto control** (all three verify against the keys compiled into
+`cuelight-control`; an artifact is stored in CAS only when its sha256 and size match):
+
+- *Feed*: control fetches `CUELIGHT_CONTROL_UPDATE_FEED_URL` (default: the latest GitHub
+  release's `cuelight-release.json`) 30 s after start and every
+  `CUELIGHT_CONTROL_UPDATE_CHECK_INTERVAL` (default `6h`), downloading the artifacts from
+  the same base URL. `CUELIGHT_CONTROL_UPDATE_CHECK=off` disables it. Failures never stop
+  control; the last error shows on the **Software** page (and *Check now* retries).
+- *Offline / CLI*: `cuelight-control updates import DIR` on the server (same env file as
+  `serve`; needs `CUELIGHT_CONTROL_DATABASE_URL` and `CUELIGHT_CONTROL_CAS_PATH`), where DIR
+  holds `cuelight-release.json` and any of its artifacts. Re-running is idempotent and fills
+  in missing files; it exits non-zero if a file does not match the manifest.
+- *Upload*: **Software → Import a release** in the controller (choose
+  `cuelight-release.json` plus the release files), i.e. `POST /api/v1/software/releases`
+  as streamed `multipart/form-data` with the envelope as the first part.
+
+**Rolling out.** The Software page lists every screen's running version, newest installable
+release, target, and status (`current`, `outdated`, `updating`, `failed`, `unknown`,
+`unsupported`); screen tiles and screen pages show *Out of date*, *Updating*, *Update failed*,
+and *Standby* (the screen's display is showing another network) badges. *Update* /
+*Cancel* per screen, or *Update all outdated*, set targets (`PUT|DELETE
+/api/v1/software/nodes/{id}/target`, `POST /api/v1/software/rollouts`, scope `node_write`).
+Control refuses a target below the version a screen runs. A target reaches the screen as
+`Assignment.software` (even without content assigned); appliances and the desktop app
+download the signed envelope and artifacts from `/api/v1/player/software/*` over mTLS.
+Browser nodes load the website-node build control serves and reload when control's
+`X-Cuelight-Version` response header differs from their build (once per version, never
+while showing a pairing code); in the Android shell they also hand a newer signed APK to
+`CuelightAndroid.installUpdate`. A banner on every controller page announces an imported
+release newer than the server itself.
+
+**Get the app.** `/updates/{version}/{name}` serves the artifacts of imported releases
+without authentication, so the Software page's download links (macOS, Windows, Linux,
+Android) work on a LAN with no internet access.
 
 ## License
 

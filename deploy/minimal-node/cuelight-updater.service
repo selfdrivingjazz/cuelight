@@ -1,0 +1,14 @@
+[Unit]
+Description=Apply a staged Cuelight software update
+
+[Service]
+Type=oneshot
+# Runs as root: re-verifies the staged release against the release keys
+# compiled into the installed player, switches /opt/cuelight/current, and
+# rolls back unless the new player reaches control.
+ExecStart=/opt/cuelight/current/cuelight-player update apply
+TimeoutStartSec=10min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full

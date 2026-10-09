@@ -2,6 +2,8 @@ package playerapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -61,48 +63,67 @@ func (s *Service) GetAssignment(ctx context.Context, nodeID, ifNoneMatch string,
 	if wait < 0 || wait > limits.MaxWait {
 		return client.AssignmentResult{}, ErrWaitTooLong
 	}
-	value, ok, err := s.Repository.CurrentAssignment(ctx, nodeID)
+	state, err := s.assignmentState(ctx, nodeID)
 	if err != nil {
 		return client.AssignmentResult{}, err
 	}
-	if !ok {
+	if etagMatches(ifNoneMatch, state.etag) && wait > 0 {
+		err = s.Repository.WaitForAssignment(ctx, nodeID, state.assignment.DesiredGeneration, state.softwareGeneration, wait)
+		if err != nil {
+			return client.AssignmentResult{}, err
+		}
+		if state, err = s.assignmentState(ctx, nodeID); err != nil {
+			return client.AssignmentResult{}, err
+		}
+	}
+	if !state.found && state.software == nil {
 		return client.AssignmentResult{}, ErrNotFound
 	}
-	etag := assignmentETag(value.DesiredGeneration)
-	if etagMatches(ifNoneMatch, etag) && wait > 0 {
-		err = s.Repository.WaitForAssignment(ctx, nodeID, value.DesiredGeneration, wait)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return client.AssignmentResult{}, err
-			}
-			return client.AssignmentResult{}, err
-		}
-		value, ok, err = s.Repository.CurrentAssignment(ctx, nodeID)
-		if err != nil {
-			return client.AssignmentResult{}, err
-		}
-		if !ok {
-			return client.AssignmentResult{}, ErrNotFound
-		}
-		etag = assignmentETag(value.DesiredGeneration)
+	if etagMatches(ifNoneMatch, state.etag) {
+		return client.AssignmentResult{ETag: state.etag, NotModified: true}, nil
 	}
-	if etagMatches(ifNoneMatch, etag) {
-		return client.AssignmentResult{ETag: etag, NotModified: true}, nil
+	if !state.found {
+		// Software-only: the node keeps presenting nothing but can update.
+		return client.AssignmentResult{Assignment: client.Assignment{NodeID: nodeID, Software: state.software}, ETag: state.etag}, nil
 	}
-	kind := canonical.PresentationKind("")
-	if kind == "" {
-		envelope, loadErr := s.ReleaseLoader.LoadRelease(ctx, value.ReleaseID)
-		if loadErr != nil || envelope.ID != value.ReleaseID || (value.ReleaseDigest != "" && envelope.Digest != value.ReleaseDigest) {
-			return client.AssignmentResult{}, fmt.Errorf("%w: release binding mismatch", ErrForbidden)
-		}
-		kind = envelope.Payload.PresentationMode()
-		if !validPresentationKind(kind) {
-			return client.AssignmentResult{}, fmt.Errorf("%w: invalid release presentation", ErrForbidden)
-		}
+	value := state.assignment
+	envelope, loadErr := s.ReleaseLoader.LoadRelease(ctx, value.ReleaseID)
+	if loadErr != nil || envelope.ID != value.ReleaseID || (value.ReleaseDigest != "" && envelope.Digest != value.ReleaseDigest) {
+		return client.AssignmentResult{}, fmt.Errorf("%w: release binding mismatch", ErrForbidden)
+	}
+	kind := envelope.Payload.PresentationMode()
+	if !validPresentationKind(kind) {
+		return client.AssignmentResult{}, fmt.Errorf("%w: invalid release presentation", ErrForbidden)
 	}
 	valueClient := toClientAssignment(value)
 	valueClient.PresentationKind = kind
-	return client.AssignmentResult{Assignment: valueClient, ETag: etag}, nil
+	valueClient.Software = state.software
+	return client.AssignmentResult{Assignment: valueClient, ETag: state.etag}, nil
+}
+
+type assignmentState struct {
+	assignment         assignment.Assignment
+	found              bool
+	software           *client.SoftwareTarget
+	softwareGeneration int64
+	etag               string
+}
+
+func (s *Service) assignmentState(ctx context.Context, nodeID string) (assignmentState, error) {
+	var state assignmentState
+	var err error
+	state.assignment, state.found, err = s.Repository.CurrentAssignment(ctx, nodeID)
+	if err != nil {
+		return assignmentState{}, err
+	}
+	if s.Software != nil {
+		state.software, state.softwareGeneration, err = s.Software.PlayerTarget(ctx, nodeID)
+		if err != nil {
+			return assignmentState{}, err
+		}
+	}
+	state.etag = assignmentETag(state.assignment.DesiredGeneration, state.software)
+	return state, nil
 }
 
 func (s *Service) FetchRelease(ctx context.Context, nodeID, releaseID string) (canonical.EnvelopeV1, error) {
@@ -268,8 +289,16 @@ func (s *Service) authorizedArtifact(ctx context.Context, nodeID, digest string)
 	return s.Repository.AuthorizeArtifact(ctx, nodeID, digest)
 }
 
-func assignmentETag(generation int64) string { return fmt.Sprintf("\"assignment-%d\"", generation) }
-func artifactETag(digest string) string      { return fmt.Sprintf("\"%s\"", digest) }
+// assignmentETag covers the content generation and the software target, so a
+// target change alone yields a new ETag.
+func assignmentETag(generation int64, software *client.SoftwareTarget) string {
+	if software == nil {
+		return fmt.Sprintf("\"assignment-%d\"", generation)
+	}
+	digest := sha256.Sum256([]byte(strings.Join([]string{software.Version, software.ManifestURL, software.ArtifactsBaseURL, software.APKURL, software.APKSHA256}, "\n")))
+	return fmt.Sprintf("\"assignment-%d-sw-%s\"", generation, hex.EncodeToString(digest[:8]))
+}
+func artifactETag(digest string) string { return fmt.Sprintf("\"%s\"", digest) }
 func toClientAssignment(value assignment.Assignment) client.Assignment {
 	return client.Assignment{ID: value.ID, NodeID: value.NodeID, ReleaseID: value.ReleaseID, ReleaseDigest: value.ReleaseDigest, DeliveryMode: value.DeliveryMode, ExpectedGeneration: value.ExpectedGeneration, DesiredGeneration: value.DesiredGeneration, RemoteInput: value.RemoteInput, ShowQR: value.ShowQR}
 }

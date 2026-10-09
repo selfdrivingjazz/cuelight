@@ -1,8 +1,10 @@
-import { BrowserWindow, WebContentsView } from "electron";
+import { type BrowserWindow, WebContentsView } from "electron";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
+import path from "node:path";
 import QRCode from "qrcode";
+import { isVersion } from "../shared/version";
 import { PointerGlow } from "./pointer-glow";
 import { mapRemoteEvent, parseInputBody, parseRemoteBody, webURL, type InputAction, type Point } from "./remote-input";
 
@@ -15,18 +17,39 @@ interface ManagedOutput {
   qr?: string;
 }
 
-const webPartition = "persist:web-pages";
+/** The desktop side a membership's renderer endpoint reports to. */
+export interface OutputHost {
+  /** Window for this membership's display, created on demand. */
+  window(): BrowserWindow;
+  /** The output was created, replaced, or removed. */
+  outputChanged(): void;
+  /** The sidecar accepted a new assignment (`changedAt` in ms). */
+  assignmentChanged(changedAt: number): void;
+  /** Whether the display currently shows another network. */
+  standby(): boolean;
+  /** Queues an app update from a verified feed directory; returns an error message to reject. */
+  softwareUpdate(version: string, feedDir: string): string | undefined;
+  /** Physical Escape on the output. */
+  returnToControls(): void;
+}
+
 const qrSize = 168;
 const qrMargin = 24;
+let sequence = 0;
+/** Process-wide monotonic counter ordering outputs and assignment reports. */
+export function nextSequence(): number { return ++sequence; }
 
+/**
+ * One membership's loopback renderer endpoint (own port and bearer token) and
+ * the output views it drives inside its display's window.
+ */
 export class RendererServer {
-  private onChange: () => void = () => undefined;
   readonly token = randomBytes(32).toString("base64url");
+  /** Sequence of the current output's creation (see arbiter). */
+  outputSeq?: number;
   private server = createServer((request, response) => void this.handle(request, response));
-  private fullScreen = true;
   private baseUrl?: string;
   private host?: BrowserWindow;
-  private viewHost?: BrowserWindow;
   private view?: WebContentsView;
   private viewKind?: OutputKind;
   private overlay?: WebContentsView;
@@ -34,35 +57,9 @@ export class RendererServer {
   private injecting = false;
   private readonly cursor: Point = { x: 0, y: 0 };
   private output?: ManagedOutput;
-  private showingOutput = false;
-  private readonly resizeOutput = () => this.updateBounds();
+  private onAir = false;
 
-  setOnChange(listener: () => void): void { this.onChange = listener; }
-
-  attachHost(window: BrowserWindow): void {
-    if (this.host === window) return;
-    if (this.host) this.detachHost(this.host);
-    this.host = window;
-    window.on("resize", this.resizeOutput);
-    window.on("enter-full-screen", this.resizeOutput);
-    window.on("leave-full-screen", this.resizeOutput);
-    this.attachView();
-    if (this.showingOutput) this.showOutput();
-  }
-
-  detachHost(window: BrowserWindow): void {
-    if (this.host !== window) return;
-    window.off("resize", this.resizeOutput);
-    window.off("enter-full-screen", this.resizeOutput);
-    window.off("leave-full-screen", this.resizeOutput);
-    if (this.viewHost === window && !window.isDestroyed()) {
-      if (this.view) window.contentView.removeChildView(this.view);
-      if (this.overlay) window.contentView.removeChildView(this.overlay);
-      this.glow.detach();
-    }
-    this.viewHost = undefined;
-    this.host = undefined;
-  }
+  constructor(private readonly delegate: OutputHost, private readonly webPartition: string) {}
 
   async start(): Promise<string> {
     if (this.baseUrl) return this.baseUrl;
@@ -76,71 +73,83 @@ export class RendererServer {
     return this.baseUrl;
   }
 
-  setFullScreen(value: boolean): void {
-    this.fullScreen = value;
-    if (this.showingOutput && this.host && !this.host.isDestroyed()) this.host.setFullScreen(value);
+  hasOutput(): boolean { return Boolean(this.output); }
+
+  /** Moves this membership's views into `window` (its display's output window). */
+  attach(window: BrowserWindow): void {
+    if (this.host === window && !window.isDestroyed()) return;
+    this.detach();
+    this.host = window;
+    if (this.view) window.contentView.addChildView(this.view);
+    // Added after the output so it stacks on top.
+    if (this.overlay) window.contentView.addChildView(this.overlay);
+    if (this.view) this.glow.attach(window);
+    this.layout();
   }
 
-  count(): number { return this.output ? 1 : 0; }
-
-  showOutput(): void {
-    if (!this.output) throw new Error("no active output is available");
-    if (!this.host || this.host.isDestroyed()) throw new Error("desktop window is unavailable");
-    this.attachView();
-    const wasShowing = this.showingOutput;
-    this.showingOutput = true;
-    if (!wasShowing) this.host.setFullScreen(this.fullScreen);
-    this.updateBounds();
-    this.view?.setVisible(true);
-    this.overlay?.setVisible(Boolean(this.output.qr));
-    this.host.show();
-    this.host.focus();
-    this.view?.webContents.focus();
-  }
-  showControls(): void {
-    this.showingOutput = false;
-    this.view?.setVisible(false);
-    this.overlay?.setVisible(false);
-    this.glow.hide();
-    if (this.host && !this.host.isDestroyed()) {
-      if (this.host.isFullScreen()) this.host.setFullScreen(false);
-      this.host.show();
-      this.host.focus();
-      this.host.webContents.focus();
+  /** Standby views stay loaded but hidden and muted, so switching back is instant. */
+  setOnAir(onAir: boolean): void {
+    this.onAir = onAir;
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      this.view.setVisible(onAir);
+      this.view.webContents.setAudioMuted(!onAir);
     }
+    this.overlay?.setVisible(onAir && Boolean(this.output?.qr));
+    if (!onAir) this.glow.hide();
   }
 
+  focus(): void {
+    if (this.onAir && this.view && !this.view.webContents.isDestroyed()) this.view.webContents.focus();
+  }
+
+  layout(): void {
+    if (!this.host || this.host.isDestroyed()) return;
+    const { width, height } = this.host.getContentBounds();
+    this.view?.setBounds({ x: 0, y: 0, width, height });
+    this.overlay?.setBounds({ x: Math.max(0, width - qrSize - qrMargin), y: Math.max(0, height - qrSize - qrMargin), width: qrSize, height: qrSize });
+  }
+
+  /** The sidecar stopped: drop its output. */
   closeWindows(): void {
+    const had = Boolean(this.output);
     this.output = undefined;
-    this.showControls();
+    this.outputSeq = undefined;
+    this.setOnAir(false);
     if (this.view && !this.view.webContents.isDestroyed()) void this.view.webContents.loadURL("about:blank");
     if (this.overlay && !this.overlay.webContents.isDestroyed()) void this.overlay.webContents.loadURL("about:blank");
-    this.onChange();
+    if (had) this.delegate.outputChanged();
   }
 
   async close(): Promise<void> {
-    this.closeWindows();
+    this.output = undefined;
     this.destroyView();
     this.glow.close();
     if (this.overlay) {
-      if (this.viewHost && !this.viewHost.isDestroyed()) this.viewHost.contentView.removeChildView(this.overlay);
+      if (this.host && !this.host.isDestroyed()) this.host.contentView.removeChildView(this.overlay);
       if (!this.overlay.webContents.isDestroyed()) this.overlay.webContents.close();
       this.overlay = undefined;
     }
-    this.viewHost = undefined;
+    this.host = undefined;
     if (!this.server.listening) return;
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.baseUrl = undefined;
   }
 
+  private detach(): void {
+    if (this.host && !this.host.isDestroyed()) {
+      if (this.view) this.host.contentView.removeChildView(this.view);
+      if (this.overlay) this.host.contentView.removeChildView(this.overlay);
+    }
+    this.glow.detach();
+    this.host = undefined;
+  }
+
   private destroyView(): void {
     if (!this.view) return;
-    if (this.viewHost && !this.viewHost.isDestroyed()) this.viewHost.contentView.removeChildView(this.view);
+    if (this.host && !this.host.isDestroyed()) this.host.contentView.removeChildView(this.view);
     if (!this.view.webContents.isDestroyed()) this.view.webContents.close();
     this.view = undefined;
     this.viewKind = undefined;
-    if (this.overlay) this.viewHost?.contentView.removeChildView(this.overlay);
-    this.viewHost = undefined;
   }
 
   private ensureView(kind: OutputKind): WebContentsView {
@@ -153,11 +162,12 @@ export class RendererServer {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
-        ...(kind === "web" ? { partition: webPartition } : {}),
+        ...(kind === "web" ? { partition: this.webPartition } : {}),
       },
     });
     view.setBackgroundColor("#000000");
-    view.setVisible(false);
+    view.setVisible(this.onAir);
+    view.webContents.setAudioMuted(!this.onAir);
     view.webContents.setWindowOpenHandler(({ url }) => {
       // Web outputs have a single view: popups and target=_blank load in place.
       if (kind === "web" && webURL(url)) void view.webContents.loadURL(url);
@@ -178,12 +188,21 @@ export class RendererServer {
       // Only physical Escape returns to controls; remote-injected Escape reaches the page.
       if (input.key === "Escape" && !this.injecting) {
         event.preventDefault();
-        this.showControls();
+        this.delegate.returnToControls();
       }
     });
     this.view = view;
     this.viewKind = kind;
-    this.attachView();
+    const window = this.delegate.window();
+    if (this.host === window && !window.isDestroyed()) {
+      window.contentView.addChildView(view);
+      // Keep the overlay and glow above the replacement view.
+      if (this.overlay) window.contentView.addChildView(this.overlay);
+      this.glow.attach(window);
+      this.layout();
+    } else {
+      this.attach(window);
+    }
     return view;
   }
 
@@ -199,9 +218,9 @@ export class RendererServer {
     // The overlay is decorative; hand any focus straight back to the output page.
     overlay.webContents.on("focus", () => this.view?.webContents.focus());
     this.overlay = overlay;
-    if (this.viewHost && !this.viewHost.isDestroyed()) {
-      this.viewHost.contentView.addChildView(overlay);
-      this.updateBounds();
+    if (this.host && !this.host.isDestroyed()) {
+      this.host.contentView.addChildView(overlay);
+      this.layout();
     }
     return overlay;
   }
@@ -212,27 +231,6 @@ export class RendererServer {
     const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
     await this.ensureOverlay().webContents.loadURL(url);
     return url;
-  }
-
-  private attachView(): void {
-    if (!this.host || this.host.isDestroyed() || !this.view || this.viewHost === this.host) return;
-    if (this.viewHost && !this.viewHost.isDestroyed()) {
-      this.viewHost.contentView.removeChildView(this.view);
-      if (this.overlay) this.viewHost.contentView.removeChildView(this.overlay);
-    }
-    this.host.contentView.addChildView(this.view);
-    // Added after the output so it stacks on top.
-    if (this.overlay) this.host.contentView.addChildView(this.overlay);
-    this.glow.attach(this.host);
-    this.viewHost = this.host;
-    this.updateBounds();
-  }
-
-  private updateBounds(): void {
-    if (!this.host || this.host.isDestroyed() || !this.view) return;
-    const { width, height } = this.host.getContentBounds();
-    this.view.setBounds({ x: 0, y: 0, width, height });
-    this.overlay?.setBounds({ x: Math.max(0, width - qrSize - qrMargin), y: Math.max(0, height - qrSize - qrMargin), width: qrSize, height: qrSize });
   }
 
   private inject(actions: InputAction[]): void {
@@ -273,6 +271,29 @@ export class RendererServer {
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (!this.authorized(request)) return this.problem(response, 401, "renderer authentication required");
     const url = new URL(request.url ?? "/", "http://renderer.invalid");
+    if (request.method === "GET" && url.pathname === "/v1/output") {
+      return this.json(response, 200, { standby: this.delegate.standby() });
+    }
+    if (request.method === "POST" && url.pathname === "/v1/assignment") {
+      const body = await this.readJSON(request, response);
+      if (!body) return;
+      const changedAt = typeof body.changedAt === "string" ? Date.parse(body.changedAt) : Number.NaN;
+      if (typeof body.generation !== "string" || body.generation.length === 0 || body.generation.length > 128) return this.problem(response, 400, "assignment generation must be a non-empty string");
+      if (body.releaseDigest !== null && typeof body.releaseDigest !== "string") return this.problem(response, 400, "assignment releaseDigest must be a string or null");
+      if (!Number.isFinite(changedAt)) return this.problem(response, 400, "assignment changedAt must be an RFC 3339 timestamp");
+      this.delegate.assignmentChanged(changedAt);
+      response.writeHead(204).end();
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/software-update") {
+      const body = await this.readJSON(request, response);
+      if (!body) return;
+      if (typeof body.version !== "string" || !isVersion(body.version)) return this.problem(response, 400, "software update version must be semantic");
+      if (typeof body.feedDir !== "string" || !path.isAbsolute(body.feedDir)) return this.problem(response, 400, "software update feedDir must be an absolute path");
+      const rejected = this.delegate.softwareUpdate(body.version, body.feedDir);
+      if (rejected) return this.problem(response, 400, rejected);
+      return this.json(response, 202, { accepted: true });
+    }
     if (request.method === "POST" && url.pathname === "/v1/windows") {
       const body = await this.readJSON(request, response);
       if (!body) return;
@@ -292,25 +313,28 @@ export class RendererServer {
         if (typeof remote === "string") return this.problem(response, 400, remote);
         remoteURL = remote.qrURL;
       }
-      if (!this.host || this.host.isDestroyed()) return this.problem(response, 503, "desktop window is unavailable");
       const id = randomUUID();
       this.output = { id, kind, origin: target.origin };
       const view = this.ensureView(kind);
       this.cursor.x = 0;
       this.cursor.y = 0;
       this.glow.hide();
-      this.onChange();
       try {
         if (remoteURL) this.output.qr = await this.loadOverlay(remoteURL);
         else this.overlay?.setVisible(false);
         await view.webContents.loadURL(target.toString());
-        this.showOutput();
       } catch (error) {
-        this.output = undefined;
-        this.showControls();
-        this.onChange();
+        if (this.output?.id === id) {
+          this.output = undefined;
+          this.outputSeq = undefined;
+          this.delegate.outputChanged();
+        }
         return this.problem(response, 502, error instanceof Error ? error.message : "renderer load failed");
       }
+      // Arbitrate only once the page is loaded, so a winning switch is never blank.
+      this.outputSeq = nextSequence();
+      this.setOnAir(this.onAir);
+      this.delegate.outputChanged();
       return this.json(response, 201, { id });
     }
     const screenshotMatch = url.pathname.match(/^\/v1\/windows\/([^/]+)\/screenshot$/);
@@ -350,7 +374,7 @@ export class RendererServer {
       const actions = events.flatMap((event) => mapRemoteEvent(event, { width, height }, this.cursor)).filter((action) => web || action.kind !== "navigate");
       this.inject(actions);
       // Injected input does not move the OS cursor, so draw where it lands.
-      if (web && actions.some((action) => action.kind === "mouse" || action.kind === "wheel")) this.glow.show(this.cursor);
+      if (web && this.onAir && actions.some((action) => action.kind === "mouse" || action.kind === "wheel")) this.glow.show(this.cursor);
       response.writeHead(204).end();
       return;
     }
@@ -369,7 +393,7 @@ export class RendererServer {
         return this.problem(response, 502, error instanceof Error ? error.message : "renderer remote update failed");
       }
       // The window may have been replaced while the overlay loaded.
-      if (this.output === output) this.overlay?.setVisible(this.showingOutput && Boolean(output.qr));
+      if (this.output === output) this.overlay?.setVisible(this.onAir && Boolean(output.qr));
       response.writeHead(204).end();
       return;
     }
@@ -382,7 +406,8 @@ export class RendererServer {
     if (windowID && request.method === "DELETE") {
       if (this.output?.id !== decodeURIComponent(windowID)) return this.problem(response, 404, "renderer window not found");
       this.output = undefined;
-      this.onChange();
+      this.outputSeq = undefined;
+      this.delegate.outputChanged();
       response.writeHead(204).end();
       return;
     }

@@ -1210,6 +1210,196 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/software": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getSoftwareOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/software/releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listSoftwareReleases"];
+        put?: never;
+        /** @description Streams a release into control. The first multipart part must be the signed envelope (form field `envelope` or a file named cuelight-release.json); every later file part is an artifact identified by its file name. Artifacts are hashed while they are written, so uploads of any size up to CUELIGHT_CONTROL_MAX_UPLOAD_BYTES are not buffered. Re-uploading a release is idempotent and fills in artifacts that were missing. Files the manifest does not list are ignored and reported. An untrusted signature is 422; artifact bytes that do not match the manifest are 422 (other artifacts still import). */
+        post: operations["importSoftwareRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/software/releases/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getSoftwareRelease"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/software/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Checks the update feed now and mirrors a new release. Feed failures are reported in lastError, not as an HTTP error. */
+        post: operations["checkSoftwareFeed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/software/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listNodeSoftware"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/software/nodes/{nodeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getNodeSoftware"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/software/nodes/{nodeId}/target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Asks the node to run an imported version. 409 when the version is below the node's running version; 400 when the node has not reported a version, follows control (browser), does not update (none), or the release has no artifact for its update method and platform. */
+        put: operations["setNodeSoftwareTarget"];
+        post?: never;
+        /** @description Cancels a pending update; the node stays on what it runs. */
+        delete: operations["clearNodeSoftwareTarget"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/software/rollouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Targets a version on the listed nodes, or (allEligible) on every node that can install it and runs an older version. Nodes that cannot take it are skipped with a reason. */
+        post: operations["rolloutSoftware"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/software/releases/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getPlayerSoftwareRelease"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/software/artifacts/{sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        /** @description Bytes of an artifact of any imported release, by sha256. Range and If-Range are supported. */
+        get: operations["getPlayerSoftwareArtifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head: operations["headPlayerSoftwareArtifact"];
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/{version}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version: components["parameters"]["SoftwareVersion"];
+                name: string;
+            };
+            cookie?: never;
+        };
+        /** @description Unauthenticated mirror of the artifacts of imported, verified releases (electron-updater feeds, the Android shell's APK, and "Get the app" downloads). Range is supported. */
+        get: operations["downloadSoftwareArtifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1461,6 +1651,10 @@ export interface components {
             secret: string;
             /** Format: date-time */
             expiresAt: string;
+            /** @description Desktop join link `cuelight://join?v=1&url=…&token=…[&ca=sha256:…]&name=…`. Present for enrollment tokens when CUELIGHT_CONTROL_PUBLIC_URL is configured. */
+            joinUrl?: string;
+            /** @description SHA-256 (hex) of the self-signed root DER anchoring control's TLS chain; omitted for publicly trusted chains. */
+            caSha256?: string;
         };
         RemoteLink: {
             sessionId: string;
@@ -1794,6 +1988,7 @@ export interface components {
             /** @default false */
             showQr: boolean;
         };
+        /** @description A node with a software target but no content assignment receives an Assignment whose id, releaseId, releaseDigest, presentationKind, and deliveryMode are empty strings; only nodeId and software are meaningful and the node keeps presenting nothing. */
         Assignment: {
             id: components["schemas"]["Id"];
             nodeId: components["schemas"]["Id"];
@@ -1812,6 +2007,18 @@ export interface components {
             showQr: boolean;
             /** @enum {string} */
             presentationKind?: "media" | "media-schedule" | "web";
+            software?: components["schemas"]["SoftwareTarget"];
+        };
+        /** @description The version control wants the node to run; absent means stay put. Nodes never install a version at or below the one they run. URLs are absolute when CUELIGHT_CONTROL_PUBLIC_URL is set and origin-relative otherwise. */
+        SoftwareTarget: {
+            version: string;
+            /** @description GET (mTLS): the signed release envelope. */
+            manifestUrl: string;
+            /** @description Append an artifact's sha256 to download it (mTLS, Range). */
+            artifactsBaseUrl: string;
+            /** @description Browser nodes in the Android shell (updateMethod android): public APK URL. */
+            apkUrl?: string;
+            apkSha256?: string;
         };
         RemoteEvent: {
             /** Format: int64 */
@@ -1873,6 +2080,109 @@ export interface components {
             freeBytes?: number;
             outputReady?: boolean;
             clockReliable?: boolean;
+            /** @description Semantic version of the software the node runs. */
+            softwareVersion?: string;
+            /** @enum {string} */
+            channel?: "stable" | "beta";
+            /** @enum {string} */
+            updateMethod?: "desktop" | "appliance" | "browser" | "android" | "none";
+            /** @description Connected, but the node's shared local display currently shows another Cuelight network. */
+            outputStandby?: boolean;
+        };
+        SoftwareOverview: {
+            control: {
+                version: string;
+                /** @description Newest imported stable release. */
+                latestAvailable?: string;
+                updateAvailable: boolean;
+            };
+            feed: components["schemas"]["SoftwareFeedStatus"];
+            latest?: components["schemas"]["SoftwareRelease"];
+        };
+        SoftwareFeedStatus: {
+            enabled: boolean;
+            url: string;
+            /** Format: int64 */
+            intervalSeconds: number;
+            /** Format: date-time */
+            lastCheckedAt?: string;
+            /** Format: date-time */
+            lastSuccessAt?: string;
+            lastError?: string;
+            lastVersion?: string;
+        };
+        SoftwareArtifact: {
+            /** @enum {string} */
+            component: "control" | "player" | "cli" | "minimal-node" | "desktop" | "android";
+            os: string;
+            arch: string;
+            format: string;
+            name: string;
+            /** Format: int64 */
+            size: number;
+            sha256: string;
+            /** @description The bytes are mirrored in control. */
+            available: boolean;
+            /** @description Origin-relative public mirror path, /updates/{version}/{name}. */
+            downloadUrl: string;
+        };
+        SoftwareRelease: {
+            version: string;
+            /** @enum {string} */
+            channel: "stable" | "beta";
+            /** Format: date-time */
+            publishedAt: string;
+            /** Format: date-time */
+            importedAt: string;
+            /** @enum {string} */
+            source: "feed" | "cli" | "upload";
+            keyId: string;
+            minimumProtocolVersion: string;
+            artifacts: components["schemas"]["SoftwareArtifact"][];
+        };
+        SoftwareReleaseEnvelope: {
+            /** @description Exact signed manifest JSON bytes. */
+            manifest: string;
+            keyId: string;
+            /** @description Ed25519 over "cuelight-release-manifest-v1\n" + manifest. */
+            signature: string;
+        };
+        SoftwareImportResult: {
+            version: string;
+            created: boolean;
+            artifacts: {
+                name: string;
+                /** @enum {string} */
+                state: "imported" | "present" | "missing" | "rejected";
+                error?: string;
+            }[];
+            ignored?: string[];
+        };
+        NodeSoftwareStatus: {
+            nodeId: components["schemas"]["Id"];
+            nodeName: string;
+            running?: string;
+            target?: string;
+            /** Format: date-time */
+            targetRequestedAt?: string;
+            /** @description Newest imported release this node can install (control's version for browser nodes). */
+            latestAvailable?: string;
+            /** @enum {string} */
+            status: "current" | "outdated" | "updating" | "failed" | "unknown" | "unsupported";
+            detail?: string;
+            updateMethod?: string;
+            channel?: string;
+            outputStandby: boolean;
+            platform?: string;
+            architecture?: string;
+        };
+        SoftwareRolloutResult: {
+            version: string;
+            updated: components["schemas"]["NodeSoftwareStatus"][];
+            skipped: {
+                nodeId: string;
+                reason: string;
+            }[];
         };
         CurrentContent: {
             releaseDigest: string;
@@ -1966,6 +2276,7 @@ export interface components {
         PageSort: string;
         PageOrder: "asc" | "desc";
         PageSearch: string;
+        SoftwareVersion: string;
         Digest: string;
     };
     requestBodies: never;
@@ -4370,6 +4681,383 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getSoftwareOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Control's version, the newest imported release, and feed status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareOverview"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listSoftwareReleases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Imported releases, newest version first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SoftwareRelease"][];
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    importSoftwareRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    envelope: string;
+                    artifacts?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The release was already imported; artifact outcomes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareImportResult"];
+                };
+            };
+            /** @description Release imported. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareImportResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getSoftwareRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version: components["parameters"]["SoftwareVersion"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One imported release. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareRelease"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    checkSoftwareFeed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Feed status after the check. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareFeedStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listNodeSoftware: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Software status of every unrevoked node. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["NodeSoftwareStatus"][];
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getNodeSoftware: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One node's software status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeSoftwareStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setNodeSoftwareTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated software status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeSoftwareStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    clearNodeSoftwareTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: components["parameters"]["NodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated software status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeSoftwareStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    rolloutSoftware: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: string;
+                    nodeIds?: components["schemas"]["Id"][];
+                    allEligible?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Targeted and skipped nodes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareRolloutResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getPlayerSoftwareRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version: components["parameters"]["SoftwareVersion"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The signed release envelope exactly as imported; verify it before use. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoftwareReleaseEnvelope"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getPlayerSoftwareArtifact: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+                "If-Range"?: string;
+            };
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete artifact. */
+            200: {
+                headers: {
+                    "Accept-Ranges"?: "bytes";
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description One satisfiable byte range. */
+            206: {
+                headers: {
+                    "Content-Range"?: string;
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Unsatisfiable byte range. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    headPlayerSoftwareArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Artifact metadata. */
+            200: {
+                headers: {
+                    "Accept-Ranges"?: "bytes";
+                    "Content-Length"?: number;
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    downloadSoftwareArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version: components["parameters"]["SoftwareVersion"];
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Artifact bytes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description One satisfiable byte range. */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             default: components["responses"]["Problem"];
         };
     };

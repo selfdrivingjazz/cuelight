@@ -34,6 +34,14 @@ class SetupActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine(); setText(current?.nodePath ?: NodeConfig.DEFAULT_NODE_PATH)
         }
+        val caLabel = TextView(this).apply {
+            text = "Server root CA SHA-256 (optional — only for a control server with a self-signed root; e.g. sha256:3f9a…)"
+            textSize = 16f
+        }
+        val ca = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setSingleLine(); setText(current?.caSha256?.let { "sha256:$it" } ?: "")
+        }
         val boot = CheckBox(this).apply { text = "Start on boot"; isChecked = current?.startOnBoot ?: false }
         val error = TextView(this).apply { setTextColor(0xFFF87171.toInt()) }
         val save = Button(this).apply {
@@ -41,7 +49,11 @@ class SetupActivity : Activity() {
             setOnClickListener {
                 val url = NodeConfig.normalizeServerUrl(server.text.toString())
                 if (url == null) { error.text = "Enter a valid http(s) URL"; return@setOnClickListener }
-                Prefs.save(this@SetupActivity, NodeConfig(url, NodeConfig.normalizeNodePath(path.text.toString()), boot.isChecked))
+                val caText = ca.text.toString().trim()
+                val pin = if (caText.isEmpty()) null else Sha256.normalize(caText)
+                if (caText.isNotEmpty() && pin == null) { error.text = "The root CA SHA-256 must be 64 hex characters"; return@setOnClickListener }
+                if (pin != null && !url.startsWith("https://")) { error.text = "A root CA pin needs an https:// server URL"; return@setOnClickListener }
+                Prefs.save(this@SetupActivity, NodeConfig(url, NodeConfig.normalizeNodePath(path.text.toString()), boot.isChecked, pin))
                 setResult(RESULT_OK); finish()
             }
         }
@@ -49,7 +61,7 @@ class SetupActivity : Activity() {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
             setPadding(pad, pad, pad, pad)
-            listOf(title, hint, server, pathLabel, path, boot, error, save).forEach { addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) }
+            listOf(title, hint, server, pathLabel, path, caLabel, ca, boot, error, save).forEach { addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) }
         }
         setContentView(ScrollView(this).apply { addView(column) })
         server.requestFocus()

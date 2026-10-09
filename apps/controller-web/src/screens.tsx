@@ -12,6 +12,7 @@ import { NodePlaybackView, ScreenTile, nextNodeSelection, type FleetNodeVisual, 
 import { getMedia, type Media } from "./media-library";
 import { useMediaThumbnail } from "./media-thumbnail";
 import { LoadingCard, QueryError, RouterLink, RoutePending, SearchBox, Toolbar, formatWhen, getNode, getNodeAssignment, getNodeCapabilities, getNodeStatus, hasScope, listNodeEvents, listNodes, queryKeys, shortId } from "./kit";
+import { ScreenSoftwareCard, SoftwareBadges, useNodeSoftware } from "./software";
 
 type ScreenshotFailureCode = "unsupported" | "failed" | "expired" | "timeout" | "cancelled" | "http";
 
@@ -241,8 +242,9 @@ const screenGrid = "grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(mi
 /** Wall of screen tiles; shared by Overview and Screens. */
 export function ScreenWall({ nodes, selectedIds, onSelectedChange }: { nodes: readonly Node[]; selectedIds?: readonly string[]; onSelectedChange?: (nodeId: string, selected: boolean) => void }) {
   const reports = useQueries({ queries: nodes.map((node) => ({ queryKey: queryKeys.nodeStatus(node.id), queryFn: () => getNodeStatus(node.id), staleTime: 5_000 })) });
+  const software = useNodeSoftware();
   return <div role="list" aria-label="Screens" className={screenGrid}>{nodes.map((node, index) => <div role="listitem" key={node.id} className="min-w-0">
-    <ScreenVisual node={node} report={reports[index]?.data ?? undefined} render={(visual) => <ScreenTile {...visual} selected={selectedIds?.includes(node.id)} onSelectedChange={onSelectedChange ? (selected) => onSelectedChange(node.id, selected) : undefined} />} />
+    <ScreenVisual node={node} report={reports[index]?.data ?? undefined} render={(visual) => <ScreenTile {...visual} software={software.get(node.id)} selected={selectedIds?.includes(node.id)} onSelectedChange={onSelectedChange ? (selected) => onSelectedChange(node.id, selected) : undefined} />} />
   </div>)}</div>;
 }
 
@@ -314,6 +316,7 @@ type NodeAssignment = components["schemas"]["Assignment"];
 
 export function ScreenDetailPage({ nodeId, tab }: { nodeId: string; tab: ScreenTab }) {
   const node = useQuery({ queryKey: queryKeys.node(nodeId), queryFn: () => getNode(nodeId) });
+  const software = useNodeSoftware();
   if (node.isPending) return <RoutePending />;
   if (node.isError) return <PageFrame><PageHeader title="Screen" /><QueryError error={node.error} retry={() => void node.refetch()} /></PageFrame>;
   const detail = node.data;
@@ -321,6 +324,7 @@ export function ScreenDetailPage({ nodeId, tab }: { nodeId: string; tab: ScreenT
     <PageHeader eyebrow="Screen" title={detail.name} meta={<>
       <StatusBadge tone={detail.credentialState === "active" ? "success" : "danger"}>{detail.credentialState}</StatusBadge>
       <StatusBadge tone="neutral">{detail.nodeClass === "browser" ? "Browser node" : "Desktop node"}</StatusBadge>
+      <SoftwareBadges software={software.get(detail.id)} />
       <code className="font-mono text-xs text-muted-foreground">{detail.id}</code>
     </>} />
     <SectionTabs label="Screen sections" linkComponent={RouterLink} tabs={screenTabs.map((item) => ({ label: item.label, href: `/screens/${nodeId}${item.slug ? `/${item.slug}` : ""}`, active: item.slug === tab }))} />
@@ -450,6 +454,7 @@ function SystemPanel({ node }: { node: Node }) {
         { label: "Media types", value: capabilities.data.acceptedMediaTypes?.join(", ") || "None", wide: true },
       ]} />}
     </CardContent></Card>
+    <ScreenSoftwareCard nodeId={node.id} />
     <Card><CardHeader><CardTitle>Cache activation</CardTitle></CardHeader><CardContent>
       {status.isPending ? <Skeleton className="h-16 w-full" /> : status.isError ? <QueryError error={status.error} retry={() => void status.refetch()} /> : status.data ? <Facts columns={1} items={[
         { label: "Candidate release", value: status.data.candidateReleaseDigest ?? "None", mono: true },
@@ -515,9 +520,31 @@ export function PairPage() {
       </form>}
     </CardContent></Card>
     {canEnroll && <Card><CardHeader><CardTitle>Desktop node app</CardTitle></CardHeader><CardContent className="space-y-3">
-      <p className="text-sm text-muted-foreground">Create a one-time enrollment token and enter it in Cuelight. It cannot be retrieved again.</p>
-      {enrollment.data ? <><div className="flex gap-2"><input aria-label="Enrollment token" readOnly value={enrollment.data.secret} className="h-9 min-w-0 flex-1 rounded-md border border-input bg-card px-3 font-mono text-xs" onFocus={(event) => event.currentTarget.select()} /><Button variant="secondary" onClick={() => void navigator.clipboard.writeText(enrollment.data.secret)}>Copy</Button></div><p className="text-xs text-muted-foreground">Expires <time dateTime={enrollment.data.expiresAt}>{formatWhen(enrollment.data.expiresAt)}</time></p></> : <Button variant="secondary" onClick={() => enrollment.mutate()} disabled={enrollment.isPending}>{enrollment.isPending ? "Creating token…" : "Create enrollment token"}</Button>}
+      <p className="text-sm text-muted-foreground">Create a one-time join link. Open it on the computer running Cuelight (or paste it into the app) to add this network. It cannot be retrieved again.</p>
+      {enrollment.data ? <DesktopJoin created={enrollment.data} /> : <Button variant="secondary" onClick={() => enrollment.mutate()} disabled={enrollment.isPending}>{enrollment.isPending ? "Creating link…" : "Create join link"}</Button>}
       {enrollment.isError && <QueryError error={enrollment.error} retry={() => enrollment.reset()} />}
     </CardContent></Card>}
   </PageFrame>;
+}
+
+function DesktopJoin({ created }: { created: { secret: string; expiresAt: string; joinUrl?: string } }) {
+  const [qr, setQr] = React.useState<string>();
+  const [copied, setCopied] = React.useState<"link" | "token">();
+  React.useEffect(() => {
+    setQr(undefined);
+    if (!created.joinUrl) return;
+    let live = true;
+    void QRCode.toDataURL(created.joinUrl, { margin: 1, width: 360, errorCorrectionLevel: "M" }).then((url) => { if (live) setQr(url); });
+    return () => { live = false; };
+  }, [created.joinUrl]);
+  const copy = (kind: "link" | "token", value: string) => void navigator.clipboard.writeText(value).then(() => setCopied(kind));
+  const field = "h-9 min-w-0 flex-1 rounded-md border border-input bg-card px-3 font-mono text-xs";
+  return <>
+    {created.joinUrl ? <>
+      <div className="mx-auto w-full max-w-[14rem] rounded-lg bg-white p-3">{qr ? <img src={qr} alt="QR code for the desktop join link" className="aspect-square w-full [image-rendering:pixelated]" /> : <Skeleton className="aspect-square w-full" />}</div>
+      <div className="flex gap-2"><input aria-label="Desktop join link" readOnly value={created.joinUrl} className={field} onFocus={(event) => event.currentTarget.select()} /><Button variant="secondary" onClick={() => copy("link", created.joinUrl!)}>{copied === "link" ? "Copied" : "Copy"}</Button><Button variant="secondary" asChild><a href={created.joinUrl}>Open in Cuelight</a></Button></div>
+    </> : <p className="rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-sm">Join links need <code className="font-mono text-xs">CUELIGHT_CONTROL_PUBLIC_URL</code> on the control server. Enter the token manually instead.</p>}
+    <div className="flex gap-2"><input aria-label="Enrollment token" readOnly value={created.secret} className={field} onFocus={(event) => event.currentTarget.select()} /><Button variant="secondary" onClick={() => copy("token", created.secret)}>{copied === "token" ? "Copied" : "Copy token"}</Button></div>
+    <p className="text-xs text-muted-foreground">Expires <time dateTime={created.expiresAt}>{formatWhen(created.expiresAt)}</time></p>
+  </>;
 }

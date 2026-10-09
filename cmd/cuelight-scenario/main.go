@@ -71,7 +71,7 @@ func run(parent context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	config := dev.Config{Root: root, MigrationsPath: filepath.Join(projectRoot(), "migrations")}
+	config := dev.Config{Root: root}
 	runner, err := e2e.NewProduction(config, nil, evidence)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -106,11 +106,4 @@ func openOutput(path string) (*os.File, error) {
 		return nil, err
 	}
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-}
-
-func projectRoot() string {
-	if value := os.Getenv("CUELIGHT_PROJECT_ROOT"); value != "" {
-		return value
-	}
-	return "."
 }

@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
+
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 )
 
 // cuelight-minimal-node deliberately delegates protocol, storage, and signed
@@ -12,7 +15,11 @@ import (
 // never starts Chromium, Node, or Electron and therefore runs on appliance
 // images containing only MPV and the player binary.
 func main() {
-	player, err := exec.LookPath("cuelight-player")
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(buildinfo.String("cuelight-minimal-node"))
+		return
+	}
+	player, err := playerPath()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cuelight-minimal-node: cuelight-player is required: %v\n", err)
 		os.Exit(1)
@@ -30,4 +37,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cuelight-minimal-node: replace process: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// playerPath prefers the cuelight-player shipped beside this binary, so an
+// appliance bundle under /opt/cuelight/versions/<v> always runs its own player.
+func playerPath() (string, error) {
+	if self, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(self); err == nil {
+			sibling := filepath.Join(filepath.Dir(resolved), "cuelight-player")
+			if info, err := os.Stat(sibling); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
+				return sibling, nil
+			}
+		}
+	}
+	return exec.LookPath("cuelight-player")
 }

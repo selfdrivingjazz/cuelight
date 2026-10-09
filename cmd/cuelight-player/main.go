@@ -10,27 +10,30 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 	"github.com/jmilldotdev/cuelight/internal/media/localcas"
 	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
 	"github.com/jmilldotdev/cuelight/internal/player/renderer"
 	playerruntime "github.com/jmilldotdev/cuelight/internal/player/runtime"
 	playerstate "github.com/jmilldotdev/cuelight/internal/player/state"
+	"github.com/jmilldotdev/cuelight/internal/player/update"
+	"github.com/jmilldotdev/cuelight/internal/updates"
 )
-
-var version = "dev"
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Printf("cuelight-player %s\n", version)
+		fmt.Println(buildinfo.String("cuelight-player"))
 		return
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals()...)
@@ -42,8 +45,15 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "update" {
+		if err := runUpdate(ctx, os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: cuelight-player [--version] | cuelight-player provision [flags]")
+		fmt.Fprintln(os.Stderr, "usage: cuelight-player [--version] | cuelight-player provision [flags] | cuelight-player update apply [flags]")
 		os.Exit(2)
 	}
 	if err := run(ctx, os.LookupEnv); err != nil {
@@ -57,9 +67,11 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 	if err != nil {
 		return err
 	}
-	serverCA, err := os.ReadFile(config.ServerCAPath)
-	if err != nil {
-		return fmt.Errorf("read player server CA: %w", err)
+	var serverCA []byte
+	if config.ServerCAPath != "" {
+		if serverCA, err = os.ReadFile(config.ServerCAPath); err != nil {
+			return fmt.Errorf("read player server CA: %w", err)
+		}
 	}
 	nodeCertificate, err := tls.LoadX509KeyPair(config.NodeCertificatePath, config.NodePrivateKeyPath)
 	if err != nil {
@@ -75,6 +87,7 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		return fmt.Errorf("create player client: %w", err)
 	}
 	defer controller.CloseIdleConnections()
+	nodeController := &capabilityController{Client: controller}
 	proxyHTTPClient, err := authenticatedHTTPClient(serverCA, nodeCertificate)
 	if err != nil {
 		return err
@@ -112,13 +125,14 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		}
 	}
 	var mediaRenderer, webRenderer renderer.Adapter
+	var desktop *renderer.HTTPBrowserLauncher
 	if config.RendererMode == "desktop" {
-		launcher, err := renderer.NewHTTPBrowserLauncher(config.DesktopRendererURL, config.DesktopRendererToken, &http.Client{Timeout: config.ChromiumTimeout})
+		desktop, err = renderer.NewHTTPBrowserLauncher(config.DesktopRendererURL, config.DesktopRendererToken, &http.Client{Timeout: config.ChromiumTimeout})
 		if err != nil {
 			listener.Close()
 			return fmt.Errorf("create desktop browser launcher: %w", err)
 		}
-		browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, Launcher: launcher, Output: os.Stderr, Remote: controller, AppTokens: controller})
+		browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, Launcher: desktop, Output: os.Stderr, Remote: controller, AppTokens: controller})
 		if err != nil {
 			listener.Close()
 			return fmt.Errorf("create desktop renderer: %w", err)
@@ -148,8 +162,27 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		}
 		rendererAdapter = composite
 	}
+	hooks := &nodeHooks{desktop: desktop, changePath: filepath.Join(filepath.Dir(config.StatePath), "assignment-change.json")}
+	if config.UpdateMethod == update.MethodAppliance {
+		hooks.healthPath = update.Layout{StateDir: config.ApplianceStateDir}.HealthPath()
+	}
+	if config.UpdateMethod != update.MethodNone {
+		updateConfig := update.Config{
+			Method: config.UpdateMethod, RunningVersion: buildinfo.Version, OS: goruntime.GOOS, Arch: goruntime.GOARCH,
+			Dir: config.updatesDir(), HTTP: controller.HTTPClient(), ControlURL: config.ControlURL, Trusted: updates.TrustedKeys(), Logf: log.Printf,
+			FreeBytes: func(path string) (int64, error) { return filesystemCapacity{path: path}.AvailableBytes(ctx) },
+		}
+		if desktop != nil {
+			updateConfig.Handoff = desktop.StageSoftwareUpdate
+		}
+		if hooks.updates, err = update.NewManager(updateConfig); err != nil {
+			listener.Close()
+			return fmt.Errorf("create software update manager: %w", err)
+		}
+	}
 	reconciler, err := playerruntime.New(config.runtimeConfig(publisherKey), playerruntime.Dependencies{
-		Controller: controller, Journal: journal, CAS: cache, ScreenshotCache: screenshotCache{store: cache}, Capacity: filesystemCapacity{path: config.CASPath}, Streamer: streamer, Renderer: rendererAdapter,
+		Controller: nodeController, Journal: journal, CAS: cache, ScreenshotCache: screenshotCache{store: cache}, Capacity: filesystemCapacity{path: config.CASPath}, Streamer: streamer, Renderer: rendererAdapter,
+		Hooks: hooks,
 	})
 	if err != nil {
 		listener.Close()
@@ -166,6 +199,12 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		}
 		serveErrors <- err
 	}()
+	if hooks.updates != nil {
+		go func() { _ = hooks.updates.Run(runCtx) }()
+	}
+	if desktop != nil {
+		go watchOutput(runCtx, desktop, nodeController)
+	}
 	runtimeErrors := make(chan error, 1)
 	go func() { runtimeErrors <- reconciler.Run(runCtx) }()
 
@@ -194,12 +233,15 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 }
 
 func authenticatedHTTPClient(serverCA []byte, certificate tls.Certificate) (*http.Client, error) {
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(serverCA) {
-		return nil, errors.New("player server CA is not valid PEM")
+	config := &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}}
+	if len(serverCA) != 0 {
+		config.RootCAs = x509.NewCertPool()
+		if !config.RootCAs.AppendCertsFromPEM(serverCA) {
+			return nil, errors.New("player server CA is not valid PEM")
+		}
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, Certificates: []tls.Certificate{certificate}}
+	transport.TLSClientConfig = config
 	return &http.Client{Transport: transport, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, nil
 }
 

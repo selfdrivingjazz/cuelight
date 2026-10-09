@@ -11,7 +11,6 @@ import (
 
 const (
 	defaultListenAddress       = ":8443"
-	defaultMigrationsPath      = "migrations"
 	defaultDatabaseTimeout     = 10 * time.Second
 	defaultDatabaseConnections = 16
 	defaultDatabaseIdle        = 4
@@ -26,12 +25,13 @@ const (
 	defaultMaxLocalMediaBytes  = 8 << 30
 	defaultMaxEvents           = 100
 	defaultMaxWait             = 30 * time.Second
+	defaultUpdateFeedURL       = "https://github.com/jmilldotdev/cuelight/releases/latest/download/cuelight-release.json"
+	defaultUpdateInterval      = 6 * time.Hour
 )
 
 type Config struct {
 	ListenAddress           string
 	DatabaseURL             string
-	MigrationsPath          string
 	TLSCertificatePath      string
 	TLSPrivateKeyPath       string
 	PublisherPrivateKeyPath string
@@ -45,8 +45,9 @@ type Config struct {
 	ProtocolVersion         string
 	PlaybackProfile         string
 	PublicURL               string
-	// WebNodeDir is the built website-node app served at /node/; empty disables it.
-	WebNodeDir string
+	// NetworkName labels this control plane in desktop join links; empty
+	// defaults to the public URL host.
+	NetworkName string
 	// WebCaptureBrowser is a headless Chromium binary used to capture web
 	// library thumbnails; empty auto-detects one on PATH.
 	WebCaptureBrowser      string
@@ -64,6 +65,11 @@ type Config struct {
 	MaxLocalMediaBytes     int64
 	MaxEvents              int
 	MaxWait                time.Duration
+	// UpdateFeedURL is the signed release envelope polled for new versions.
+	UpdateFeedURL string
+	// UpdateCheck enables feed polling; CUELIGHT_CONTROL_UPDATE_CHECK=off disables it.
+	UpdateCheck         bool
+	UpdateCheckInterval time.Duration
 }
 
 type ConfigError struct {
@@ -79,7 +85,6 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	config := Config{
 		ListenAddress:           envOrDefault(lookup, "CUELIGHT_CONTROL_LISTEN_ADDR", defaultListenAddress),
 		DatabaseURL:             env(lookup, "CUELIGHT_CONTROL_DATABASE_URL"),
-		MigrationsPath:          envOrDefault(lookup, "CUELIGHT_CONTROL_MIGRATIONS_PATH", defaultMigrationsPath),
 		TLSCertificatePath:      env(lookup, "CUELIGHT_CONTROL_TLS_CERT_PATH"),
 		TLSPrivateKeyPath:       env(lookup, "CUELIGHT_CONTROL_TLS_KEY_PATH"),
 		PublisherPrivateKeyPath: env(lookup, "CUELIGHT_CONTROL_PUBLISHER_KEY_PATH"),
@@ -92,7 +97,7 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		ProtocolVersion:         envOrDefault(lookup, "CUELIGHT_CONTROL_PROTOCOL_VERSION", "1.0"),
 		PlaybackProfile:         envOrDefault(lookup, "CUELIGHT_CONTROL_PLAYBACK_PROFILE", "default"),
 		PublicURL:               env(lookup, "CUELIGHT_CONTROL_PUBLIC_URL"),
-		WebNodeDir:              env(lookup, "CUELIGHT_CONTROL_WEB_NODE_DIR"),
+		NetworkName:             env(lookup, "CUELIGHT_CONTROL_NETWORK_NAME"),
 		WebCaptureBrowser:       env(lookup, "CUELIGHT_CONTROL_WEB_CAPTURE_BROWSER"),
 		DatabaseTimeout:         defaultDatabaseTimeout,
 		DatabaseMaxConnections:  defaultDatabaseConnections,
@@ -108,6 +113,8 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		MaxLocalMediaBytes:      defaultMaxLocalMediaBytes,
 		MaxEvents:               defaultMaxEvents,
 		MaxWait:                 defaultMaxWait,
+		UpdateFeedURL:           envOrDefault(lookup, "CUELIGHT_CONTROL_UPDATE_FEED_URL", defaultUpdateFeedURL),
+		UpdateCheckInterval:     defaultUpdateInterval,
 	}
 	var err error
 	if config.DatabaseTimeout, err = durationEnv(lookup, "CUELIGHT_CONTROL_DATABASE_TIMEOUT", config.DatabaseTimeout); err != nil {
@@ -152,6 +159,16 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	if config.MaxWait, err = durationEnv(lookup, "CUELIGHT_CONTROL_MAX_WAIT", config.MaxWait); err != nil {
 		return Config{}, err
 	}
+	switch strings.ToLower(env(lookup, "CUELIGHT_CONTROL_UPDATE_CHECK")) {
+	case "", "on", "true", "1":
+		config.UpdateCheck = true
+	case "off", "false", "0":
+	default:
+		return Config{}, &ConfigError{Field: "CUELIGHT_CONTROL_UPDATE_CHECK", Reason: "must be on or off"}
+	}
+	if config.UpdateCheckInterval, err = durationEnv(lookup, "CUELIGHT_CONTROL_UPDATE_CHECK_INTERVAL", config.UpdateCheckInterval); err != nil {
+		return Config{}, err
+	}
 	if err := config.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -163,7 +180,6 @@ func (config Config) Validate() error {
 		value string
 	}{
 		{"CUELIGHT_CONTROL_DATABASE_URL", config.DatabaseURL},
-		{"CUELIGHT_CONTROL_MIGRATIONS_PATH", config.MigrationsPath},
 		{"CUELIGHT_CONTROL_TLS_CERT_PATH", config.TLSCertificatePath},
 		{"CUELIGHT_CONTROL_TLS_KEY_PATH", config.TLSPrivateKeyPath},
 		{"CUELIGHT_CONTROL_PUBLISHER_KEY_PATH", config.PublisherPrivateKeyPath},
@@ -224,6 +240,15 @@ func (config Config) Validate() error {
 	}
 	if err := boundedDuration("CUELIGHT_CONTROL_MAX_WAIT", config.MaxWait, 0, 5*time.Minute); err != nil {
 		return err
+	}
+	if config.UpdateCheck {
+		feedURL, err := url.Parse(config.UpdateFeedURL)
+		if err != nil || (feedURL.Scheme != "https" && feedURL.Scheme != "http") || feedURL.Host == "" {
+			return &ConfigError{Field: "CUELIGHT_CONTROL_UPDATE_FEED_URL", Reason: "must be an absolute HTTP(S) URL"}
+		}
+		if err := boundedDuration("CUELIGHT_CONTROL_UPDATE_CHECK_INTERVAL", config.UpdateCheckInterval, 5*time.Minute, 7*24*time.Hour); err != nil {
+			return err
+		}
 	}
 	if strings.TrimSpace(config.ProtocolVersion) == "" || strings.TrimSpace(config.PlaybackProfile) == "" {
 		return &ConfigError{Field: "CUELIGHT_CONTROL_PROTOCOL_VERSION", Reason: "protocol version and playback profile are required"}

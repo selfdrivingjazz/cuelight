@@ -1,0 +1,27 @@
+[Unit]
+Description=Cuelight control plane
+Documentation=https://github.com/jmilldotdev/cuelight
+After=network-online.target postgresql.service
+Wants=network-online.target
+# Created by `cuelight-control init --dir /var/lib/cuelight-control ...`.
+ConditionPathExists=/var/lib/cuelight-control/cuelight-control.env
+
+[Service]
+Type=simple
+User=cuelight-control
+Group=cuelight-control
+EnvironmentFile=/var/lib/cuelight-control/cuelight-control.env
+ExecStart=/usr/bin/cuelight-control serve
+Restart=on-failure
+RestartSec=5
+# Allows CUELIGHT_CONTROL_LISTEN_ADDR=:443 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cuelight-control
+
+[Install]
+WantedBy=multi-user.target

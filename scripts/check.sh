@@ -4,6 +4,7 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 
+node scripts/check-version.mjs
 test -z "$("$(go env GOROOT)/bin/gofmt" -l .)"
 go vet ./...
 go test ./...

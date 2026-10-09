@@ -11,9 +11,9 @@ import type { ClaimStarted, RemoteEvent, RemoteSession } from "./types";
 
 type Report = (render: RenderState) => void;
 
-/** Injected by apps/node-android's WebView; absent in plain browsers. */
+/** Injected by apps/node-android's WebView; absent in plain browsers. Update calls are absent in older shells. */
 declare global {
-  interface Window { CuelightAndroid?: { isAvailable(): boolean; injectInput(json: string): number } }
+  interface Window { CuelightAndroid?: { isAvailable(): boolean; injectInput(json: string): number; appVersion?: () => string; installUpdate?: (json: string) => boolean } }
 }
 
 export function WebsiteNodeApp({ controller: provided }: { controller?: BrowserNodeController }) {

@@ -6,6 +6,7 @@ require (
 	github.com/getkin/kin-openapi v0.147.0
 	github.com/jackc/pgx/v5 v5.7.6
 	go.etcd.io/bbolt v1.5.0
+	golang.org/x/sys v0.45.0
 )
 
 require (
@@ -20,6 +21,5 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 )

@@ -57,7 +57,7 @@ func (s *Store) CurrentAssignment(ctx context.Context, nodeID string) (assignmen
 // WaitForAssignment uses bounded polling rather than holding a PostgreSQL
 // connection open for the duration of a long poll. Every query observes the
 // caller context, making cancellation safe even while a request is waiting.
-func (s *Store) WaitForAssignment(ctx context.Context, nodeID string, generation int64, wait time.Duration) error {
+func (s *Store) WaitForAssignment(ctx context.Context, nodeID string, generation, softwareGeneration int64, wait time.Duration) error {
 	if err := s.requirePlayerNode(ctx, nodeID); err != nil {
 		return err
 	}
@@ -82,16 +82,16 @@ func (s *Store) WaitForAssignment(ctx context.Context, nodeID string, generation
 		case <-timer.C:
 			return nil
 		case <-ticker.C:
-			var current int64
+			var current, currentSoftware int64
 			err := s.q(ctx).QueryRowContext(ctx,
-				`SELECT desired_generation FROM nodes WHERE id = $1`, nodeID).Scan(&current)
+				`SELECT desired_generation, software_generation FROM nodes WHERE id = $1`, nodeID).Scan(&current, &currentSoftware)
 			if errors.Is(err, sql.ErrNoRows) {
 				return pki.ErrNodeNotFound
 			}
 			if err != nil {
 				return wrap("poll assignment generation", err)
 			}
-			if current > generation {
+			if current > generation || currentSoftware > softwareGeneration {
 				return nil
 			}
 		}

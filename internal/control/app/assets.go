@@ -33,9 +33,6 @@ func LoadStartupAssets(config Config) (StartupAssets, error) {
 	if err := validateCASDirectory(config.CASPath); err != nil {
 		return StartupAssets{}, err
 	}
-	if err := validateImmutableDirectory("migrations", config.MigrationsPath); err != nil {
-		return StartupAssets{}, err
-	}
 	certificate, err := tls.LoadX509KeyPair(config.TLSCertificatePath, config.TLSPrivateKeyPath)
 	if err != nil {
 		return StartupAssets{}, &PathError{Kind: "TLS certificate/key", Path: config.TLSCertificatePath, Reason: err.Error()}
@@ -97,20 +94,6 @@ func validateCASDirectory(path string) error {
 	}
 	if permissions&0o022 != 0 {
 		return &PathError{Kind: "CAS", Path: path, Reason: "must not be writable by group or other users"}
-	}
-	return nil
-}
-
-func validateImmutableDirectory(kind, path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return &PathError{Kind: kind, Path: path, Reason: err.Error()}
-	}
-	if !info.IsDir() {
-		return &PathError{Kind: kind, Path: path, Reason: "must be a directory, not a symlink or file"}
-	}
-	if info.Mode().Perm()&0o022 != 0 {
-		return &PathError{Kind: kind, Path: path, Reason: "must not be writable by group or other users"}
 	}
 	return nil
 }

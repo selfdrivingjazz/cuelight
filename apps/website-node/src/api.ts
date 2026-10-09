@@ -27,6 +27,9 @@ const BASE = "/api/v1/browser-node";
 
 /** Browser-node HTTP API. Uses only fetch + JSON so it runs on TV browsers. */
 export class BrowserNodeApi {
+  /** Called with control's X-Cuelight-Version on every response that carries it. */
+  onServerVersion?: (version: string) => void;
+
   constructor(private readonly origin = "", private readonly fetcher: FetchLike = (input, init) => fetch(input, init)) {}
 
   startClaim(userAgent: string): Promise<ClaimStarted> {
@@ -92,12 +95,16 @@ export class BrowserNodeApi {
   }
 
   private async send(method: string, path: string, init: RequestInit): Promise<Response> {
+    let response: Response;
     try {
-      return await this.fetcher(`${this.origin}${BASE}${path}`, { ...init, method, cache: "no-store", credentials: "omit" });
+      response = await this.fetcher(`${this.origin}${BASE}${path}`, { ...init, method, cache: "no-store", credentials: "omit" });
     } catch (error) {
       if (init.signal && init.signal.aborted) throw error;
       throw new ApiError(0, error instanceof Error ? error.message : "network request failed");
     }
+    const version = response.headers.get("x-cuelight-version");
+    if (version && this.onServerVersion) this.onServerVersion(version);
+    return response;
   }
 }
 

@@ -117,6 +117,11 @@ type EnrollmentTokenCreated struct {
 	ID        string    `json:"id"`
 	Secret    string    `json:"secret"`
 	ExpiresAt time.Time `json:"expiresAt"`
+	// JoinURL is a cuelight://join link for desktop nodes (enrollment only,
+	// present when CUELIGHT_CONTROL_PUBLIC_URL is configured).
+	JoinURL string `json:"joinUrl,omitempty"`
+	// CASHA256 pins the self-signed root anchoring control's TLS chain.
+	CASHA256 string `json:"caSha256,omitempty"`
 }
 
 type OperatorMe struct {
@@ -306,6 +311,7 @@ type Dependencies struct {
 	MaxChunkBytes   int64
 	Idempotency     *IdempotencyCache
 	Profiles        ProfileService
+	JoinLinks       JoinLinks
 }
 
 // IdempotencyCache is only used by adapters that need HTTP-level replay. Domain

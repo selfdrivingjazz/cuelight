@@ -29,7 +29,9 @@ var (
 type Repository interface {
 	PutCapabilities(context.Context, string, client.CapabilityReport) error
 	CurrentAssignment(context.Context, string) (assignment.Assignment, bool, error)
-	WaitForAssignment(context.Context, string, int64, time.Duration) error
+	// WaitForAssignment returns once the node's assignment generation exceeds
+	// generation or its software generation exceeds softwareGeneration.
+	WaitForAssignment(ctx context.Context, nodeID string, generation, softwareGeneration int64, wait time.Duration) error
 	AssignedRelease(context.Context, string, string) (assignment.Assignment, bool, error)
 	AuthorizeArtifact(context.Context, string, string) (bool, error)
 	RecordReport(context.Context, string, client.NodeReport) (bool, error)
@@ -40,6 +42,12 @@ type Repository interface {
 // authorized the requesting node for that release.
 type ReleaseLoader interface {
 	LoadRelease(context.Context, string) (canonical.EnvelopeV1, error)
+}
+
+// SoftwareResolver supplies Assignment.software and the node's software
+// generation, which changes whenever its target is set or cleared.
+type SoftwareResolver interface {
+	PlayerTarget(ctx context.Context, nodeID string) (*client.SoftwareTarget, int64, error)
 }
 
 type ArtifactStat struct {
@@ -82,9 +90,11 @@ func (l Limits) normalized() Limits {
 }
 
 type Service struct {
-	Repository        Repository
-	ReleaseLoader     ReleaseLoader
-	CASReader         CASReader
+	Repository    Repository
+	ReleaseLoader ReleaseLoader
+	CASReader     CASReader
+	// Software is optional; without it assignments never carry software.
+	Software          SoftwareResolver
 	Identity          Identity
 	RevocationChecker RevocationChecker
 	Limits            Limits

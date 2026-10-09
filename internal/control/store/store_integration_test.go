@@ -379,7 +379,7 @@ func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
 
 	cancelCtx, cancel := context.WithCancel(ctx)
 	waitDone := make(chan error, 1)
-	go func() { waitDone <- repository.WaitForAssignment(cancelCtx, nodeOne, 1, time.Second) }()
+	go func() { waitDone <- repository.WaitForAssignment(cancelCtx, nodeOne, 1, 0, time.Second) }()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	if err := <-waitDone; !errors.Is(err, context.Canceled) {
@@ -390,7 +390,7 @@ func TestPostgresPlayerAPIRepositoryContracts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.WaitForAssignment(ctx, nodeOne, 1, time.Second); err != nil {
+	if err := repository.WaitForAssignment(ctx, nodeOne, 1, 0, time.Second); err != nil {
 		t.Fatalf("assignment wait after update = %v", err)
 	}
 

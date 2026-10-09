@@ -1,0 +1,135 @@
+# GoReleaser v2. Builds the Go release artifacts named as `cuelight-release
+# manifest` expects. Run through scripts/build-release.sh, which builds and
+# embeds the web apps first and copies only the artifacts into its output dir;
+# publishing is CI's job (release.disable below).
+version: 2
+project_name: cuelight
+
+snapshot:
+  # build-release.sh always runs --snapshot with the release version from VERSION.
+  version_template: "{{ .Env.CUELIGHT_VERSION }}"
+
+builds:
+  - &gobuild
+    id: cuelight-control
+    main: ./cmd/cuelight-control
+    binary: cuelight-control
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/jmilldotdev/cuelight/internal/buildinfo.Version={{ .Version }} -X github.com/jmilldotdev/cuelight/internal/buildinfo.Commit={{ .ShortCommit }}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+  - <<: *gobuild
+    id: cuelight
+    main: ./cmd/cuelight
+    binary: cuelight
+  - <<: *gobuild
+    id: cuelight-player
+    main: ./cmd/cuelight-player
+    binary: cuelight-player
+    goos: [linux]
+  - <<: *gobuild
+    id: cuelight-minimal-node
+    main: ./cmd/cuelight-minimal-node
+    binary: cuelight-minimal-node
+    goos: [linux]
+
+# Entries are root-owned so a root `tar x` (or the appliance updater) never
+# leaves files owned by the build user's uid.
+archives:
+  - id: cuelight-control
+    ids: [cuelight-control]
+    formats: [tar.gz]
+    name_template: "cuelight-control_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info: &root-exec { owner: root, group: root, mode: 0755 }
+    files:
+      - { src: LICENSE, info: &root { owner: root, group: root, mode: 0644 } }
+      - src: deploy/control/cuelight-control.service
+        dst: systemd
+        strip_parent: true
+        info: *root
+  - id: cuelight
+    ids: [cuelight]
+    formats: [tar.gz]
+    name_template: "cuelight_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info: *root-exec
+    files:
+      - { src: LICENSE, info: *root }
+  # The appliance bundle: `cuelight-player update apply` unpacks it as-is into
+  # /opt/cuelight/versions/<version>; install.sh does a first install from it.
+  - id: cuelight-player
+    ids: [cuelight-player, cuelight-minimal-node]
+    formats: [tar.gz]
+    name_template: "cuelight-player_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info: *root-exec
+    files:
+      - { src: LICENSE, info: *root }
+      - src: deploy/minimal-node/install.sh
+        strip_parent: true
+        info: *root-exec
+      - src: deploy/minimal-node/*.service
+        dst: systemd
+        strip_parent: true
+        info: *root
+      - src: deploy/minimal-node/*.path
+        dst: systemd
+        strip_parent: true
+        info: *root
+
+nfpms:
+  - id: cuelight-control
+    ids: [cuelight-control]
+    package_name: cuelight-control
+    file_name_template: "cuelight-control_{{ .Version }}_{{ .Arch }}"
+    formats: [deb]
+    vendor: Cuelight
+    homepage: https://github.com/jmilldotdev/cuelight
+    maintainer: Cuelight <cuelight@jmill.dev>
+    description: Cuelight control plane (API, controller web UI, browser node app) as one binary; needs PostgreSQL.
+    license: See /usr/share/doc/cuelight-control/LICENSE
+    section: video
+    bindir: /usr/bin
+    recommends: [postgresql]
+    contents:
+      - src: deploy/control/cuelight-control.service
+        dst: /lib/systemd/system/cuelight-control.service
+      - src: LICENSE
+        dst: /usr/share/doc/cuelight-control/LICENSE
+    scripts:
+      postinstall: deploy/control/deb/postinst.sh
+      preremove: deploy/control/deb/prerm.sh
+  - id: cuelight-player
+    ids: [cuelight-player, cuelight-minimal-node]
+    package_name: cuelight-player
+    file_name_template: "cuelight-player_{{ .Version }}_{{ .Arch }}"
+    formats: [deb]
+    vendor: Cuelight
+    homepage: https://github.com/jmilldotdev/cuelight
+    maintainer: Cuelight <cuelight@jmill.dev>
+    description: Cuelight screen appliance (cuelight-player + MPV minimal node) with signed self-updates.
+    license: See /usr/share/doc/cuelight-player/LICENSE
+    section: video
+    bindir: /opt/cuelight/versions/{{ .Version }}
+    recommends: [mpv]
+    contents:
+      - src: deploy/minimal-node/*.service
+        dst: /lib/systemd/system/
+      - src: deploy/minimal-node/*.path
+        dst: /lib/systemd/system/
+      - src: /opt/cuelight/current/cuelight-player
+        dst: /usr/bin/cuelight-player
+        type: symlink
+      - src: LICENSE
+        dst: /usr/share/doc/cuelight-player/LICENSE
+    scripts:
+      postinstall: deploy/minimal-node/deb/postinst.sh
+      preremove: deploy/minimal-node/deb/prerm.sh
+      postremove: deploy/minimal-node/deb/postrm.sh
+
+checksum:
+  disable: true
+changelog:
+  disable: true
+release:
+  disable: true

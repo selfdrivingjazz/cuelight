@@ -22,6 +22,7 @@ import (
 	"time"
 
 	apispec "github.com/jmilldotdev/cuelight/api"
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 	"github.com/jmilldotdev/cuelight/internal/control/app"
 	"github.com/jmilldotdev/cuelight/internal/control/appaccess"
 	"github.com/jmilldotdev/cuelight/internal/control/assignment"
@@ -35,14 +36,17 @@ import (
 	"github.com/jmilldotdev/cuelight/internal/control/profile"
 	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
 	"github.com/jmilldotdev/cuelight/internal/control/remote"
+	"github.com/jmilldotdev/cuelight/internal/control/software"
 	"github.com/jmilldotdev/cuelight/internal/control/store"
 	"github.com/jmilldotdev/cuelight/internal/control/usage"
 	"github.com/jmilldotdev/cuelight/internal/control/webitem"
 	"github.com/jmilldotdev/cuelight/internal/control/webnode"
+	"github.com/jmilldotdev/cuelight/internal/control/webui"
 	"github.com/jmilldotdev/cuelight/internal/media/localcas"
 	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
 	"github.com/jmilldotdev/cuelight/internal/protocol"
 	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/jmilldotdev/cuelight/migrations"
 )
 
 // HandlerFactory is suitable for app.Options.Handler.
@@ -125,6 +129,12 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("construct player service: %w", err)
 	}
+	softwareService := &software.Service{
+		Repository: repository, Blobs: cas, PublicURL: config.PublicURL, ControlVersion: buildinfo.Version,
+		Feed: software.Feed{URL: config.UpdateFeedURL, Enabled: config.UpdateCheck, Interval: config.UpdateCheckInterval},
+	}
+	playerService.Software = softwareService
+	go softwareService.RunFeed(context.Background())
 
 	remoteService := &remote.Service{Policies: repository, PublicURL: config.PublicURL, TTL: 12 * time.Hour}
 	operatorRepository := store.NewOperatorAdapter(repository)
@@ -153,6 +163,16 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		},
 		MaxJSONBytes: config.MaxBodyBytes,
 	})
+	var joinLinks operatorapi.JoinLinks
+	if config.PublicURL != "" {
+		chainPEM, err := os.ReadFile(config.TLSCertificatePath)
+		if err != nil {
+			return nil, fmt.Errorf("read TLS chain for join links: %w", err)
+		}
+		if joinLinks, err = operatorapi.NewJoinLinks(config.PublicURL, config.NetworkName, chainPEM); err != nil {
+			return nil, fmt.Errorf("construct join links: %w", err)
+		}
+	}
 	operatorDependencies := operatorapi.Dependencies{
 		Auth:            authService,
 		PKI:             pkiService,
@@ -172,6 +192,7 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		MaxChunkBytes:   config.MaxChunkBytes,
 		Idempotency:     operatorapi.NewIdempotencyCache(),
 		Profiles:        profile.Service{Repository: store.ProfileRepository{Store: repository}, Assigner: assignmentService},
+		JoinLinks:       joinLinks,
 	}
 	operator := operatorapi.NewHandler(operatorDependencies)
 	usageService := usage.NewService(repository, nil)
@@ -203,6 +224,13 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	api.Handle("/player/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerHandler.ServeHTTP(w, r)
 	}))
+	api.Handle("/player/software/", software.NewPlayerHandler(softwareService, func(r *http.Request) (string, error) { return protocol.NodeIdentity(r, nil) }))
+	softwareOperator := software.NewOperatorHandler(softwareService, software.OperatorOptions{
+		Authorize: operatorDependencies.MiddlewareForScope, ReadScope: operatorapi.ScopeNodeRead, WriteScope: operatorapi.ScopeNodeWrite,
+		MaxUploadBytes: config.MaxUploadBytes, MaxJSONBytes: config.MaxBodyBytes,
+	})
+	api.Handle("/software", softwareOperator)
+	api.Handle("/software/", softwareOperator)
 	browserNodes := &webnode.Service{Repository: repository, Config: webnode.Config{PairBaseURL: config.PublicURL}, NewID: newUUID}
 	browserPlayerService := *playerService
 	browserPlayerService.Identity = browserNodes.Identity
@@ -242,11 +270,20 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 	api.Handle("/", operator)
 	root := http.NewServeMux()
 	root.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
-	if config.WebNodeDir != "" {
-		root.Handle("/node/", http.StripPrefix("/node", webnode.NewAppHandler(config.WebNodeDir)))
-		root.Handle("/node", http.RedirectHandler("/node/", http.StatusMovedPermanently))
-	}
-	return root, nil
+	root.Handle("/updates/", software.NewPublicHandler(softwareService))
+	root.Handle("/node/", http.StripPrefix("/node", webui.Handler(webui.WebsiteNode)))
+	root.Handle("/node", http.RedirectHandler("/node/", http.StatusMovedPermanently))
+	root.Handle("/", webui.Handler(webui.ControllerWeb))
+	return withVersionHeader(root), nil
+}
+
+// withVersionHeader stamps every response with control's software version;
+// browser nodes reload when it differs from the build they run.
+func withVersionHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Cuelight-Version", buildinfo.Version)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func newUUID() (string, error) {
@@ -367,9 +404,6 @@ func BootstrapAdminToken(ctx context.Context, config app.Config, actorID, actorN
 	if strings.TrimSpace(config.DatabaseURL) == "" {
 		return auth.CreatedToken{}, &app.ConfigError{Field: "CUELIGHT_CONTROL_DATABASE_URL", Reason: "is required"}
 	}
-	if strings.TrimSpace(config.MigrationsPath) == "" {
-		return auth.CreatedToken{}, &app.ConfigError{Field: "CUELIGHT_CONTROL_MIGRATIONS_PATH", Reason: "is required"}
-	}
 	if actorID == "" {
 		actorID = randomID()
 	}
@@ -389,7 +423,7 @@ func BootstrapAdminToken(ctx context.Context, config app.Config, actorID, actorN
 	defer db.Close()
 	migrationCtx, cancelMigration := context.WithTimeout(ctx, timeout)
 	defer cancelMigration()
-	if err := persistence.ApplyMigrations(migrationCtx, db, os.DirFS(config.MigrationsPath)); err != nil {
+	if err := persistence.ApplyMigrations(migrationCtx, db, migrations.FS); err != nil {
 		return auth.CreatedToken{}, err
 	}
 	repository, err := store.New(db)
@@ -400,6 +434,36 @@ func BootstrapAdminToken(ctx context.Context, config app.Config, actorID, actorN
 		return auth.CreatedToken{}, err
 	}
 	return auth.NewService(repository, pki.SystemClock(), rand.Reader).Create(ctx, actorID, scopes)
+}
+
+// ImportSoftwareRelease imports a release directory (cuelight-release.json
+// plus artifacts) into control's database and CAS, as
+// `cuelight-control updates import <dir>` does on the server.
+func ImportSoftwareRelease(ctx context.Context, config app.Config, dir string) (software.ImportResult, error) {
+	timeout := config.DatabaseTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	dbCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	db, err := persistence.OpenPostgres(dbCtx, config.DatabaseURL, persistence.PoolConfig{MaxOpenConnections: 2, MaxIdleConnections: 1, ConnectionLifetime: time.Hour})
+	if err != nil {
+		return software.ImportResult{}, err
+	}
+	defer db.Close()
+	if err := persistence.ApplyMigrations(dbCtx, db, migrations.FS); err != nil {
+		return software.ImportResult{}, err
+	}
+	repository, err := store.New(db)
+	if err != nil {
+		return software.ImportResult{}, err
+	}
+	cas, err := localcas.New(config.CASPath)
+	if err != nil {
+		return software.ImportResult{}, fmt.Errorf("open CAS: %w", err)
+	}
+	service := &software.Service{Repository: repository, Blobs: cas, ControlVersion: buildinfo.Version}
+	return service.ImportDir(ctx, software.SourceCLI, dir)
 }
 func ConfigureTLS(config app.Config) func(*tls.Config) error {
 	return func(tlsConfig *tls.Config) error {

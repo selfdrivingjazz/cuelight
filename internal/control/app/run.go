@@ -6,11 +6,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
-	"os"
 
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 	"github.com/jmilldotdev/cuelight/internal/control/persistence"
+	"github.com/jmilldotdev/cuelight/migrations"
 )
 
 type Runtime struct {
@@ -22,12 +24,12 @@ type Runtime struct {
 type HandlerFactory func(Runtime) (http.Handler, error)
 
 type Options struct {
-	Version      string
 	Handler      HandlerFactory
 	ConfigureTLS func(*tls.Config) error
 }
 
 func Run(ctx context.Context, config Config, options Options) (resultErr error) {
+	slog.Info("cuelight-control starting", "version", buildinfo.Version, "commit", buildinfo.Commit, "listen", config.ListenAddress)
 	if err := config.Validate(); err != nil {
 		return err
 	}
@@ -53,7 +55,7 @@ func Run(ctx context.Context, config Config, options Options) (resultErr error) 
 	}()
 
 	migrationCtx, cancelMigrations := context.WithTimeout(ctx, config.DatabaseTimeout)
-	err = persistence.ApplyMigrations(migrationCtx, database, os.DirFS(config.MigrationsPath))
+	err = persistence.ApplyMigrations(migrationCtx, database, migrations.FS)
 	cancelMigrations()
 	if err != nil {
 		return err
@@ -72,11 +74,6 @@ func Run(ctx context.Context, config Config, options Options) (resultErr error) 
 			return fmt.Errorf("build product handler: %w", err)
 		}
 	}
-	version := options.Version
-	if version == "" {
-		version = "dev"
-	}
-
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{assets.TLSCertificate},
 		MinVersion:   tls.VersionTLS13,
@@ -99,7 +96,7 @@ func Run(ctx context.Context, config Config, options Options) (resultErr error) 
 	}
 	tlsListener := tls.NewListener(listener, tlsConfig)
 	server := &http.Server{
-		Handler:           NewHandler(version, readiness, product),
+		Handler:           NewHandler(buildinfo.Version, readiness, product),
 		ReadHeaderTimeout: config.ReadHeaderTimeout,
 		IdleTimeout:       config.IdleTimeout,
 		MaxHeaderBytes:    config.MaxHeaderBytes,

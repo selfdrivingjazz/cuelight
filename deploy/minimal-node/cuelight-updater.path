@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch for staged Cuelight software updates
+
+[Path]
+# The player (user cuelight) writes request.json after staging and verifying
+# a release; cuelight-player update apply consumes it.
+PathExists=/var/lib/cuelight/updates/request.json
+Unit=cuelight-updater.service
+
+[Install]
+WantedBy=multi-user.target

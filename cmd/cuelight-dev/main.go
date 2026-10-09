@@ -13,10 +13,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 	"github.com/jmilldotdev/cuelight/internal/dev"
 )
-
-var version = "dev"
 
 type commandIO struct{ stdout, stderr io.Writer }
 
@@ -28,13 +27,12 @@ func main() {
 
 func run(ctx context.Context, args []string, streams commandIO) int {
 	if len(args) == 1 && (args[0] == "-version" || args[0] == "--version") {
-		fmt.Fprintln(streams.stdout, version)
+		fmt.Fprintln(streams.stdout, buildinfo.String("cuelight-dev"))
 		return 0
 	}
 	flags := flag.NewFlagSet("cuelight-dev", flag.ContinueOnError)
 	flags.SetOutput(streams.stderr)
 	root := flags.String("root", ".cuelight-dev", "private development root")
-	migrations := flags.String("migrations", "migrations", "control-plane migrations directory")
 	control := flags.String("control-binary", "cuelight-control", "cuelight-control executable")
 	simulator := flags.String("simulator-binary", "cuelight-node-sim", "cuelight-node-sim executable")
 	image := flags.String("postgres-image", "postgres:17-alpine", "PostgreSQL Docker image")
@@ -51,7 +49,7 @@ func run(ctx context.Context, args []string, streams commandIO) int {
 		fmt.Fprintln(streams.stderr, "usage: cuelight-dev [--root PATH] [--json] {up|status|reset|down}")
 		return 2
 	}
-	manager, err := dev.New(dev.Config{Root: *root, MigrationsPath: *migrations, ControlBinary: *control, SimulatorBinary: *simulator, PostgresImage: *image, ControlAddress: *controlAddress, DisableSimulator: *withoutSimulator}, dev.Options{})
+	manager, err := dev.New(dev.Config{Root: *root, ControlBinary: *control, SimulatorBinary: *simulator, PostgresImage: *image, ControlAddress: *controlAddress, DisableSimulator: *withoutSimulator}, dev.Options{})
 	if err != nil {
 		fmt.Fprintln(streams.stderr, err)
 		return 1

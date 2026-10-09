@@ -9,8 +9,11 @@
     "bootstrap": "pnpm install --frozen-lockfile",
     "seed:dev": "node scripts/seed-dev.mjs",
     "generate": "pnpm --filter @cuelight/api-client generate",
-    "check": "pnpm generate && pnpm -r typecheck && pnpm --filter @cuelight/api-client check-generated",
+    "check": "node scripts/check-version.mjs && pnpm generate && pnpm -r typecheck && pnpm --filter @cuelight/api-client check-generated",
     "build": "pnpm -r build",
+    "build:web": "pnpm --filter @cuelight/controller-web --filter @cuelight/website-node build && node scripts/embed-web.mjs --require",
+    "version:set": "node scripts/set-version.mjs",
+    "version:check": "node scripts/check-version.mjs",
     "test": "pnpm -r test",
     "e2e": "pnpm --filter @cuelight/controller-web e2e"
   },

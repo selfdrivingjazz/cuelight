@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
 	"github.com/jmilldotdev/cuelight/internal/sim"
 )
-
-var version = "dev"
 
 func main() {
 	var scenario, controlURL, caPEM, enrollmentToken, recoveryToken, statePath string
@@ -26,9 +26,18 @@ func main() {
 	flag.StringVar(&recoveryToken, "recovery-token", "", "one-time recovery token")
 	flag.StringVar(&statePath, "state", "cuelight-node-sim.state.json", "durable simulator state path")
 	flag.DurationVar(&duration, "duration", 0, "stop after this duration (default: until interrupted)")
+	var capabilities playerclient.CapabilityReport
+	flag.StringVar(&capabilities.Platform, "platform", "", "reported platform (default sim)")
+	flag.StringVar(&capabilities.SoftwareVersion, "software-version", "", "reported softwareVersion")
+	flag.StringVar(&capabilities.UpdateMethod, "update-method", "", "reported updateMethod (desktop, appliance, browser, android, none)")
+	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String("cuelight-node-sim"))
+		return
+	}
 	if scenario == "" && controlURL == "" {
-		fmt.Fprintf(os.Stderr, "cuelight-node-sim %s: -scenario or -control-url is required\n", version)
+		fmt.Fprintf(os.Stderr, "cuelight-node-sim %s: -scenario or -control-url is required\n", buildinfo.Version)
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -57,7 +66,7 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	node, err := sim.New(sim.Config{ControlURL: controlURL, ServerCAPEM: ca, EnrollmentToken: enrollmentToken, RecoveryToken: recoveryToken, StatePath: statePath, Evidence: os.Stdout})
+	node, err := sim.New(sim.Config{ControlURL: controlURL, ServerCAPEM: ca, EnrollmentToken: enrollmentToken, RecoveryToken: recoveryToken, StatePath: statePath, Evidence: os.Stdout, Capabilities: capabilities})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

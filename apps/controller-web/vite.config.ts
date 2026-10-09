@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import type { ProxyOptions } from "vite";
@@ -16,6 +17,7 @@ const apiProxy: ProxyOptions | undefined = controllerProxy ? {
 } : undefined;
 export default defineConfig({
   plugins: [react()],
+  define: { __CUELIGHT_VERSION__: JSON.stringify(readFileSync(new URL("../../VERSION", import.meta.url), "utf8").trim()) },
   server: {
     allowedHosts: ["cuelight.example.ts.net"],
     // The control plane answers CORS itself (the /api/v1/app API allows any origin).

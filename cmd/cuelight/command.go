@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 	operator "github.com/jmilldotdev/cuelight/internal/client"
 	"io"
 	"mime"
@@ -93,7 +94,7 @@ func run(ctx context.Context, args []string, streams commandIO) int {
 		options.json = true
 	}
 	if *showVersion {
-		fmt.Fprintf(streams.stdout, "cuelight %s\n", version)
+		fmt.Fprintln(streams.stdout, buildinfo.String("cuelight"))
 		return exitOK
 	}
 	remaining := flags.Args()

@@ -40,7 +40,7 @@ func (f *fakeRepository) CurrentAssignment(_ context.Context, node string) (assi
 	}
 	return f.assignment, true, nil
 }
-func (f *fakeRepository) WaitForAssignment(ctx context.Context, _ string, _ int64, _ time.Duration) error {
+func (f *fakeRepository) WaitForAssignment(ctx context.Context, _ string, _, _ int64, _ time.Duration) error {
 	if f.wait != nil {
 		return f.wait(ctx)
 	}

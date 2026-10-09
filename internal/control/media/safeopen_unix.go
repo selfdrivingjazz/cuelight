@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package media
 
@@ -9,7 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 type OSSafeOpener struct{}
@@ -32,26 +33,26 @@ func (OSSafeOpener) Open(root, relativePath string) (SafeFile, error) {
 		}
 	}
 
-	current, err := syscall.Open(root, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	current, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open allowlisted root: %w", err)
 	}
 	for _, part := range parts[:len(parts)-1] {
-		next, openErr := syscall.Openat(current, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-		syscall.Close(current)
+		next, openErr := unix.Openat(current, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		unix.Close(current)
 		if openErr != nil {
 			return nil, fmt.Errorf("open source directory component: %w", openErr)
 		}
 		current = next
 	}
-	fd, err := syscall.Openat(current, parts[len(parts)-1], syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-	syscall.Close(current)
+	fd, err := unix.Openat(current, parts[len(parts)-1], unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	unix.Close(current)
 	if err != nil {
 		return nil, fmt.Errorf("open source file: %w", err)
 	}
 	file := os.NewFile(uintptr(fd), filepath.Join(root, clean))
 	if file == nil {
-		syscall.Close(fd)
+		unix.Close(fd)
 		return nil, errors.New("construct source file handle")
 	}
 	source := &osSafeFile{file: file}
@@ -79,9 +80,17 @@ func (f *osSafeFile) Version() (SourceVersion, error) {
 	if err != nil {
 		return SourceVersion{}, err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return SourceVersion{}, errors.New("source stat lacks Unix identity")
+	connection, err := f.file.SyscallConn()
+	if err != nil {
+		return SourceVersion{}, err
+	}
+	var stat unix.Stat_t
+	var statErr error
+	if err := connection.Control(func(fd uintptr) { statErr = unix.Fstat(int(fd), &stat) }); err != nil {
+		return SourceVersion{}, err
+	}
+	if statErr != nil {
+		return SourceVersion{}, fmt.Errorf("source stat: %w", statErr)
 	}
 	return SourceVersion{
 		Size:            info.Size(),

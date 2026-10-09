@@ -2,7 +2,7 @@ import { ApiError, BrowserNodeApi } from "./api";
 import { toPresentation, withAppToken } from "./presentation";
 import type { Presentation } from "./presentation";
 import type { CredentialStorage } from "./storage";
-import type { Assignment, BrowserCredential, ClaimStarted, ContentState, RemoteEvent, RemoteSession } from "./types";
+import type { Assignment, BrowserCredential, ClaimStarted, ContentState, RemoteEvent, RemoteSession, SoftwareTarget } from "./types";
 
 export type NodeView =
   | { phase: "starting" }
@@ -20,14 +20,26 @@ export type NodeSnapshot = {
 /** What the renderer observed; reported to the control plane as currentContent. */
 export type RenderState = { state: ContentState; itemId?: string; positionMs?: number; width?: number; height?: number; error?: string };
 
+/** The Android shell's bridge (apps/node-android); update calls are absent in older shells. */
+export type AndroidBridge = { appVersion?: () => string; installUpdate?: (json: string) => boolean };
+
 export type ControllerOptions = {
   userAgent?: string;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   now?: () => number;
   assignmentWaitSeconds?: number;
+  /** The version this website-node build was made from. */
+  buildVersion?: string;
+  /** Defaults to window.CuelightAndroid. */
+  android?: AndroidBridge;
+  /** Reloads the page to pick up the website-node build control now serves. */
+  reload?: () => void;
+  /** Settling time between seeing a new control version and reloading. */
+  reloadDelayMs?: number;
 };
 
 const RENDERER_VERSION = "website-node/0.2.0";
+const RELOADED_FOR_KEY = "cuelight-reloaded-for-version";
 
 /** Pairing, assignment, report, and remote-input loops for one browser node. */
 export class BrowserNodeController {
@@ -41,6 +53,10 @@ export class BrowserNodeController {
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly now: () => number;
   private readonly waitSeconds: number;
+  private readonly buildVersion: string;
+  private readonly android: AndroidBridge | undefined;
+  private reloadTimer: ReturnType<typeof setTimeout> | undefined;
+  private installRequested = "";
 
   constructor(private readonly api: BrowserNodeApi, private readonly storage: CredentialStorage, private readonly options: ControllerOptions = {}) {
     this.sleep = options.sleep || abortableSleep;
@@ -48,6 +64,9 @@ export class BrowserNodeController {
     this.waitSeconds = options.assignmentWaitSeconds === undefined ? 25 : options.assignmentWaitSeconds;
     // Millisecond clock seeds a sequence that stays monotonic across reloads.
     this.reportSequence = this.now();
+    this.buildVersion = options.buildVersion || __CUELIGHT_VERSION__;
+    this.android = options.android || (typeof window === "undefined" ? undefined : window.CuelightAndroid);
+    api.onServerVersion = (version) => this.serverVersion(version);
   }
 
   get snapshot(): NodeSnapshot { return this.snapshotValue; }
@@ -71,6 +90,47 @@ export class BrowserNodeController {
   stop(): void {
     this.abort.abort();
     this.stopRemote();
+    clearTimeout(this.reloadTimer);
+    this.reloadTimer = undefined;
+  }
+
+  /** The software this node reports: the Android shell's version when it can update itself. */
+  private software(): { softwareVersion: string; updateMethod: "browser" | "android" } {
+    const android = this.android;
+    if (android && android.appVersion && android.installUpdate) return { softwareVersion: android.appVersion(), updateMethod: "android" };
+    return { softwareVersion: this.buildVersion, updateMethod: "browser" };
+  }
+
+  /**
+   * Control serves the website-node build matching its own version, so a
+   * different X-Cuelight-Version means a newer page is available. Reload once
+   * per control version (a page that still differs after reloading stays put)
+   * and never while a pairing code is on screen.
+   */
+  private serverVersion(version: string): void {
+    if (version === this.buildVersion || this.reloadTimer !== undefined || readSession(RELOADED_FOR_KEY) === version) return;
+    const delay = this.options.reloadDelayMs === undefined ? 10000 : this.options.reloadDelayMs;
+    const attempt = () => {
+      if (this.snapshotValue.view.phase === "pairing") {
+        this.reloadTimer = setTimeout(attempt, delay);
+        return;
+      }
+      this.reloadTimer = undefined;
+      writeSession(RELOADED_FOR_KEY, version);
+      (this.options.reload || (() => window.location.reload()))();
+    };
+    this.reloadTimer = setTimeout(attempt, delay);
+  }
+
+  /** Hands a newer signed APK to the Android shell, once per version per page load. */
+  private installSoftware(target: SoftwareTarget | undefined): void {
+    const android = this.android;
+    if (!target || !target.apkUrl || !target.apkSha256 || !android || !android.installUpdate) return;
+    const reported = this.software().softwareVersion;
+    if (this.installRequested === target.version || compareVersions(target.version, reported) <= 0) return;
+    this.installRequested = target.version;
+    const apkUrl = typeof location === "undefined" ? target.apkUrl : new URL(target.apkUrl, location.href).toString();
+    android.installUpdate(JSON.stringify({ version: target.version, apkUrl, apkSha256: target.apkSha256 }));
   }
 
   /** Forget the credential locally and show a fresh pairing code. */
@@ -178,7 +238,7 @@ export class BrowserNodeController {
         await this.renewIfDue();
         const token = this.credential.token;
         if (!capabilitiesSent) {
-          await this.api.putCapabilities(token, capabilities());
+          await this.api.putCapabilities(token, { ...capabilities(), ...this.software() });
           capabilitiesSent = true;
         }
         const poll = await this.api.pollAssignment(token, etag, this.waitSeconds, signal);
@@ -192,6 +252,14 @@ export class BrowserNodeController {
           continue;
         }
         if ("notModified" in poll) continue;
+        this.installSoftware(poll.assignment.software);
+        if (!poll.assignment.releaseId) {
+          // Software-only: nothing to present, but keep long-polling on its ETag.
+          etag = poll.etag;
+          this.stopRemote();
+          if (this.snapshotValue.view.phase !== "idle") this.update({ view: { phase: "idle", nodeId: credential.nodeId }, remote: null });
+          continue;
+        }
         const release = await this.api.release(token, poll.assignment.releaseId);
         let presentation = toPresentation(release, (digest) => this.api.artifactUrl(token, digest));
         if (presentation.kind === "web" && presentation.appAccess && presentation.mediaId) {
@@ -289,6 +357,44 @@ function isUnauthorized(error: unknown): boolean {
 
 function backoff(failures: number): number {
   return Math.min(30000, 1000 * Math.pow(2, Math.min(failures, 5)));
+}
+
+/** Semantic-version precedence of MAJOR.MINOR.PATCH[-PRERELEASE]; unparseable versions sort lowest. */
+function compareVersions(a: string, b: string): number {
+  const pattern = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
+  const left = pattern.exec(a);
+  const right = pattern.exec(b);
+  if (!left || !right) return left ? 1 : right ? -1 : 0;
+  for (let index = 1; index <= 3; index += 1) {
+    const difference = Number(left[index]) - Number(right[index]);
+    if (difference !== 0) return difference;
+  }
+  const leftPre = left[4] || "";
+  const rightPre = right[4] || "";
+  if (leftPre === rightPre) return 0;
+  if (!leftPre || !rightPre) return leftPre ? -1 : 1;
+  const leftParts = leftPre.split(".");
+  const rightParts = rightPre.split(".");
+  for (let index = 0; index < Math.min(leftParts.length, rightParts.length); index += 1) {
+    const x = leftParts[index] || "";
+    const y = rightParts[index] || "";
+    if (x === y) continue;
+    const xNumeric = /^\d+$/.test(x);
+    const yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) return Number(x) - Number(y);
+    if (xNumeric !== yNumeric) return xNumeric ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return leftParts.length - rightParts.length;
+}
+
+/** sessionStorage survives the reload it guards; private modes and old TV browsers may lack it. */
+function readSession(key: string): string | null {
+  try { return typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(key); } catch { return null; }
+}
+
+function writeSession(key: string, value: string): void {
+  try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, value); } catch { /* reload loops are then only bounded by the delay */ }
 }
 
 function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {

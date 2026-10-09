@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/jmilldotdev/cuelight/internal/buildinfo"
 )
 
 func TestRunReportsActionableConfigurationError(t *testing.T) {
@@ -71,7 +73,7 @@ func TestRunVersionDoesNotRequireRuntimeConfiguration(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := run(context.Background(), []string{"-version"}, nil, &stdout, &stderr)
-	if exitCode != 0 || stdout.String() != "cuelight-control "+version+"\n" {
+	if exitCode != 0 || stdout.String() != buildinfo.String("cuelight-control")+"\n" {
 		t.Fatalf("exit = %d stdout = %q stderr = %q", exitCode, stdout.String(), stderr.String())
 	}
 }

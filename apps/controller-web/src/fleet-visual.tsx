@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { components } from "@cuelight/api-client";
+import { SoftwareBadges, type NodeSoftware } from "./software";
 import {
   Card,
   CardContent,
@@ -55,6 +56,8 @@ export interface FleetNodeVisual {
   capabilities?: CapabilityReport;
   nodeHref?: string;
   actions?: React.ReactNode;
+  /** Software status: out-of-date and Standby badges. */
+  software?: NodeSoftware;
 }
 
 export interface FleetNodeCardProps extends FleetNodeVisual {
@@ -311,7 +314,7 @@ function screenSource({ capture, expectedNow, observedNow }: Pick<FleetNodeVisua
 }
 
 /** Compact wall tile: a monitor-framed preview, the screen name, what it shows, and a tally status. */
-export function ScreenTile({ node, report, lastContactAt, health, healthDetail, observedNow, expectedNow, capture, nodeHref, selected = false, onSelectedChange, now }: Omit<FleetNodeCardProps, "actions" | "capabilities" | "next">) {
+export function ScreenTile({ node, report, lastContactAt, health, healthDetail, observedNow, expectedNow, capture, nodeHref, software, selected = false, onSelectedChange, now }: Omit<FleetNodeCardProps, "actions" | "capabilities" | "next">) {
   const summary = nodeHealth({ report, health, healthDetail });
   const source = screenSource({ capture, expectedNow, observedNow });
   const showing = observedNow?.title ?? expectedNow?.title ?? (report?.currentContent?.state === "off_air" ? "Off air" : report?.currentContent ? humanizeStatus(report.currentContent.state) : "Nothing reported");
@@ -327,6 +330,7 @@ export function ScreenTile({ node, report, lastContactAt, health, healthDetail, 
       <div className="min-w-0">
         <h2 className="truncate font-semibold tracking-tight">{nodeHref ? <a className="after:absolute after:inset-0 after:rounded-lg focus-visible:shadow-none focus-visible:after:shadow-[var(--focus-ring)]" href={nodeHref}>{node.name}</a> : node.name}</h2>
         <p className="mt-0.5 truncate text-sm text-muted-foreground">{showing}</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5 empty:hidden"><SoftwareBadges software={software} /></div>
       </div>
       {onSelectedChange && <label className="relative z-10 -m-1 inline-flex cursor-pointer p-1"><input type="checkbox" className="h-4 w-4 rounded border-input accent-primary" checked={selected} onChange={(event) => onSelectedChange(event.currentTarget.checked)} /><span className="sr-only">Select {node.name}</span></label>}
     </div>

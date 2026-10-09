@@ -30,7 +30,7 @@ type provisionedNode struct {
 	ControlURL             string `json:"controlUrl"`
 	EventEpoch             string `json:"eventEpoch"`
 	PublisherKeyID         string `json:"publisherKeyId"`
-	CAPath                 string `json:"caPath"`
+	CAPath                 string `json:"caPath,omitempty"`
 	CertificatePath        string `json:"certificatePath"`
 	PrivateKeyPath         string `json:"privateKeyPath"`
 	PublisherPublicKeyPath string `json:"publisherPublicKeyPath"`
@@ -41,22 +41,31 @@ func runProvision(ctx context.Context, args []string, lookup func(string) (strin
 	flags.SetOutput(io.Discard)
 	controlURL := flags.String("control-url", "", "controller API base URL")
 	caFile := flags.String("ca-file", "", "controller CA certificate")
+	caSHA256 := flags.String("ca-sha256", "", "hex SHA-256 of the controller's self-signed root certificate (DER)")
 	nodeName := flags.String("node-name", "", "node display name")
 	outputDirectory := flags.String("output", "", "private node state directory")
 	recoverNode := flags.Bool("recover", false, "use a recovery token")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || strings.TrimSpace(*controlURL) == "" || strings.TrimSpace(*caFile) == "" || strings.TrimSpace(*outputDirectory) == "" {
-		return errors.New("usage: cuelight-player provision --control-url URL --ca-file FILE --output DIRECTORY [--node-name NAME] [--recover]")
+	if flags.NArg() != 0 || strings.TrimSpace(*controlURL) == "" || strings.TrimSpace(*outputDirectory) == "" || (*caFile != "" && *caSHA256 != "") {
+		return errors.New("usage: cuelight-player provision --control-url URL [--ca-file FILE | --ca-sha256 HEX] --output DIRECTORY [--node-name NAME] [--recover]")
 	}
 	token, ok := lookup(provisionTokenEnvironment)
 	if !ok || strings.TrimSpace(token) == "" {
 		return fmt.Errorf("%s is required", provisionTokenEnvironment)
 	}
-	caPEM, err := os.ReadFile(*caFile)
-	if err != nil {
-		return fmt.Errorf("read controller CA: %w", err)
+	var caPEM []byte
+	var err error
+	switch {
+	case *caFile != "":
+		if caPEM, err = os.ReadFile(*caFile); err != nil {
+			return fmt.Errorf("read controller CA: %w", err)
+		}
+	case *caSHA256 != "":
+		if caPEM, err = fetchPinnedCA(ctx, normalizeControllerAPIURL(*controlURL), *caSHA256); err != nil {
+			return err
+		}
 	}
 	directory, err := filepath.Abs(*outputDirectory)
 	if err != nil {
@@ -108,22 +117,25 @@ func runProvision(ctx context.Context, args []string, lookup func(string) (strin
 	if _, err := tls.X509KeyPair([]byte(enrollment.Certificate), privatePEM); err != nil {
 		return errors.New("controller returned a certificate that does not match the generated key")
 	}
-	caPath := filepath.Join(directory, "controller-ca.pem")
 	certificatePath := filepath.Join(directory, "node.pem")
 	privateKeyPath := filepath.Join(directory, "node-key.pem")
 	publisherPath := filepath.Join(directory, "publisher-public-key")
-	files := []struct {
-		path    string
-		content []byte
-		mode    os.FileMode
-	}{
-		{caPath, caPEM, 0o600},
-		{certificatePath, []byte(enrollment.Certificate), 0o600},
-		{privateKeyPath, privatePEM, 0o600},
-		{publisherPath, []byte(enrollment.PublisherPublicKey + "\n"), 0o600},
+	files := map[string][]byte{
+		certificatePath: []byte(enrollment.Certificate),
+		privateKeyPath:  privatePEM,
+		publisherPath:   []byte(enrollment.PublisherPublicKey + "\n"),
 	}
-	for _, file := range files {
-		if err := atomicWrite(file.path, file.content, file.mode); err != nil {
+	// Without an explicit trust anchor the node trusts system roots, recorded
+	// as an absent caPath.
+	caPath := ""
+	if len(caPEM) != 0 {
+		caPath = filepath.Join(directory, "controller-ca.pem")
+		files[caPath] = caPEM
+	} else if err := os.Remove(filepath.Join(directory, "controller-ca.pem")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	for path, content := range files {
+		if err := atomicWrite(path, content, 0o600); err != nil {
 			return err
 		}
 	}

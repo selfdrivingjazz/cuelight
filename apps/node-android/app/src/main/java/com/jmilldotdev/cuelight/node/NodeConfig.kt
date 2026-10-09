@@ -7,9 +7,18 @@ data class NodeConfig(
     val serverUrl: String,
     val nodePath: String = DEFAULT_NODE_PATH,
     val startOnBoot: Boolean = false,
+    /**
+     * Lowercase hex SHA-256 of the DER of the control server's self-signed root (the `ca=sha256:`
+     * value of a join link). When set, TLS to the server host is trusted only via that root.
+     */
+    val caSha256: String? = null,
 ) {
     /** Full URL of the browser node page served by the control server. */
     fun nodeUrl(): String = joinUrl(serverUrl, nodePath)
+
+    /** True when [host] is the server host and a root pin is configured. */
+    fun pinsHost(host: String?): Boolean =
+        caSha256 != null && host != null && host.equals(URI(serverUrl).host, ignoreCase = true)
 
     companion object {
         const val DEFAULT_NODE_PATH = "/node/"
