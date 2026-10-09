@@ -1,17 +1,23 @@
 import * as React from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { components } from "@cuelight/api-client";
 import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState } from "@cuelight/controller-ui";
 import { api, readApiResult, setApiToken } from "./api";
 
 type Operator = components["schemas"]["OperatorMe"];
 type AuthState = "checking" | "signedOut" | "authenticated" | "invalid";
+export interface OperatorSession {
+  operator: Operator;
+  /** Absent when control admitted this browser without a token (trusted network). */
+  token?: string;
+}
 interface AuthContextValue {
   token?: string;
   operator?: Operator;
   state: AuthState;
   error?: string;
   signIn: (token: string) => Promise<boolean>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 }
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 const TOKEN_KEY = "cuelight.controller.operatorToken";
@@ -21,49 +27,84 @@ function readStoredToken(): string | undefined {
   return window.sessionStorage.getItem(TOKEN_KEY) ?? undefined;
 }
 
+function storeToken(token: string | undefined) {
+  if (typeof window === "undefined") return;
+  if (token) window.sessionStorage.setItem(TOKEN_KEY, token);
+  else window.sessionStorage.removeItem(TOKEN_KEY);
+}
+
+async function identify(token: string | undefined): Promise<Operator> {
+  setApiToken(token);
+  return readApiResult(await api.GET("/operator/me"));
+}
+
+/**
+ * Resolves this browser's operator session on load: the token chosen earlier in
+ * this tab first, then a token-less probe that succeeds when control trusts the
+ * browser's network. `error` explains a stored token that no longer works.
+ */
+export async function resolveSession(storedToken: string | undefined): Promise<{ session?: OperatorSession; error?: string }> {
+  let error: string | undefined;
+  if (storedToken) {
+    try {
+      return { session: { operator: await identify(storedToken), token: storedToken } };
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "The token is invalid.";
+    }
+  }
+  try {
+    return { session: { operator: await identify(undefined) } };
+  } catch {
+    return { error };
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const initialToken = React.useRef(readStoredToken());
-  const [token, setToken] = React.useState<string | undefined>(initialToken.current);
-  const [operator, setOperator] = React.useState<Operator | undefined>();
+  const queryClient = useQueryClient();
+  const [session, setSession] = React.useState<OperatorSession>();
   const [state, setState] = React.useState<AuthState>("checking");
   const [error, setError] = React.useState<string>();
+  const current = React.useRef<OperatorSession | undefined>(undefined);
 
-  const validate = React.useCallback(async (candidate: string): Promise<boolean> => {
-    const normalized = candidate.trim();
-    setState("checking");
-    setError(undefined);
-    setApiToken(normalized || undefined);
-    try {
-      const identity = readApiResult(await api.GET("/operator/me"));
-      setToken(normalized || undefined);
-      setOperator(identity);
-      setState("authenticated");
-      if (typeof window !== "undefined") {
-        if (normalized) window.sessionStorage.setItem(TOKEN_KEY, normalized);
-        else window.sessionStorage.removeItem(TOKEN_KEY);
-      }
-      return true;
-    } catch (cause) {
-      setApiToken(undefined);
-      setToken(undefined);
-      setOperator(undefined);
-      setState(normalized ? "invalid" : "signedOut");
-      setError(normalized && cause instanceof Error ? cause.message : undefined);
-      if (typeof window !== "undefined") window.sessionStorage.removeItem(TOKEN_KEY);
-      return false;
-    }
-  }, []);
+  const adopt = React.useCallback((next: OperatorSession | undefined, failure?: string) => {
+    current.current = next;
+    setSession(next);
+    setError(failure);
+    setState(next ? "authenticated" : failure ? "invalid" : "signedOut");
+    storeToken(next?.token);
+    // Cached reads belong to the previous identity and its scopes.
+    void queryClient.resetQueries();
+  }, [queryClient]);
 
   React.useEffect(() => {
-    void validate(initialToken.current ?? "");
-  }, [validate]);
+    let cancelled = false;
+    void resolveSession(readStoredToken()).then(({ session: resolved, error: failure }) => {
+      if (!cancelled) adopt(resolved, failure);
+    });
+    return () => { cancelled = true; };
+  }, [adopt]);
 
-  const signOut = React.useCallback(() => {
-    initialToken.current = undefined;
-    void validate("");
-  }, [validate]);
-  const signIn = React.useCallback((candidate: string) => validate(candidate), [validate]);
-  const value = React.useMemo(() => ({ token, operator, state, error, signIn, signOut }), [token, operator, state, error, signIn, signOut]);
+  const signIn = React.useCallback(async (candidate: string): Promise<boolean> => {
+    const token = candidate.trim();
+    if (!token) return false;
+    try {
+      adopt({ operator: await identify(token), token });
+      return true;
+    } catch (cause) {
+      // A rejected token never ends a working session (e.g. trusted-network access).
+      setApiToken(current.current?.token);
+      setError(cause instanceof Error ? cause.message : "The token is invalid.");
+      if (!current.current) setState("invalid");
+      return false;
+    }
+  }, [adopt]);
+
+  const signOut = React.useCallback(async () => {
+    const { session: resolved } = await resolveSession(undefined);
+    adopt(resolved);
+  }, [adopt]);
+
+  const value = React.useMemo(() => ({ token: session?.token, operator: session?.operator, state, error, signIn, signOut }), [session, state, error, signIn, signOut]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
@@ -73,15 +114,20 @@ export function useAuth(): AuthContextValue {
   return value;
 }
 
-export function AccessScreen() {
+/** Token entry; also offered in Settings to trusted-network operators who want a token identity. */
+export function TokenForm({ submitLabel = "Continue" }: { submitLabel?: string }) {
   const auth = useAuth();
   const [candidate, setCandidate] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true);
-    await auth.signIn(candidate);
+    if (await auth.signIn(candidate)) setCandidate("");
     setSubmitting(false);
   };
-  return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader><CardTitle>Controller access</CardTitle></CardHeader><CardContent><form className="space-y-4" onSubmit={submit}><label className="block text-sm font-medium" htmlFor="operator-token">Operator token<input id="operator-token" type="password" autoComplete="current-password" required value={candidate} onChange={(event) => setCandidate(event.currentTarget.value)} className="mt-1 h-10 w-full rounded-md border border-border bg-background px-3" /></label>{(auth.state === "invalid" || auth.error) && <ErrorState title="Access denied" description={auth.error ?? "The token is invalid."} onRetry={() => undefined} />}{auth.state === "checking" && <p role="status" className="text-sm text-muted-foreground">Validating token…</p>}<Button type="submit" disabled={submitting || !candidate.trim()}>{submitting ? "Checking…" : "Continue"}</Button></form></CardContent></Card></main>;
+  return <form className="space-y-4" onSubmit={submit}><label className="block text-sm font-medium" htmlFor="operator-token">Operator token<input id="operator-token" type="password" autoComplete="current-password" required value={candidate} onChange={(event) => setCandidate(event.currentTarget.value)} className="mt-1 h-10 w-full rounded-md border border-border bg-background px-3" /></label>{auth.error && <ErrorState title="Access denied" description={auth.error} onRetry={() => undefined} />}<Button type="submit" disabled={submitting || !candidate.trim()}>{submitting ? "Checking…" : submitLabel}</Button></form>;
+}
+
+export function AccessScreen() {
+  return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader><CardTitle>Controller access</CardTitle></CardHeader><CardContent><TokenForm /></CardContent></Card></main>;
 }

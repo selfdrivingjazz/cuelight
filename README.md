@@ -42,7 +42,7 @@ init` generates everything else once:
 ```sh
 cuelight-control init --dir DIR --hostname NAME [--hostname …] [--ip ADDR …] \
   --public-url https://NAME:8443 [--network-name "Name"] [--database-url postgres://…] \
-  [--listen :8443] [--tls-cert chain.pem --tls-key key.pem]
+  [--listen :8443] [--tls-cert chain.pem --tls-key key.pem] [--trusted-network CIDR …]
 ```
 
 It writes `DIR/cuelight-control.env` (every `CUELIGHT_CONTROL_*` path), the node-client CA
@@ -59,7 +59,8 @@ browser-node TV needs a publicly trusted certificate (`--tls-cert`).
 
 Start with `set -a; . DIR/cuelight-control.env; set +a; cuelight-control serve`, then mint
 the first operator token with `cuelight-control admin token create --scopes …` (same
-environment; prints the secret once) and paste it into the controller at `/`.
+environment; prints the secret once) and paste it into the controller at `/` — or skip
+tokens on a private network (see "Operator access").
 
 **Docker Compose** (PostgreSQL 17 + control, built from this checkout):
 
@@ -102,6 +103,56 @@ with the env file loaded (`systemd/cuelight-control.service` is the reference un
 - **Desktop app** (macOS/Windows/Linux): see "Desktop app: multiple networks" below.
 - **Any browser or smart TV**: open `https://<public origin>/node/` (see "Browser and
   smart-TV nodes").
+
+## Operator access
+
+Operators authenticate in one of two ways:
+
+- **Token**: `Authorization: Bearer cuelight_admin_…` from
+  `cuelight-control admin token create --scopes …`. Scopes limit what it can do and
+  every action is attributed to the token's actor. The controller asks for one at `/`.
+- **Trusted network**: with `CUELIGHT_CONTROL_TRUSTED_NETWORKS` (comma-separated CIDRs,
+  IPv4 and IPv6; `init --trusted-network CIDR`, repeatable; default empty = off), a
+  request with **no** `Authorization` header whose TCP peer address is inside one of
+  those ranges is the built-in **Trusted network** operator with every scope. The
+  controller then opens straight into the app (Settings → Operator session shows
+  `Trusted network (ADDRESS)` and still accepts a token), and `cuelight` CLI commands
+  work without `--token`. `GET /api/v1/operator/me` reports `authMethod: token|network`.
+
+A request that carries a token is always judged by that token, even from a trusted
+address: a read-only token stays read-only, and a bad one is a 401. Network trust
+never applies to screens (mTLS), browser screens, app tokens, or phone-remote links.
+
+Because a trusted browser needs no credential, control refuses network-trusted
+requests a third-party page could trigger: 403 when `Sec-Fetch-Site` is present and
+not `same-origin`/`none`, or when `Origin` is present and is not the origin of
+`CUELIGHT_CONTROL_PUBLIC_URL` (without a public URL: the request's own scheme and
+host). Requests without those headers (curl, the CLI) pass. The operator API never
+sends CORS headers; only `/api/v1/app/*` and `/api/v1/openapi.yaml` do.
+
+Before enabling it:
+
+- **Everyone in those ranges is a full operator**, including `security_admin`: they
+  can mint and revoke tokens, enroll and unregister screens, and change any
+  assignment. Anything running in a browser at control's origin on a trusted device —
+  including HTML you upload as media — acts as that operator. Trust only networks
+  where every device and person is an operator.
+- **Trust is the TCP peer address**; `X-Forwarded-For` is ignored. Behind a reverse
+  proxy or port forwarder (`tailscale serve`, nginx, Docker's userland proxy) every
+  request arrives from the proxy's address, so trusting it trusts whoever can reach
+  the proxy. Configure trusted networks only on a listener clients reach directly.
+
+On a dedicated LAN, for example the Mars College network:
+
+```sh
+cuelight-control init --dir /var/lib/cuelight-control --hostname cuelight.mars \
+  --ip 10.0.0.5 --public-url https://cuelight.mars:8443 --listen 10.0.0.5:8443 \
+  --trusted-network 10.0.0.0/8 --trusted-network fd00::/8
+```
+
+On a tailnet, listen on the machine's tailnet address and trust
+`100.64.0.0/10,fd7a:115c:a1e0::/48`. Existing installs add
+`CUELIGHT_CONTROL_TRUSTED_NETWORKS=…` to the env file and restart.
 
 ## Development
 

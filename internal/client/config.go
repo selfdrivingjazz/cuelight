@@ -13,7 +13,9 @@ var ErrInsecureConfig = errors.New("operator config permissions must be 0600")
 
 type Config struct {
 	Server string `json:"server"`
-	Token  string `json:"token"`
+	// Token is optional: without one the CLI sends unauthenticated requests,
+	// which control accepts from its trusted networks.
+	Token  string `json:"token,omitempty"`
 	CAPath string `json:"caPath,omitempty"`
 }
 
@@ -48,15 +50,15 @@ func LoadConfig(path string) (Config, error) {
 	if err := decoder.Decode(&config); err != nil {
 		return Config{}, fmt.Errorf("decode operator config: %w", err)
 	}
-	if strings.TrimSpace(config.Server) == "" || strings.TrimSpace(config.Token) == "" {
-		return Config{}, errors.New("operator config requires server and token")
+	if strings.TrimSpace(config.Server) == "" {
+		return Config{}, errors.New("operator config requires a server")
 	}
 	return config, nil
 }
 
 func SaveConfig(path string, config Config) error {
-	if strings.TrimSpace(config.Server) == "" || strings.TrimSpace(config.Token) == "" {
-		return errors.New("operator config requires server and token")
+	if strings.TrimSpace(config.Server) == "" {
+		return errors.New("operator config requires a server")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create operator config directory: %w", err)

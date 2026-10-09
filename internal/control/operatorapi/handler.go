@@ -179,9 +179,15 @@ func resourceID(r *http.Request) string {
 	return ""
 }
 
+// authenticate resolves the operator for r. A present Authorization header is
+// always authoritative, so a scoped token is never upgraded by network trust;
+// only requests without one fall back to the TCP peer's network.
 func (d Dependencies) authenticate(r *http.Request, scope string) (auth.Actor, error) {
 	if d.Auth == nil {
 		return auth.Actor{}, fmt.Errorf("operator auth dependency is not configured")
+	}
+	if _, present := r.Header["Authorization"]; !present {
+		return d.NetworkTrust.authenticate(r)
 	}
 	value := strings.TrimSpace(r.Header.Get("Authorization"))
 	parts := strings.Fields(value)
@@ -237,10 +243,17 @@ func (h *Handler) getOperatorMe(w http.ResponseWriter, r *http.Request) {
 	for _, scope := range actor.Scopes {
 		capabilities[scope] = true
 	}
-	writeJSON(w, http.StatusOK, OperatorMe{
-		ID: actor.ID, TokenID: actor.TokenID,
+	me := OperatorMe{
+		ID: actor.ID, TokenID: actor.TokenID, AuthMethod: AuthMethodToken,
 		Scopes: append([]string(nil), actor.Scopes...), Capabilities: capabilities,
-	})
+	}
+	if actor.TokenID == "" {
+		me.AuthMethod = AuthMethodNetwork
+		if peer, ok := h.deps.NetworkTrust.peer(r); ok {
+			me.PeerAddress = peer.String()
+		}
+	}
+	writeJSON(w, http.StatusOK, me)
 }
 
 func (h *Handler) listAdminTokens(w http.ResponseWriter, r *http.Request) {
@@ -879,7 +892,7 @@ func statusFor(err error) int {
 	switch {
 	case errors.Is(err, ErrUnauthorized), errors.Is(err, auth.ErrInvalidCredential), errors.Is(err, auth.ErrTokenRevoked):
 		return http.StatusUnauthorized
-	case errors.Is(err, ErrForbidden), errors.Is(err, auth.ErrInsufficientScope):
+	case errors.Is(err, ErrForbidden), errors.Is(err, ErrCrossSite), errors.Is(err, auth.ErrInsufficientScope):
 		return http.StatusForbidden
 	case errors.Is(err, ErrBodyTooLarge), errors.Is(err, ErrChunkTooLarge), errors.Is(err, media.ErrChunkTooLarge):
 		return http.StatusRequestEntityTooLarge

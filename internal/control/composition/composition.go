@@ -173,6 +173,21 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 			return nil, fmt.Errorf("construct join links: %w", err)
 		}
 	}
+	networkTrust, err := operatorapi.NewNetworkTrust(config.TrustedNetworks, config.PublicURL)
+	if err != nil {
+		return nil, fmt.Errorf("construct trusted networks: %w", err)
+	}
+	if networkTrust.Enabled() {
+		// Network-trusted mutations are attributed to this actor, so it must
+		// exist before the first request references it.
+		ensureCtx, cancel := context.WithTimeout(context.Background(), config.DatabaseTimeout)
+		err := repository.EnsureActor(ensureCtx, operatorapi.TrustedNetworkActorID, operatorapi.TrustedNetworkActorName)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("ensure trusted-network actor: %w", err)
+		}
+		slog.Warn("operator access: requests without a token from trusted networks get full operator scopes", "networks", config.TrustedNetworks)
+	}
 	operatorDependencies := operatorapi.Dependencies{
 		Auth:            authService,
 		PKI:             pkiService,
@@ -193,6 +208,7 @@ func HandlerFactory(runtime app.Runtime) (http.Handler, error) {
 		Idempotency:     operatorapi.NewIdempotencyCache(),
 		Profiles:        profile.Service{Repository: store.ProfileRepository{Store: repository}, Assigner: assignmentService},
 		JoinLinks:       joinLinks,
+		NetworkTrust:    networkTrust,
 	}
 	operator := operatorapi.NewHandler(operatorDependencies)
 	usageService := usage.NewService(repository, nil)

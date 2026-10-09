@@ -1966,6 +1966,15 @@ components:
       type: http
       scheme: bearer
       bearerFormat: CuelightToken
+      description: >-
+        Operator bearer token. When control is configured with
+        CUELIGHT_CONTROL_TRUSTED_NETWORKS, a request with no Authorization header
+        whose TCP peer address (never X-Forwarded-For) is inside a trusted network
+        authenticates as the built-in "Trusted network" actor with every operator
+        scope. Such requests are refused with 403 when Sec-Fetch-Site is present and
+        not same-origin/none, or when Origin is present and differs from control's
+        public origin. A present Authorization header is always evaluated as a token
+        and is never upgraded by network trust.
     nodeMTLS:
       type: mutualTLS
     browserNodeToken:
@@ -2169,10 +2178,17 @@ components:
         correlationId: {type: string}
     OperatorMe:
       type: object
-      required: [id, scopes, capabilities]
+      required: [id, authMethod, scopes, capabilities]
       properties:
         id: {type: string}
-        tokenId: {type: string}
+        tokenId: {type: string, description: Present for token authentication.}
+        authMethod:
+          type: string
+          enum: [token, network]
+          description: token for a bearer token; network for a token-less request from a trusted network.
+        peerAddress:
+          type: string
+          description: The trusted TCP peer address; present only when authMethod is network.
         scopes: {type: array, items: {type: string}}
         capabilities: {type: object, additionalProperties: {type: boolean}}
     PageInfo:

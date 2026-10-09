@@ -183,6 +183,36 @@ func TestLoginWritesPrivateConfigWithoutEchoingToken(t *testing.T) {
 	}
 }
 
+func TestTokenlessCLISendsNoAuthorization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if _, present := request.Header["Authorization"]; present {
+			t.Errorf("token-less request carried Authorization: %q", request.Header.Get("Authorization"))
+		}
+		response.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(response, `{"items":[]}`)
+	}))
+	defer server.Close()
+	configPath := filepath.Join(t.TempDir(), "cuelight", "config.json")
+	execute := func(args ...string) cliResult {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), append([]string{"--config", configPath, "--allow-insecure-loopback"}, args...), commandIO{stdin: strings.NewReader(""), stdout: &stdout, stderr: &stderr, httpClient: server.Client()})
+		return cliResult{code: code, stdout: stdout.String(), stderr: stderr.String()}
+	}
+	// --server alone works before any login.
+	if result := execute("--server", server.URL, "node", "list"); result.code != exitOK {
+		t.Fatalf("--server without config = %#v", result)
+	}
+	if result := execute("login", "--server", server.URL); result.code != exitOK {
+		t.Fatalf("token-less login = %#v", result)
+	}
+	if result := execute("config"); result.code != exitOK || !strings.Contains(result.stdout, "Token: none") {
+		t.Fatalf("config show = %#v", result)
+	}
+	if result := execute("node", "list"); result.code != exitOK {
+		t.Fatalf("node list from token-less config = %#v", result)
+	}
+}
+
 func TestMediaUploadCommandStreamsFile(t *testing.T) {
 	content := []byte("media payload from disk")
 	path := filepath.Join(t.TempDir(), "clip.bin")

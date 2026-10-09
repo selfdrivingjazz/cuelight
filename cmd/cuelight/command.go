@@ -179,14 +179,14 @@ func extractOutputArgs(args []string) ([]string, outputMode, bool, error) {
 func runLogin(args []string, options globalOptions, streams commandIO) int {
 	flags := commandFlags("login")
 	server := flags.String("server", options.server, "Cuelight server URL")
-	token := flags.String("token", options.token, "operator token")
+	token := flags.String("token", options.token, "operator token (omit on a trusted network)")
 	caPath := flags.String("ca", options.caPath, "CA certificate for the Cuelight server")
 	allowInsecureLoopback := flags.Bool("allow-insecure-loopback", options.allowInsecureLoopback, "allow plain HTTP to a loopback server")
 	if code := parseCommand(flags, args, streams.stderr); code != exitOK {
 		return code
 	}
-	if flags.NArg() != 0 || *server == "" || *token == "" {
-		fmt.Fprintln(streams.stderr, "usage: cuelight login --server URL --token TOKEN [--ca PATH]")
+	if flags.NArg() != 0 || *server == "" {
+		fmt.Fprintln(streams.stderr, "usage: cuelight login --server URL [--token TOKEN] [--ca PATH]")
 		return exitUsage
 	}
 	options.allowInsecureLoopback = *allowInsecureLoopback
@@ -204,7 +204,7 @@ func runLogin(args []string, options globalOptions, streams commandIO) int {
 	result := struct {
 		Server          string `json:"server"`
 		TokenConfigured bool   `json:"tokenConfigured"`
-	}{Server: strings.TrimRight(*server, "/"), TokenConfigured: true}
+	}{Server: strings.TrimRight(*server, "/"), TokenConfigured: *token != ""}
 	if options.json {
 		writeJSON(streams.stdout, result)
 	} else {
@@ -233,7 +233,11 @@ func runConfig(args []string, options globalOptions, streams commandIO) int {
 	if options.json {
 		writeJSON(streams.stdout, result)
 	} else {
-		fmt.Fprintf(streams.stdout, "Server: %s\nToken: configured\n", result.Server)
+		tokenState := "configured"
+		if !result.TokenConfigured {
+			tokenState = "none (requests are unauthenticated; works on control's trusted networks)"
+		}
+		fmt.Fprintf(streams.stdout, "Server: %s\nToken: %s\n", result.Server, tokenState)
 		if result.CAPath != "" {
 			fmt.Fprintf(streams.stdout, "CA: %s\n", result.CAPath)
 		}
@@ -985,7 +989,8 @@ func configuredClient(options globalOptions, streams commandIO) (*operator.Clien
 	token := options.token
 	if server == "" || token == "" {
 		config, err := operator.LoadConfig(options.configPath)
-		if err != nil {
+		// --server without a saved config is a complete, token-less setup.
+		if err != nil && !(server != "" && errors.Is(err, os.ErrNotExist)) {
 			return nil, renderFailure(streams, options.json, exitConfig, err)
 		}
 		if server == "" {

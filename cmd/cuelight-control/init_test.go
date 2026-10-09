@@ -18,7 +18,7 @@ import (
 func TestInitGeneratesServableMaterialAndRefusesToOverwrite(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "control")
 	var stdout, stderr bytes.Buffer
-	args := []string{"init", "--dir", dir, "--hostname", "cuelight.lan", "--ip", "10.0.0.5", "--public-url", "https://cuelight.lan:8443", "--database-url", "postgres://u:p@db:5432/cuelight"}
+	args := []string{"init", "--dir", dir, "--hostname", "cuelight.lan", "--ip", "10.0.0.5", "--public-url", "https://cuelight.lan:8443", "--database-url", "postgres://u:p@db:5432/cuelight", "--trusted-network", "10.0.0.0/8", "--trusted-network", "fd00::/8"}
 	if code := run(t.Context(), args, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("init exit %d: %s", code, stderr.String())
 	}
@@ -26,6 +26,9 @@ func TestInitGeneratesServableMaterialAndRefusesToOverwrite(t *testing.T) {
 	config, err := app.LoadConfig(func(name string) (string, bool) { value, ok := env[name]; return value, ok })
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(config.TrustedNetworks) != 2 || config.TrustedNetworks[0].String() != "10.0.0.0/8" || config.TrustedNetworks[1].String() != "fd00::/8" {
+		t.Fatalf("trusted networks = %v", config.TrustedNetworks)
 	}
 	if _, err := app.LoadStartupAssets(config); err != nil {
 		t.Fatalf("generated material is not servable: %v", err)
@@ -83,6 +86,17 @@ func TestInitRefusesPartialExistingMaterial(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, envFileName)); !os.IsNotExist(err) {
 		t.Fatalf("env file written despite refusal: %v", err)
+	}
+}
+
+func TestInitRejectsMalformedTrustedNetwork(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "control")
+	var stderr bytes.Buffer
+	if code := run(t.Context(), []string{"init", "--dir", dir, "--hostname", "cuelight.lan", "--trusted-network", "10.0.0.1"}, nil, &bytes.Buffer{}, &stderr); code != 2 || !strings.Contains(stderr.String(), "--trusted-network") {
+		t.Fatalf("exit %d stderr %q; want usage error", code, stderr.String())
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("init wrote %s despite refusal: %v", dir, err)
 	}
 }
 

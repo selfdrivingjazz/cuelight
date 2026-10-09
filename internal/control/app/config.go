@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -70,6 +71,9 @@ type Config struct {
 	// UpdateCheck enables feed polling; CUELIGHT_CONTROL_UPDATE_CHECK=off disables it.
 	UpdateCheck         bool
 	UpdateCheckInterval time.Duration
+	// TrustedNetworks admits operator requests without a token when the TCP
+	// peer address is inside one of these prefixes; empty disables it.
+	TrustedNetworks []netip.Prefix
 }
 
 type ConfigError struct {
@@ -168,6 +172,13 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if config.UpdateCheckInterval, err = durationEnv(lookup, "CUELIGHT_CONTROL_UPDATE_CHECK_INTERVAL", config.UpdateCheckInterval); err != nil {
 		return Config{}, err
+	}
+	for _, value := range csvEnv(lookup, "CUELIGHT_CONTROL_TRUSTED_NETWORKS") {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return Config{}, &ConfigError{Field: "CUELIGHT_CONTROL_TRUSTED_NETWORKS", Reason: fmt.Sprintf("%q is not a CIDR prefix (e.g. 10.0.0.0/8 or fd00::/8)", value)}
+		}
+		config.TrustedNetworks = append(config.TrustedNetworks, prefix.Masked())
 	}
 	if err := config.Validate(); err != nil {
 		return Config{}, err

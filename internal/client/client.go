@@ -38,6 +38,8 @@ func AllowInsecureLoopback() Option {
 	}
 }
 
+// New builds an operator API client. An empty token sends unauthenticated
+// requests, which control accepts from its trusted networks.
 func New(baseURL, token string, httpClient *http.Client, provided ...Option) (*Client, error) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
@@ -56,10 +58,7 @@ func New(baseURL, token string, httpClient *http.Client, provided ...Option) (*C
 		}
 	}
 	if !secureServerURL(parsed, config.allowInsecureLoopback) {
-		return nil, errors.New("operator bearer tokens require HTTPS; plain HTTP may be explicitly enabled only for loopback development")
-	}
-	if token == "" {
-		return nil, errors.New("operator token is required")
+		return nil, errors.New("the operator API requires HTTPS; plain HTTP may be explicitly enabled only for loopback development")
 	}
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -68,7 +67,7 @@ func New(baseURL, token string, httpClient *http.Client, provided ...Option) (*C
 	previousRedirectPolicy := configuredHTTPClient.CheckRedirect
 	configuredHTTPClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
 		if !secureServerURL(request.URL, config.allowInsecureLoopback) {
-			return errors.New("refusing to redirect an operator bearer token to insecure HTTP")
+			return errors.New("refusing to redirect an operator request to insecure HTTP")
 		}
 		if previousRedirectPolicy != nil {
 			return previousRedirectPolicy(request, via)
@@ -435,7 +434,9 @@ func (c *Client) request(ctx context.Context, method, path string, body io.Reade
 		return nil, fmt.Errorf("build API request: %w", err)
 	}
 	request.Header.Set("Accept", "application/json, application/problem+json")
-	request.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	return request, nil
 }
 

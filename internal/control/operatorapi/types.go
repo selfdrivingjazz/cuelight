@@ -35,6 +35,7 @@ const (
 var (
 	ErrUnauthorized   = errors.New("operator authentication required")
 	ErrForbidden      = errors.New("operator scope is insufficient")
+	ErrCrossSite      = errors.New("cross-site request refused for trusted-network access; use a token")
 	ErrInvalidRequest = errors.New("invalid operator request")
 	ErrBodyTooLarge   = errors.New("operator request body is too large")
 	ErrChunkTooLarge  = errors.New("operator upload chunk is too large")
@@ -129,6 +130,11 @@ type OperatorMe struct {
 	TokenID      string          `json:"tokenId,omitempty"`
 	Scopes       []string        `json:"scopes"`
 	Capabilities map[string]bool `json:"capabilities"`
+	// AuthMethod is "token" for a bearer token or "network" for a token-less
+	// request admitted by CUELIGHT_CONTROL_TRUSTED_NETWORKS.
+	AuthMethod string `json:"authMethod"`
+	// PeerAddress is the trusted TCP peer, present for network auth only.
+	PeerAddress string `json:"peerAddress,omitempty"`
 }
 
 type NodeService interface {
@@ -312,6 +318,8 @@ type Dependencies struct {
 	Idempotency     *IdempotencyCache
 	Profiles        ProfileService
 	JoinLinks       JoinLinks
+	// NetworkTrust admits token-less operator requests from trusted peers.
+	NetworkTrust NetworkTrust
 }
 
 // IdempotencyCache is only used by adapters that need HTTP-level replay. Domain

@@ -4,7 +4,7 @@ import { keepPreviousData, useQueries, useQuery, useQueryClient } from "@tanstac
 import type { Asset, components } from "@cuelight/api-client";
 import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, Facts, PageFrame, PageHeader, Pagination, SectionTabs, Skeleton, StatusBadge, TanStackDataTable } from "@cuelight/controller-ui";
 import { api, getControllerHealth, readApiResult } from "./api";
-import { useAuth } from "./auth";
+import { TokenForm, useAuth } from "./auth";
 import { NodeAssignmentComposer } from "./assignment";
 import { MediaDropzone } from "./components/MediaDropzone";
 import { MediaThumbnail } from "./media-thumbnail";
@@ -226,11 +226,17 @@ export function SettingsPage() {
     <Card><CardHeader><CardTitle>Appearance</CardTitle></CardHeader><CardContent><ThemeControl label="Color theme" /></CardContent></Card>
     <Card><CardHeader><CardTitle>Operator session</CardTitle></CardHeader><CardContent className="space-y-4">
       {operator && <Facts items={[
+        operator.authMethod === "network"
+          ? { label: "Access", value: `Trusted network (${operator.peerAddress ?? "unknown address"})` }
+          : { label: "Token", value: operator.tokenId ?? "Injected by the dev proxy", mono: Boolean(operator.tokenId) },
         { label: "Operator", value: operator.id, mono: true },
-        { label: "Token", value: operator.tokenId ?? "Injected by the dev proxy", mono: Boolean(operator.tokenId) },
         { label: "Scopes", value: <span className="flex flex-wrap gap-1.5">{operator.scopes.map((scope) => <StatusBadge key={scope} tone="neutral">{scope}</StatusBadge>)}</span>, wide: true },
       ]} />}
-      {auth.token && <Button variant="secondary" onClick={auth.signOut}>Sign out</Button>}
+      {operator?.authMethod === "network" && <div className="space-y-2 border-t border-border pt-4">
+        <p className="text-sm text-muted-foreground">This browser is a full operator because control trusts its network. Enter a token to act under that token's identity and scopes instead.</p>
+        <TokenForm submitLabel="Use token" />
+      </div>}
+      {auth.token && <Button variant="secondary" onClick={() => void auth.signOut()}>Sign out</Button>}
     </CardContent></Card>
     <Card><CardHeader><CardTitle>Controller</CardTitle></CardHeader><CardContent>{health.isPending ? <Skeleton className="h-10 w-48" /> : health.isError ? <QueryError error={health.error} retry={() => void health.refetch()} /> : <Facts items={[{ label: "Status", value: <StatusBadge tone={health.data.status === "ok" ? "success" : "danger"}>{health.data.status}</StatusBadge> }, { label: "Version", value: health.data.version, mono: true }]} />}</CardContent></Card>
   </PageFrame>;

@@ -77,8 +77,11 @@ async function installControllerApi(page: Page, requireToken = false): Promise<A
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
     const reply = (json: unknown, status = 200, headers: Record<string, string> = {}) => route.fulfill({ status, headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(json) });
     if (path === "/operator/me") {
-      if (requireToken && request.headers().authorization !== "Bearer operator-token") return reply({ title: "Unauthorized", status: 401 }, 401);
-      return reply({ id: "operator-one", scopes: ["node_read", "node_enroll", "media_read", "media_write", "assignment_read", "assignment_write"], capabilities: { node_read: true, node_enroll: true, media_read: true, media_write: true, assignment_read: true, assignment_write: true } });
+      const authorization = request.headers().authorization;
+      // Without requireToken the mock behaves like control on a trusted network: token-less requests are a full operator.
+      if (authorization ? authorization !== "Bearer operator-token" : requireToken) return reply({ title: "Unauthorized", status: 401, detail: "operator authentication required" }, 401);
+      const identity = authorization ? { id: "operator-one", tokenId: "token-one", authMethod: "token" } : { id: "00000000-0000-4000-8000-7275737465ff", authMethod: "network", peerAddress: "100.101.102.103" };
+      return reply({ ...identity, scopes: ["node_read", "node_enroll", "media_read", "media_write", "assignment_read", "assignment_write"], capabilities: { node_read: true, node_enroll: true, media_read: true, media_write: true, assignment_read: true, assignment_write: true } });
     }
     if (path === "/health") return reply({ status: "ok", version: "browser-test" });
     if (path === "/nodes") return reply({ items: [node], page: pageInfo });
@@ -160,6 +163,24 @@ async function authenticate(page: Page) {
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 }
+
+test("a trusted network skips the token screen and still allows a token identity", async ({ page }) => {
+  await installControllerApi(page);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Operator token" })).toHaveCount(0);
+  await page.goto("/settings");
+  await expect(page.getByText("Trusted network (100.101.102.103)")).toBeVisible();
+  await page.getByRole("textbox", { name: "Operator token" }).fill("wrong-token");
+  await page.getByRole("button", { name: "Use token" }).click();
+  await expect(page.getByText("operator authentication required")).toBeVisible();
+  await expect(page.getByText("Trusted network (100.101.102.103)")).toBeVisible();
+  await page.getByRole("textbox", { name: "Operator token" }).fill("operator-token");
+  await page.getByRole("button", { name: "Use token" }).click();
+  await expect(page.getByText("token-one")).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByText("Trusted network (100.101.102.103)")).toBeVisible();
+});
 
 test("operator authenticates and drills from the screen list into a screen's sections", async ({ page }) => {
   await installControllerApi(page, true);

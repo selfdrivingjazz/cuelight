@@ -11,11 +11,11 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ControllerThemeProvider>
-      <AuthProvider>
-        <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
           <ToastProvider><RouterProvider router={router} /></ToastProvider>
-        </QueryClientProvider>
-      </AuthProvider>
+        </AuthProvider>
+      </QueryClientProvider>
     </ControllerThemeProvider>
   </StrictMode>,
 );

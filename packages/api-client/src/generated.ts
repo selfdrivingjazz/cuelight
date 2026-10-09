@@ -1529,7 +1529,15 @@ export interface components {
         };
         OperatorMe: {
             id: string;
+            /** @description Present for token authentication. */
             tokenId?: string;
+            /**
+             * @description token for a bearer token; network for a token-less request from a trusted network.
+             * @enum {string}
+             */
+            authMethod: "token" | "network";
+            /** @description The trusted TCP peer address; present only when authMethod is network. */
+            peerAddress?: string;
             scopes: string[];
             capabilities: {
                 [key: string]: boolean;

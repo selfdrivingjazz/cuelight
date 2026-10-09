@@ -167,7 +167,7 @@ export function Shell() {
   if (pathname.startsWith("/remote/")) return <Outlet />;
   if (auth.state === "signedOut" || auth.state === "invalid") return <AccessScreen />;
   if (auth.state === "checking" || !auth.operator) return <RoutePending />;
-  const footer = <RouterLink to="/settings" aria-current={pathname === "/settings" ? "page" : undefined} className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground"><Settings className="h-4 w-4" aria-hidden />Settings<span className="ml-auto truncate font-mono text-[11px] opacity-60">{shortId(auth.operator.id)}</span></RouterLink>;
+  const footer = <RouterLink to="/settings" aria-current={pathname === "/settings" ? "page" : undefined} className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground"><Settings className="h-4 w-4" aria-hidden />Settings<span className="ml-auto truncate font-mono text-[11px] opacity-60">{auth.operator.authMethod === "network" ? "network" : shortId(auth.operator.id)}</span></RouterLink>;
   return <div className="min-h-screen bg-background text-foreground" onClick={onClick}>
     <a className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground" href="#main-content">Skip to content</a>
     <div className="flex min-h-screen">

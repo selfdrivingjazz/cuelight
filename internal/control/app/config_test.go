@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,8 @@ func TestLoadConfigRejectsOutOfBoundsValues(t *testing.T) {
 		{"short shutdown", "CUELIGHT_CONTROL_SHUTDOWN_TIMEOUT", "500ms"},
 		{"large headers", "CUELIGHT_CONTROL_MAX_HEADER_BYTES", "1048577"},
 		{"insecure public URL", "CUELIGHT_CONTROL_PUBLIC_URL", "http://controller.example"},
+		{"bare trusted address", "CUELIGHT_CONTROL_TRUSTED_NETWORKS", "10.0.0.0/8,192.168.1.10"},
+		{"malformed trusted prefix", "CUELIGHT_CONTROL_TRUSTED_NETWORKS", "10.0.0.0/33"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -63,6 +66,25 @@ func TestLoadConfigUsesBoundedDefaults(t *testing.T) {
 	}
 	if config.ListenAddress != ":8443" {
 		t.Fatalf("unexpected defaults: %#v", config)
+	}
+}
+
+func TestLoadConfigParsesTrustedNetworks(t *testing.T) {
+	values := validConfigEnvironment()
+	values["CUELIGHT_CONTROL_TRUSTED_NETWORKS"] = " 100.64.0.0/10, fd7a:115c:a1e0::/48,10.1.2.3/8 "
+	config, err := LoadConfig(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, prefix := range config.TrustedNetworks {
+		got = append(got, prefix.String())
+	}
+	if want := "100.64.0.0/10 fd7a:115c:a1e0::/48 10.0.0.0/8"; strings.Join(got, " ") != want {
+		t.Fatalf("trusted networks = %v, want %s", got, want)
+	}
+	if defaults, _ := LoadConfig(mapLookup(validConfigEnvironment())); len(defaults.TrustedNetworks) != 0 {
+		t.Fatalf("trusted networks enabled by default: %v", defaults.TrustedNetworks)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -61,7 +62,9 @@ type initOptions struct {
 	listen      string
 	databaseURL string
 	networkName string
-	existsOK    bool
+	// trustedNetworks are CIDR prefixes whose peers need no operator token.
+	trustedNetworks []string
+	existsOK        bool
 }
 
 // initLayout is every path `init` creates beneath --dir.
@@ -86,7 +89,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	var options initOptions
-	var hostnames, ips stringList
+	var hostnames, ips, trustedNetworks stringList
 	flags.StringVar(&options.dir, "dir", "", "directory for generated keys, certificates, CAS, and the env file (required)")
 	flags.Var(&hostnames, "hostname", "DNS name for the generated TLS certificate (repeatable or comma-separated)")
 	flags.Var(&ips, "ip", "IP address for the generated TLS certificate (repeatable or comma-separated)")
@@ -96,6 +99,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	flags.StringVar(&options.listen, "listen", ":8443", "listen address written to the env file")
 	flags.StringVar(&options.databaseURL, "database-url", "", "PostgreSQL URL written to the env file (default: left for you to fill in)")
 	flags.StringVar(&options.networkName, "network-name", "", "network name shown in join links (default: public URL host)")
+	flags.Var(&trustedNetworks, "trusted-network", "CIDR whose peers are full operators without a token, e.g. 10.0.0.0/8 (repeatable or comma-separated; default: none)")
 	flags.BoolVar(&options.existsOK, "exists-ok", false, "exit successfully without changes when DIR is already initialized")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -104,7 +108,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "cuelight-control init: unexpected arguments: %v\n", flags.Args())
 		return 2
 	}
-	options.hostnames, options.ips = hostnames, ips
+	options.hostnames, options.ips, options.trustedNetworks = hostnames, ips, trustedNetworks
 	layout, err := initialize(options, time.Now())
 	if errors.Is(err, errAlreadyInitialized) && options.existsOK {
 		fmt.Fprintf(stdout, "cuelight-control init: %s is already initialized; nothing changed\n", options.dir)
@@ -152,6 +156,11 @@ func initialize(options initOptions, now time.Time) (initLayout, error) {
 	}
 	if _, _, err := net.SplitHostPort(options.listen); err != nil {
 		return initLayout{}, &initUsageError{"--listen must be a host:port address"}
+	}
+	for _, network := range options.trustedNetworks {
+		if _, err := netip.ParsePrefix(network); err != nil {
+			return initLayout{}, &initUsageError{fmt.Sprintf("--trusted-network %q is not a CIDR prefix (e.g. 10.0.0.0/8 or fd00::/8)", network)}
+		}
 	}
 	var names []string
 	if !external {
@@ -450,6 +459,10 @@ func envFile(layout initLayout, options initOptions, now time.Time) []byte {
 	if options.networkName != "" {
 		line("CUELIGHT_CONTROL_NETWORK_NAME", options.networkName)
 	}
+	if len(options.trustedNetworks) != 0 {
+		out.WriteString("# Peers in these networks are full operators without a token; configure only on direct listeners.\n")
+		line("CUELIGHT_CONTROL_TRUSTED_NETWORKS", strings.Join(options.trustedNetworks, ","))
+	}
 	out.WriteString("# Without internet access, disable the release feed and use `cuelight-control updates import DIR`:\n# CUELIGHT_CONTROL_UPDATE_CHECK=off\n")
 	line("CUELIGHT_CONTROL_TLS_CERT_PATH", layout.serverCert)
 	line("CUELIGHT_CONTROL_TLS_KEY_PATH", layout.serverKey)
@@ -481,7 +494,11 @@ func printNextSteps(out io.Writer, layout initLayout, options initOptions) {
 	}
 	fmt.Fprintf(out, "  %d. Start the server:  set -a; . %s; set +a; cuelight-control serve\n", step, layout.env)
 	step++
-	fmt.Fprintf(out, "  %d. Create an operator token:  (same env) cuelight-control admin token create --scopes security_admin,node_enroll,node_read,node_write,assignment_read,assignment_write,media_read,media_write,local_media_read,release_read,release_write\n", step)
+	if len(options.trustedNetworks) != 0 {
+		fmt.Fprintf(out, "  %d. Operators connecting directly from %s need no token. For anyone else, create one:  (same env) cuelight-control admin token create --scopes security_admin,node_enroll,node_read,node_write,assignment_read,assignment_write,media_read,media_write,local_media_read,release_read,release_write\n", step, strings.Join(options.trustedNetworks, ", "))
+	} else {
+		fmt.Fprintf(out, "  %d. Create an operator token:  (same env) cuelight-control admin token create --scopes security_admin,node_enroll,node_read,node_write,assignment_read,assignment_write,media_read,media_write,local_media_read,release_read,release_write\n", step)
+	}
 	step++
 	if options.tlsCert == "" {
 		fmt.Fprintf(out, "  %d. Trust %s on operator machines and pass it to `cuelight-player provision --ca-file` (or use a join link).\n", step, layout.serverRoot)
