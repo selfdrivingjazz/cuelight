@@ -15,11 +15,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jmill/cable/internal/media/localcas"
-	playerclient "github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/player/renderer"
-	"github.com/jmill/cable/internal/player/screenshot"
-	"github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/player/renderer"
+	"github.com/jmilldotdev/cuelight/internal/player/screenshot"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type Reconciler struct {

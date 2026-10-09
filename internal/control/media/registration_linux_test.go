@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jmill/cable/internal/media/localcas"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
 )
 
 func TestLocalRegistrationPolicyDisabledAndUnallowed(t *testing.T) {

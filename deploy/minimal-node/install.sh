@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 3 ]; then
-  echo "usage: install.sh /path/to/cable-player /path/to/cable-minimal-node /path/to/provisioned-node.env" >&2
+  echo "usage: install.sh /path/to/cuelight-player /path/to/cuelight-minimal-node /path/to/provisioned-node.env" >&2
   exit 2
 fi
 player=$1
@@ -16,17 +16,17 @@ if [ ! -f "$config" ]; then
   echo "provisioned node environment file is required" >&2
   exit 1
 fi
-if ! id cable >/dev/null 2>&1; then
-  useradd --system --home-dir /var/lib/cable --shell /usr/sbin/nologin cable
+if ! id cuelight >/dev/null 2>&1; then
+  useradd --system --home-dir /var/lib/cuelight --shell /usr/sbin/nologin cuelight
 fi
-install -d -o root -g root -m 0755 /etc/cable /usr/bin
-install -d -o cable -g cable -m 0750 /var/lib/cable /var/lib/cable/player
-install -o root -g root -m 0755 "$player" /usr/bin/cable-player
-install -o root -g root -m 0755 "$minimal" /usr/bin/cable-minimal-node
-install -o root -g root -m 0644 "$(dirname "$0")/cable-mpv.service" /etc/systemd/system/cable-mpv.service
-install -o root -g root -m 0644 "$(dirname "$0")/cable-minimal-node.service" /etc/systemd/system/cable-minimal-node.service
-install -o root -g cable -m 0640 "$config" /etc/cable/minimal-node.env
+install -d -o root -g root -m 0755 /etc/cuelight /usr/bin
+install -d -o cuelight -g cuelight -m 0750 /var/lib/cuelight /var/lib/cuelight/player
+install -o root -g root -m 0755 "$player" /usr/bin/cuelight-player
+install -o root -g root -m 0755 "$minimal" /usr/bin/cuelight-minimal-node
+install -o root -g root -m 0644 "$(dirname "$0")/cuelight-mpv.service" /etc/systemd/system/cuelight-mpv.service
+install -o root -g root -m 0644 "$(dirname "$0")/cuelight-minimal-node.service" /etc/systemd/system/cuelight-minimal-node.service
+install -o root -g cuelight -m 0640 "$config" /etc/cuelight/minimal-node.env
 systemctl daemon-reload
-systemctl enable cable-mpv.service cable-minimal-node.service
-systemctl restart cable-mpv.service
-systemctl restart cable-minimal-node.service
+systemctl enable cuelight-mpv.service cuelight-minimal-node.service
+systemctl restart cuelight-mpv.service
+systemctl restart cuelight-minimal-node.service

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { components } from "@cable/api-client";
-import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState, useToast } from "@cable/controller-ui";
+import type { components } from "@cuelight/api-client";
+import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState, useToast } from "@cuelight/controller-ui";
 import { api, readApiResult } from "./api";
 import { MediaTargetField, mediaKindLabel } from "./components/MediaPicker";
 

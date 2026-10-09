@@ -10,10 +10,10 @@ import (
 )
 
 func TestMPVRealIPC(t *testing.T) {
-	socket := os.Getenv("CABLE_MPV_SOCKET")
-	fixtureDirectory := os.Getenv("CABLE_MPV_FIXTURES")
+	socket := os.Getenv("CUELIGHT_MPV_SOCKET")
+	fixtureDirectory := os.Getenv("CUELIGHT_MPV_FIXTURES")
 	if socket == "" || fixtureDirectory == "" {
-		t.Skip("set CABLE_MPV_SOCKET and CABLE_MPV_FIXTURES for a real mpv smoke")
+		t.Skip("set CUELIGHT_MPV_SOCKET and CUELIGHT_MPV_FIXTURES for a real mpv smoke")
 	}
 	adapter := &MPV{SocketPath: socket, Timeout: 5 * time.Second}
 	for _, name := range []string{"phase0.jpg", "phase0.png", "phase0.mp4"} {

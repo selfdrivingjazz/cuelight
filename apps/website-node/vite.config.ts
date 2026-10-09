@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-// Served by cable-control at /node/. TV browsers (Tizen, webOS, Silk) lag
+// Served by cuelight-control at /node/. TV browsers (Tizen, webOS, Silk) lag
 // desktop engines, so syntax is lowered to ES2019 and no newer runtime APIs
 // are used without feature detection.
 export default defineConfig({

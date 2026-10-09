@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.join(root, ".dev-seed");
-const apiBase = (process.env.CABLE_SEED_API ?? "http://127.0.0.1:4178/api/v1").replace(/\/$/, "");
+const apiBase = (process.env.CUELIGHT_SEED_API ?? "http://127.0.0.1:4178/api/v1").replace(/\/$/, "");
 const videos = [
   { key: "solar", name: "Seed Solar Drift.mp4", title: "Solar Drift", hue: "0" },
   { key: "lagoon", name: "Seed Lagoon Signal.mp4", title: "Lagoon Signal", hue: "95" },

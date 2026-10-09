@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 import type { ProxyOptions } from "vite";
 
 const controllerProxy = process.env.VITE_CONTROLLER_PROXY;
-const controllerToken = process.env.CABLE_CONTROLLER_DEV_OPERATOR_TOKEN;
+const controllerToken = process.env.CUELIGHT_CONTROLLER_DEV_OPERATOR_TOKEN;
 const apiProxy: ProxyOptions | undefined = controllerProxy ? {
   target: controllerProxy,
   secure: false,

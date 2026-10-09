@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jmill/cable/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/player/client"
 )
 
 // NewHandler mounts only player routes. The caller can mount this handler at

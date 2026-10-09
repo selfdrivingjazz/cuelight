@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 -- One media model: file media wrap an uploaded asset, web media show a live
 -- page. Cable items are web media maintained for a deployment; their URL is
 -- derived from the control plane origin when a release is published.
@@ -63,7 +63,7 @@ WHERE r.id = a.release_id
   AND m.url = r.payload->'presentation'->'web'->>'url';
 CREATE INDEX assignments_media_idx ON assignments (media_id) WHERE media_id IS NOT NULL;
 
--- +cable Down
+-- +cuelight Down
 DROP INDEX assignments_media_idx;
 ALTER TABLE assignments DROP COLUMN playlist_id, DROP COLUMN media_id;
 

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/protocol"
+	"github.com/jmilldotdev/cuelight/internal/protocol"
 )
 
 func TestEnrollmentTokenAndResultReplayAtomically(t *testing.T) {

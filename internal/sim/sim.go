@@ -1,4 +1,4 @@
-// Package sim provides a deterministic, non-interactive cable player node.
+// Package sim provides a deterministic, non-interactive cuelight player node.
 package sim
 
 import (
@@ -21,10 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmill/cable/internal/media/localcas"
-	playerclient "github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/player/runtime"
-	playerstate "github.com/jmill/cable/internal/player/state"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/player/runtime"
+	playerstate "github.com/jmilldotdev/cuelight/internal/player/state"
 )
 
 // Config controls a node simulator. ServerCAPEM is the provisioned control

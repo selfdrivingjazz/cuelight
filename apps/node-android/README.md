@@ -1,4 +1,4 @@
-# Cable Node for Android
+# Cuelight for Android
 
 Thin native Kotlin shell for phones/tablets and Android TV / Google TV / Fire TV
 (minSdk 24, targetSdk 35). It hosts the browser node (`apps/website-node`, served
@@ -12,23 +12,23 @@ by the control server) in a full-screen kiosk WebView.
 - Setup screen: control server URL (scheme inferred: `http` for LAN/loopback/`.local`,
   else `https`) and browser node path (default `/node/` — must match where control serves
   website-node). QR scanning is not implemented.
-- User-installed CAs are trusted, so a private control-server CA (e.g. cable-dev's
+- User-installed CAs are trusted, so a private control-server CA (e.g. cuelight-dev's
   `runtime/trust/ca.pem`) can be installed via Android Settings → Security → Install certificate.
 - Main-frame load errors retry every 5 s.
 
-## JS bridge: `window.CableAndroid`
+## JS bridge: `window.CuelightAndroid`
 
 Injected into every page the WebView loads (the node page is the only page it loads):
 
 | method | |
 | --- | --- |
 | `isAvailable()` | `true` — feature detection |
-| `injectInput(json)` | `{events:[…]}` or `[…]` in the Cable remote event shape (`key`/`text`/`pointer`/`wheel`, same as the desktop node `/input` body; `x`/`y` normalised 0..1). Dispatches real `MotionEvent`/`KeyEvent`s into the WebView, so input reaches cross-origin `web` presentations (iframes) at those coordinates. Returns events accepted, `-1` if invalid. |
+| `injectInput(json)` | `{events:[…]}` or `[…]` in the Cuelight remote event shape (`key`/`text`/`pointer`/`wheel`, same as the desktop node `/input` body; `x`/`y` normalised 0..1). Dispatches real `MotionEvent`/`KeyEvent`s into the WebView, so input reaches cross-origin `web` presentations (iframes) at those coordinates. Returns events accepted, `-1` if invalid. |
 | `openSetup()` | opens the setup screen |
 
 Pointer mapping: `down`/`move`/`up` become a touch drag; `move` without a press is a mouse
 hover; `click` is a touch tap; `wheel` is a mouse `ACTION_SCROLL` at the last pointer position.
-For `web`-kind presentations the browser node, when `window.CableAndroid` exists,
+For `web`-kind presentations the browser node, when `window.CuelightAndroid` exists,
 forwards polled remote events to `injectInput` instead of handling them in JS — except
 for app access pages (web media with `appAccess`), which the node opens with an app token
 in the URL fragment and which poll `/app/remote/events` themselves (no native injection).

@@ -4,7 +4,7 @@ import { provisionInputSchema, settingsSchema, type DesktopStatus } from "../sha
 import { RendererServer } from "./renderer-server";
 import { SidecarManager } from "./sidecar";
 
-app.setName("Cable Node");
+app.setName("Cuelight");
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 app.commandLine.appendSwitch("disable-features", "HardwareMediaKeyHandling");
 
@@ -30,7 +30,7 @@ async function createSetupWindow(): Promise<void> {
     minWidth: 820,
     minHeight: 620,
     backgroundColor: "#07131f",
-    title: "Cable Node",
+    title: "Cuelight",
     webPreferences: {
       preload: path.join(__dirname, "../preload/preload.js"),
       contextIsolation: true,
@@ -74,7 +74,7 @@ app.whenReady().then(async () => {
   await createSetupWindow();
   if (manager.status().settings.autoStart && manager.status().node) {
     try { await manager.start(); }
-    catch (error) { dialog.showErrorBox("Cable Node could not start", error instanceof Error ? error.message : "Unknown player error"); }
+    catch (error) { dialog.showErrorBox("Cuelight could not start", error instanceof Error ? error.message : "Unknown player error"); }
   }
 });
 

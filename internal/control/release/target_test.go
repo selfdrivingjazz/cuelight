@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/media"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type catalogFixture struct {

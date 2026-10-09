@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jmill/cable/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
 )
 
 // ChromiumCapturer renders pages with a local headless Chromium binary at a

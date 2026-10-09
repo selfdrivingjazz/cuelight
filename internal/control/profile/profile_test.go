@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
 )
 
 type fakeFleet struct {

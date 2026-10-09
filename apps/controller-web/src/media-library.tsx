@@ -1,7 +1,7 @@
 import * as React from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { type components } from "@cable/api-client";
+import { type components } from "@cuelight/api-client";
 import {
   Button,
   Card,
@@ -22,7 +22,7 @@ import {
   useToast,
   type NavigationLink,
   type PixelDimensions,
-} from "@cable/controller-ui";
+} from "@cuelight/controller-ui";
 import { api, ApiRequestError, controllerBaseUrl, getApiToken, hasCapability, readApiResult } from "./api";
 import { useAuth } from "./auth";
 import { MediaDropzone } from "./components/MediaDropzone";

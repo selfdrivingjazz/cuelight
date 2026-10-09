@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 CREATE TABLE screenshot_jobs (
   id uuid PRIMARY KEY,
   node_id uuid NOT NULL REFERENCES nodes(id),
@@ -45,7 +45,7 @@ CREATE TABLE screenshot_idempotency_records (
 CREATE INDEX screenshot_idempotency_expiry_idx
   ON screenshot_idempotency_records (expires_at, actor_id, key);
 
--- +cable Down
+-- +cuelight Down
 DROP TABLE screenshot_idempotency_records;
 DROP INDEX screenshot_jobs_artifact_retention_idx;
 DROP INDEX screenshot_jobs_retention_idx;

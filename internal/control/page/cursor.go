@@ -23,7 +23,7 @@ var (
 // stable secret when cursors must survive process restarts.
 func DefaultCodec() *Codec {
 	defaultCodecOnce.Do(func() {
-		secret := sha256.Sum256([]byte("cable-controller-pagination-v1"))
+		secret := sha256.Sum256([]byte("cuelight-controller-pagination-v1"))
 		defaultCodec, _ = NewCodec(secret[:])
 	})
 	return defaultCodec

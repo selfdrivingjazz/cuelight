@@ -11,12 +11,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/pki"
-	"github.com/jmill/cable/internal/control/playerapi"
-	"github.com/jmill/cable/internal/media/localcas"
-	"github.com/jmill/cable/internal/player/client"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	"github.com/jmilldotdev/cuelight/internal/control/playerapi"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	"github.com/jmilldotdev/cuelight/internal/player/client"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 var (

@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 CREATE TABLE cable_deployments (
   id uuid PRIMARY KEY,
   name text NOT NULL,
@@ -92,7 +92,7 @@ CREATE TABLE cable_revisions (
 );
 CREATE INDEX cable_revisions_deployment_idx ON cable_revisions(deployment_id, id);
 
--- +cable Down
+-- +cuelight Down
 DROP INDEX cable_revisions_deployment_idx;
 DROP TABLE cable_revisions;
 DROP TABLE cable_shell_build_artifacts;

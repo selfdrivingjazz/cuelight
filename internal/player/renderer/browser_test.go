@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 func TestHTTPBrowserLauncherLifecycle(t *testing.T) {

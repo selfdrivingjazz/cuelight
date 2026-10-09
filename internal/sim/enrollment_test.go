@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	playerclient "github.com/jmill/cable/internal/player/client"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
 )
 
 func TestEnrollPersistsCredentialAndReloadsClient(t *testing.T) {
@@ -40,7 +40,7 @@ func TestEnrollPersistsCredentialAndReloadsClient(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		nodeTemplate := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "cable-node-sim-node"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+		nodeTemplate := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "cuelight-node-sim-node"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
 		nodeDER, err := x509.CreateCertificate(rand.Reader, nodeTemplate, caTemplate, ed25519.PublicKey(publicBytes), caPrivate)
 		if err != nil {
 			t.Error(err)

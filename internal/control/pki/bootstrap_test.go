@@ -13,7 +13,7 @@ func TestBootstrapAuthorityAndServerCredential(t *testing.T) {
 	clock := &fixedClock{now: time.Date(2032, time.June, 7, 8, 9, 10, 0, time.UTC)}
 	serials := &sequenceSource{serial: 200}
 	bootstrap, err := BootstrapAuthority(context.Background(), clock, serials, AuthorityBootstrapOptions{
-		CommonName: "Cable control CA",
+		CommonName: "Cuelight control CA",
 		Lifetime:   365 * 24 * time.Hour,
 		Backdate:   time.Minute,
 	})

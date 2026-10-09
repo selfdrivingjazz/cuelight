@@ -17,8 +17,8 @@ import (
 	"strings"
 	"sync"
 
-	playerclient "github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/player/screenshot"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/player/screenshot"
 )
 
 type BrowserLauncher interface {

@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/page"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
 )
 
 // OperatorAdapter forwards authored media operations while keeping the

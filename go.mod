@@ -1,4 +1,4 @@
-module github.com/jmill/cable
+module github.com/jmilldotdev/cuelight
 
 go 1.27
 

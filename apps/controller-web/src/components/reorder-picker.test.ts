@@ -1,4 +1,4 @@
-import type { components } from "@cable/api-client";
+import type { components } from "@cuelight/api-client";
 import { describe, expect, it } from "vitest";
 import { pickableMedia, toggleMediaSelection } from "./MediaPicker";
 import { dropIndexFor, moveItem } from "./SortableList";

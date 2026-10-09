@@ -1,5 +1,5 @@
 {
-  "name": "@cable/website-node",
+  "name": "@cuelight/website-node",
   "version": "0.1.0",
   "private": true,
   "type": "module",

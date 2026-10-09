@@ -6,8 +6,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/jmill/cable/internal/control/preview"
-	"github.com/jmill/cable/internal/media/localcas"
+	"github.com/jmilldotdev/cuelight/internal/control/preview"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
 )
 
 type casCache struct{ *localcas.Store }

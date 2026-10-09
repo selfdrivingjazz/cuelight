@@ -54,7 +54,7 @@ func TestNodeIdentityComesFromVerifiedSANNotHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("X-Cable-Node-ID", "spoofed")
+	request.Header.Set("X-Cuelight-Node-ID", "spoofed")
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestNodeIdentityRejectsRevocation(t *testing.T) {
 
 func TestNodeIdentityRequiresVerifiedCertificate(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "https://control.invalid", nil)
-	request.Header.Set("X-Cable-Node-ID", "spoofed")
+	request.Header.Set("X-Cuelight-Node-ID", "spoofed")
 	if _, err := NodeIdentity(request, nil); err == nil {
 		t.Fatal("unverified request accepted")
 	}

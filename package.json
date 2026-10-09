@@ -1,5 +1,5 @@
 {
-  "name": "cable-workspace",
+  "name": "cuelight-workspace",
   "private": true,
   "packageManager": "pnpm@10.14.0",
   "engines": {
@@ -8,11 +8,11 @@
   "scripts": {
     "bootstrap": "pnpm install --frozen-lockfile",
     "seed:dev": "node scripts/seed-dev.mjs",
-    "generate": "pnpm --filter @cable/api-client generate",
-    "check": "pnpm generate && pnpm -r typecheck && pnpm --filter @cable/api-client check-generated",
+    "generate": "pnpm --filter @cuelight/api-client generate",
+    "check": "pnpm generate && pnpm -r typecheck && pnpm --filter @cuelight/api-client check-generated",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "e2e": "pnpm --filter @cable/controller-web e2e"
+    "e2e": "pnpm --filter @cuelight/controller-web e2e"
   },
   "devDependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",

@@ -1,5 +1,5 @@
 {
-  "name": "@cable/controller-web",
+  "name": "@cuelight/controller-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,8 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@cable/api-client": "workspace:0.1.0",
-    "@cable/controller-ui": "workspace:0.1.0",
+    "@cuelight/api-client": "workspace:0.1.0",
+    "@cuelight/controller-ui": "workspace:0.1.0",
     "@tanstack/react-query": "5.85.5",
     "@tanstack/react-router": "1.131.7",
     "@tanstack/react-table": "8.21.3",

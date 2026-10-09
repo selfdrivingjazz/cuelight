@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link } from "@tanstack/react-router";
-import { Card, CardContent, ErrorState, Skeleton, type NavigationLink } from "@cable/controller-ui";
+import { Card, CardContent, ErrorState, Skeleton, type NavigationLink } from "@cuelight/controller-ui";
 import { api, ApiRequestError, readApiResult } from "./api";
 
 export const RouterLink = Link as unknown as NavigationLink;

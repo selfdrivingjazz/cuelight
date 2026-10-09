@@ -17,13 +17,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/operatorapi"
-	"github.com/jmill/cable/internal/control/persistence"
-	controlrelease "github.com/jmill/cable/internal/control/release"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
+	"github.com/jmilldotdev/cuelight/internal/control/persistence"
+	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type targetTestAuth struct{ actorID string }
@@ -159,7 +159,7 @@ func TestPostgresUnifiedMediaMigrationConvertsWebItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := fmt.Sprintf("cable_media_migration_%d_%d", time.Now().UnixNano(), testSchemaSequence.Add(1))
+	schema := fmt.Sprintf("cuelight_media_migration_%d_%d", time.Now().UnixNano(), testSchemaSequence.Add(1))
 	if _, err := admin.ExecContext(ctx, `CREATE SCHEMA `+schema); err != nil {
 		t.Fatal(err)
 	}

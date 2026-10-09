@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/control/webnode"
+	"github.com/jmilldotdev/cuelight/internal/control/webnode"
 )
 
 func TestPostgresBrowserNodePairingRenewalAndRevocation(t *testing.T) {

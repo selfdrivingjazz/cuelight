@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/pki"
-	"github.com/jmill/cable/internal/control/release"
-	"github.com/jmill/cable/internal/control/remote"
-	playerclient "github.com/jmill/cable/internal/player/client"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	"github.com/jmilldotdev/cuelight/internal/control/release"
+	"github.com/jmilldotdev/cuelight/internal/control/remote"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type testAuth struct {
@@ -166,7 +166,7 @@ func withHeader(h http.Handler, method, path, token string, body io.Reader, head
 
 func TestOperatorAuthAndScopeAndSecretBoundary(t *testing.T) {
 	secret := pki.TokenSecret{ID: "token", Secret: "one-time", ExpiresAt: time.Unix(1, 0).UTC()}
-	authn := testAuth{scopes: []string{ScopeNodeEnroll}, listed: []auth.TokenMetadata{{ID: "token", Prefix: "cable_admin_x", Scopes: []string{ScopeNodeEnroll}}}}
+	authn := testAuth{scopes: []string{ScopeNodeEnroll}, listed: []auth.TokenMetadata{{ID: "token", Prefix: "cuelight_admin_x", Scopes: []string{ScopeNodeEnroll}}}}
 	h := NewHandler(Dependencies{Auth: authn, PKI: &testPKI{secret: secret}})
 	if got := request(h, "POST", "/enrollment-tokens", "", nil).Code; got != 401 {
 		t.Fatalf("unauthenticated status=%d", got)

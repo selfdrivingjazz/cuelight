@@ -47,7 +47,7 @@ export class SidecarManager {
     const binary = this.binaryPath();
     const args = ["provision", "--control-url", input.controllerUrl, "--ca-file", input.caPath, "--node-name", input.nodeName, "--output", this.identityDirectory()];
     if (input.recover) args.push("--recover");
-    const result = await this.runOnce(binary, args, { CABLE_PLAYER_PROVISION_TOKEN: input.token });
+    const result = await this.runOnce(binary, args, { CUELIGHT_PLAYER_PROVISION_TOKEN: input.token });
     const output = result.trim().split(/\r?\n/).filter(Boolean).at(-1);
     if (!output) throw new Error("player provisioning returned no identity");
     this.node = JSON.parse(output) as ProvisionedNode;
@@ -67,27 +67,27 @@ export class SidecarManager {
     this.renderer.setFullScreen(this.settings.fullScreen);
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
-      CABLE_PLAYER_CONTROL_URL: this.node.controlUrl,
-      CABLE_PLAYER_NODE_ID: this.node.nodeId,
-      CABLE_PLAYER_SERVER_CA_PATH: this.node.caPath,
-      CABLE_PLAYER_NODE_CERT_PATH: this.node.certificatePath,
-      CABLE_PLAYER_NODE_KEY_PATH: this.node.privateKeyPath,
-      CABLE_PLAYER_PUBLISHER_KEY_ID: this.node.publisherKeyId,
-      CABLE_PLAYER_PUBLISHER_PUBLIC_KEY_PATH: this.node.publisherPublicKeyPath,
-      CABLE_PLAYER_EVENT_EPOCH: this.node.eventEpoch,
-      CABLE_PLAYER_PROFILE_ID: "desktop-electron",
-      CABLE_PLAYER_RENDERER_VERSION: `electron/${process.versions.electron}`,
-      CABLE_PLAYER_STATE_PATH: path.join(this.stateDirectory(), "player.db"),
-      CABLE_PLAYER_CAS_PATH: path.join(this.stateDirectory(), "cas"),
-      CABLE_PLAYER_RENDERER_MODE: "desktop",
-      CABLE_PLAYER_DESKTOP_RENDERER_URL: this.rendererUrl,
-      CABLE_PLAYER_DESKTOP_RENDERER_TOKEN: this.renderer.token,
-      CABLE_PLAYER_CHROMIUM_RUNTIME_ROOT: path.join(this.stateDirectory(), "runtime"),
-      CABLE_PLAYER_LOOPBACK_ADDR: "127.0.0.1:0",
-      CABLE_PLAYER_FEATURES: "chromium,web",
-      CABLE_PLAYER_ACCEPTED_MEDIA_TYPES: "video/mp4,image/jpeg,image/png,image/webp",
-      CABLE_PLAYER_PRESENTATION_MODE: this.settings.presentationMode,
-      CABLE_PLAYER_PROBATION: "2s",
+      CUELIGHT_PLAYER_CONTROL_URL: this.node.controlUrl,
+      CUELIGHT_PLAYER_NODE_ID: this.node.nodeId,
+      CUELIGHT_PLAYER_SERVER_CA_PATH: this.node.caPath,
+      CUELIGHT_PLAYER_NODE_CERT_PATH: this.node.certificatePath,
+      CUELIGHT_PLAYER_NODE_KEY_PATH: this.node.privateKeyPath,
+      CUELIGHT_PLAYER_PUBLISHER_KEY_ID: this.node.publisherKeyId,
+      CUELIGHT_PLAYER_PUBLISHER_PUBLIC_KEY_PATH: this.node.publisherPublicKeyPath,
+      CUELIGHT_PLAYER_EVENT_EPOCH: this.node.eventEpoch,
+      CUELIGHT_PLAYER_PROFILE_ID: "desktop-electron",
+      CUELIGHT_PLAYER_RENDERER_VERSION: `electron/${process.versions.electron}`,
+      CUELIGHT_PLAYER_STATE_PATH: path.join(this.stateDirectory(), "player.db"),
+      CUELIGHT_PLAYER_CAS_PATH: path.join(this.stateDirectory(), "cas"),
+      CUELIGHT_PLAYER_RENDERER_MODE: "desktop",
+      CUELIGHT_PLAYER_DESKTOP_RENDERER_URL: this.rendererUrl,
+      CUELIGHT_PLAYER_DESKTOP_RENDERER_TOKEN: this.renderer.token,
+      CUELIGHT_PLAYER_CHROMIUM_RUNTIME_ROOT: path.join(this.stateDirectory(), "runtime"),
+      CUELIGHT_PLAYER_LOOPBACK_ADDR: "127.0.0.1:0",
+      CUELIGHT_PLAYER_FEATURES: "chromium,web",
+      CUELIGHT_PLAYER_ACCEPTED_MEDIA_TYPES: "video/mp4,image/jpeg,image/png,image/webp",
+      CUELIGHT_PLAYER_PRESENTATION_MODE: this.settings.presentationMode,
+      CUELIGHT_PLAYER_PROBATION: "2s",
     };
     await mkdir(path.join(this.stateDirectory(), "cas"), { recursive: true });
     const log = createWriteStream(this.logPath(), { flags: "a", mode: 0o600 });
@@ -181,7 +181,7 @@ export class SidecarManager {
     }
     if (process.platform !== "linux") return;
     const autostartDirectory = path.join(app.getPath("appData"), "autostart");
-    const desktopFile = path.join(autostartDirectory, "cable-node.desktop");
+    const desktopFile = path.join(autostartDirectory, "cuelight-node.desktop");
     if (!this.settings.autoStart) {
       try { await unlink(desktopFile); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -189,7 +189,7 @@ export class SidecarManager {
     }
     await mkdir(autostartDirectory, { recursive: true });
     const executable = process.execPath.replaceAll("\\\"", "\\\\\"");
-    await writeFile(desktopFile, `[Desktop Entry]\nType=Application\nName=Cable Node\nExec=\"${executable}\"\nTerminal=false\nX-GNOME-Autostart-enabled=true\n`, { mode: 0o600 });
+    await writeFile(desktopFile, `[Desktop Entry]\nType=Application\nName=Cuelight\nExec=\"${executable}\"\nTerminal=false\nX-GNOME-Autostart-enabled=true\n`, { mode: 0o600 });
   }
 
   private root(): string { return app.getPath("userData"); }
@@ -200,8 +200,8 @@ export class SidecarManager {
   private settingsPath(): string { return path.join(this.root(), "settings.json"); }
 
   private binaryPath(): string {
-    const name = process.platform === "win32" ? "cable-player.exe" : "cable-player";
-    const override = process.env.CABLE_PLAYER_BINARY;
+    const name = process.platform === "win32" ? "cuelight-player.exe" : "cuelight-player";
+    const override = process.env.CUELIGHT_PLAYER_BINARY;
     if (override) return override;
     const packaged = path.join(process.resourcesPath, "bin", name);
     if (app.isPackaged || existsSync(packaged)) return packaged;

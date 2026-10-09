@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/page"
-	"github.com/jmill/cable/internal/control/playlist"
-	"github.com/jmill/cable/internal/control/remote"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
+	"github.com/jmilldotdev/cuelight/internal/control/playlist"
+	"github.com/jmilldotdev/cuelight/internal/control/remote"
 )
 
 // Identity resolves the requesting node (mTLS or browser-node bearer).

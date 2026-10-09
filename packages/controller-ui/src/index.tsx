@@ -128,7 +128,7 @@ function SidebarLinks({ items, currentPath, linkComponent: LinkComponent = Ancho
 export function BrandMark({ className }: { className?: string }) {
   return <span className={cn("inline-flex items-center gap-2.5 font-semibold tracking-[-0.01em]", className)}>
     <span aria-hidden="true" className="relative grid h-6 w-6 place-items-center rounded-[5px] bg-sidebar-foreground text-sidebar"><span className="h-2 w-2 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))]" /></span>
-    <span>Cable<span className="ml-1.5 font-mono text-[11px] font-normal uppercase tracking-[0.14em] opacity-55">Control</span></span>
+    <span>Cuelight</span>
   </span>;
 }
 

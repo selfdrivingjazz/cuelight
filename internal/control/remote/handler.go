@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/protocol"
+	"github.com/jmilldotdev/cuelight/internal/protocol"
 )
 
 // Identity resolves the requesting node. Nil uses the mTLS node identity.

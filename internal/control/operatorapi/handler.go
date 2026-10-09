@@ -11,16 +11,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/page"
-	"github.com/jmill/cable/internal/control/pki"
-	"github.com/jmill/cable/internal/control/playlist"
-	"github.com/jmill/cable/internal/control/profile"
-	"github.com/jmill/cable/internal/control/release"
-	"github.com/jmill/cable/internal/control/remote"
-	playerclient "github.com/jmill/cable/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
+	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	"github.com/jmilldotdev/cuelight/internal/control/playlist"
+	"github.com/jmilldotdev/cuelight/internal/control/profile"
+	"github.com/jmilldotdev/cuelight/internal/control/release"
+	"github.com/jmilldotdev/cuelight/internal/control/remote"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
 )
 
 // OperationScopes is exported for clients that want to mount individual
@@ -31,19 +31,19 @@ var OperationScopes = map[string]string{
 	"getNode": ScopeNodeRead, "updateNode": ScopeNodeWrite, "unregisterNode": ScopeSecurityAdmin,
 	"getNodeStatus": ScopeNodeRead, "getNodeCapabilities": ScopeNodeRead, "createNodeRecoveryToken": ScopeSecurityAdmin,
 	"createNodeRemoteLink": ScopeAssignmentWrite,
-	"getNodeAssignment": ScopeAssignmentRead, "putNodeAssignment": ScopeAssignmentWrite,
+	"getNodeAssignment":    ScopeAssignmentRead, "putNodeAssignment": ScopeAssignmentWrite,
 	"listNodeEvents": ScopeNodeRead, "createUpload": ScopeMediaWrite,
 	"listUploads": ScopeMediaRead, "headUpload": ScopeMediaWrite,
 	"appendUpload": ScopeMediaWrite, "completeUpload": ScopeMediaWrite,
 	"registerLocalAsset": ScopeLocalMediaRead, "listAssets": ScopeMediaRead,
 	"getAsset": ScopeMediaRead, "publishRelease": ScopeReleaseWrite,
 	"listReleases": ScopeReleaseRead, "getRelease": ScopeReleaseRead,
-	"listAssignments":      ScopeAssignmentRead,
-	"listProfiles": ScopeAssignmentRead, "createProfile": ScopeAssignmentWrite,
+	"listAssignments": ScopeAssignmentRead,
+	"listProfiles":    ScopeAssignmentRead, "createProfile": ScopeAssignmentWrite,
 	"getProfile": ScopeAssignmentRead, "updateProfile": ScopeAssignmentWrite,
 	"deleteProfile": ScopeAssignmentWrite, "activateProfile": ScopeAssignmentWrite,
 	"getActiveProfile": ScopeAssignmentRead,
-	"listPlaylists": ScopeMediaRead, "createPlaylist": ScopeMediaWrite,
+	"listPlaylists":    ScopeMediaRead, "createPlaylist": ScopeMediaWrite,
 	"getPlaylist": ScopeMediaRead, "updatePlaylist": ScopeMediaWrite,
 }
 

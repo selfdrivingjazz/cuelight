@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 CREATE TABLE web_items (
   id uuid PRIMARY KEY,
   url text NOT NULL UNIQUE CHECK (url ~ '^https?://'),
@@ -29,7 +29,7 @@ WHERE payload->'presentation'->>'kind' = 'web'
   AND payload->'presentation'->'web'->>'url' ~ '^https?://'
 ORDER BY payload->'presentation'->'web'->>'url', created_at;
 
--- +cable Down
+-- +cuelight Down
 DROP INDEX web_items_thumbnail_digest_idx;
 DROP INDEX web_items_created_idx;
 DROP TABLE web_items;

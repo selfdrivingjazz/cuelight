@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 CREATE TABLE media (
   id uuid PRIMARY KEY,
   asset_id uuid NOT NULL UNIQUE REFERENCES assets(id),
@@ -36,7 +36,7 @@ ORDER BY a.id, u.created_at;
 CREATE INDEX media_created_idx ON media (created_at, id);
 CREATE INDEX media_asset_idx ON media (asset_id);
 
--- +cable Down
+-- +cuelight Down
 DROP INDEX media_asset_idx;
 DROP INDEX media_created_idx;
 DROP TABLE media;

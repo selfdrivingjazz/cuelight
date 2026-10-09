@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 -- Cable programming (deployments, channels, blocks, program entries, the
 -- hosted guide and its tokens) moved out of the core into the separate
 -- Cuelight Cable app. Playlists stay as a core library resource, and any web
@@ -59,7 +59,7 @@ CREATE INDEX app_tokens_node_idx ON app_tokens (node_id);
 CREATE INDEX app_tokens_media_idx ON app_tokens (media_id);
 CREATE INDEX app_tokens_expiry_idx ON app_tokens (expires_at);
 
--- +cable Down
+-- +cuelight Down
 DROP TABLE app_tokens;
 ALTER TABLE media DROP CONSTRAINT media_app_access_web;
 ALTER TABLE media DROP COLUMN app_access;

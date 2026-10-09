@@ -1,8 +1,8 @@
 import * as React from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { keepPreviousData, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Asset, components } from "@cable/api-client";
-import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, Facts, PageFrame, PageHeader, Pagination, SectionTabs, Skeleton, StatusBadge, TanStackDataTable } from "@cable/controller-ui";
+import type { Asset, components } from "@cuelight/api-client";
+import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, Facts, PageFrame, PageHeader, Pagination, SectionTabs, Skeleton, StatusBadge, TanStackDataTable } from "@cuelight/controller-ui";
 import { api, getControllerHealth, readApiResult } from "./api";
 import { useAuth } from "./auth";
 import { NodeAssignmentComposer } from "./assignment";

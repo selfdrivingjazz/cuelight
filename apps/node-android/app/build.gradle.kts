@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "sdj.cable.node"
+    namespace = "com.jmilldotdev.cuelight.node"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "sdj.cable.node"
+        applicationId = "com.jmilldotdev.cuelight.node"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

@@ -2,8 +2,8 @@ import * as React from "react";
 import QRCode from "qrcode";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Node, components } from "@cable/api-client";
-import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorState, Facts, PageFrame, PageHeader, Pagination, SectionTabs, Skeleton, StatusBadge, TanStackDataTable } from "@cable/controller-ui";
+import type { Node, components } from "@cuelight/api-client";
+import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorState, Facts, PageFrame, PageHeader, Pagination, SectionTabs, Skeleton, StatusBadge, TanStackDataTable } from "@cuelight/controller-ui";
 import { api, ApiRequestError, controllerBaseUrl, getApiToken, readApiResult } from "./api";
 import { useAuth } from "./auth";
 import { DeliveryField, NodeAssignmentComposer, fieldClass, type DeliveryChoice } from "./assignment";
@@ -515,7 +515,7 @@ export function PairPage() {
       </form>}
     </CardContent></Card>
     {canEnroll && <Card><CardHeader><CardTitle>Desktop node app</CardTitle></CardHeader><CardContent className="space-y-3">
-      <p className="text-sm text-muted-foreground">Create a one-time enrollment token and enter it in Cable Node. It cannot be retrieved again.</p>
+      <p className="text-sm text-muted-foreground">Create a one-time enrollment token and enter it in Cuelight. It cannot be retrieved again.</p>
       {enrollment.data ? <><div className="flex gap-2"><input aria-label="Enrollment token" readOnly value={enrollment.data.secret} className="h-9 min-w-0 flex-1 rounded-md border border-input bg-card px-3 font-mono text-xs" onFocus={(event) => event.currentTarget.select()} /><Button variant="secondary" onClick={() => void navigator.clipboard.writeText(enrollment.data.secret)}>Copy</Button></div><p className="text-xs text-muted-foreground">Expires <time dateTime={enrollment.data.expiresAt}>{formatWhen(enrollment.data.expiresAt)}</time></p></> : <Button variant="secondary" onClick={() => enrollment.mutate()} disabled={enrollment.isPending}>{enrollment.isPending ? "Creating token…" : "Create enrollment token"}</Button>}
       {enrollment.isError && <QueryError error={enrollment.error} retry={() => enrollment.reset()} />}
     </CardContent></Card>}

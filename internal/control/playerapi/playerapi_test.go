@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/player/client"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/player/client"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 const testDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

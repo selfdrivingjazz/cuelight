@@ -12,8 +12,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/jmill/cable/internal/control/preview"
-	"github.com/jmill/cable/internal/media/localcas"
+	"github.com/jmilldotdev/cuelight/internal/control/preview"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
 )
 
 var (

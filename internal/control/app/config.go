@@ -77,23 +77,23 @@ func (err *ConfigError) Error() string {
 
 func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	config := Config{
-		ListenAddress:           envOrDefault(lookup, "CABLE_CONTROL_LISTEN_ADDR", defaultListenAddress),
-		DatabaseURL:             env(lookup, "CABLE_CONTROL_DATABASE_URL"),
-		MigrationsPath:          envOrDefault(lookup, "CABLE_CONTROL_MIGRATIONS_PATH", defaultMigrationsPath),
-		TLSCertificatePath:      env(lookup, "CABLE_CONTROL_TLS_CERT_PATH"),
-		TLSPrivateKeyPath:       env(lookup, "CABLE_CONTROL_TLS_KEY_PATH"),
-		PublisherPrivateKeyPath: env(lookup, "CABLE_CONTROL_PUBLISHER_KEY_PATH"),
-		PublisherKeyID:          env(lookup, "CABLE_CONTROL_PUBLISHER_KEY_ID"),
-		CASPath:                 env(lookup, "CABLE_CONTROL_CAS_PATH"),
-		CAPath:                  env(lookup, "CABLE_CONTROL_CA_PATH"),
-		CAKeyPath:               env(lookup, "CABLE_CONTROL_CA_KEY_PATH"),
-		SealKeyPath:             env(lookup, "CABLE_CONTROL_SEAL_KEY_PATH"),
-		TemporaryRoot:           env(lookup, "CABLE_CONTROL_TEMP_ROOT"),
-		ProtocolVersion:         envOrDefault(lookup, "CABLE_CONTROL_PROTOCOL_VERSION", "1.0"),
-		PlaybackProfile:         envOrDefault(lookup, "CABLE_CONTROL_PLAYBACK_PROFILE", "default"),
-		PublicURL:               env(lookup, "CABLE_CONTROL_PUBLIC_URL"),
-		WebNodeDir:              env(lookup, "CABLE_CONTROL_WEB_NODE_DIR"),
-		WebCaptureBrowser:       env(lookup, "CABLE_CONTROL_WEB_CAPTURE_BROWSER"),
+		ListenAddress:           envOrDefault(lookup, "CUELIGHT_CONTROL_LISTEN_ADDR", defaultListenAddress),
+		DatabaseURL:             env(lookup, "CUELIGHT_CONTROL_DATABASE_URL"),
+		MigrationsPath:          envOrDefault(lookup, "CUELIGHT_CONTROL_MIGRATIONS_PATH", defaultMigrationsPath),
+		TLSCertificatePath:      env(lookup, "CUELIGHT_CONTROL_TLS_CERT_PATH"),
+		TLSPrivateKeyPath:       env(lookup, "CUELIGHT_CONTROL_TLS_KEY_PATH"),
+		PublisherPrivateKeyPath: env(lookup, "CUELIGHT_CONTROL_PUBLISHER_KEY_PATH"),
+		PublisherKeyID:          env(lookup, "CUELIGHT_CONTROL_PUBLISHER_KEY_ID"),
+		CASPath:                 env(lookup, "CUELIGHT_CONTROL_CAS_PATH"),
+		CAPath:                  env(lookup, "CUELIGHT_CONTROL_CA_PATH"),
+		CAKeyPath:               env(lookup, "CUELIGHT_CONTROL_CA_KEY_PATH"),
+		SealKeyPath:             env(lookup, "CUELIGHT_CONTROL_SEAL_KEY_PATH"),
+		TemporaryRoot:           env(lookup, "CUELIGHT_CONTROL_TEMP_ROOT"),
+		ProtocolVersion:         envOrDefault(lookup, "CUELIGHT_CONTROL_PROTOCOL_VERSION", "1.0"),
+		PlaybackProfile:         envOrDefault(lookup, "CUELIGHT_CONTROL_PLAYBACK_PROFILE", "default"),
+		PublicURL:               env(lookup, "CUELIGHT_CONTROL_PUBLIC_URL"),
+		WebNodeDir:              env(lookup, "CUELIGHT_CONTROL_WEB_NODE_DIR"),
+		WebCaptureBrowser:       env(lookup, "CUELIGHT_CONTROL_WEB_CAPTURE_BROWSER"),
 		DatabaseTimeout:         defaultDatabaseTimeout,
 		DatabaseMaxConnections:  defaultDatabaseConnections,
 		DatabaseMaxIdle:         defaultDatabaseIdle,
@@ -110,46 +110,46 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		MaxWait:                 defaultMaxWait,
 	}
 	var err error
-	if config.DatabaseTimeout, err = durationEnv(lookup, "CABLE_CONTROL_DATABASE_TIMEOUT", config.DatabaseTimeout); err != nil {
+	if config.DatabaseTimeout, err = durationEnv(lookup, "CUELIGHT_CONTROL_DATABASE_TIMEOUT", config.DatabaseTimeout); err != nil {
 		return Config{}, err
 	}
-	if config.DatabaseMaxConnections, err = intEnv(lookup, "CABLE_CONTROL_DATABASE_MAX_CONNECTIONS", config.DatabaseMaxConnections); err != nil {
+	if config.DatabaseMaxConnections, err = intEnv(lookup, "CUELIGHT_CONTROL_DATABASE_MAX_CONNECTIONS", config.DatabaseMaxConnections); err != nil {
 		return Config{}, err
 	}
-	if config.DatabaseMaxIdle, err = intEnv(lookup, "CABLE_CONTROL_DATABASE_MAX_IDLE", config.DatabaseMaxIdle); err != nil {
+	if config.DatabaseMaxIdle, err = intEnv(lookup, "CUELIGHT_CONTROL_DATABASE_MAX_IDLE", config.DatabaseMaxIdle); err != nil {
 		return Config{}, err
 	}
-	if config.DatabaseConnLifetime, err = durationEnv(lookup, "CABLE_CONTROL_DATABASE_CONN_LIFETIME", config.DatabaseConnLifetime); err != nil {
+	if config.DatabaseConnLifetime, err = durationEnv(lookup, "CUELIGHT_CONTROL_DATABASE_CONN_LIFETIME", config.DatabaseConnLifetime); err != nil {
 		return Config{}, err
 	}
-	if config.ReadHeaderTimeout, err = durationEnv(lookup, "CABLE_CONTROL_READ_HEADER_TIMEOUT", config.ReadHeaderTimeout); err != nil {
+	if config.ReadHeaderTimeout, err = durationEnv(lookup, "CUELIGHT_CONTROL_READ_HEADER_TIMEOUT", config.ReadHeaderTimeout); err != nil {
 		return Config{}, err
 	}
-	if config.IdleTimeout, err = durationEnv(lookup, "CABLE_CONTROL_IDLE_TIMEOUT", config.IdleTimeout); err != nil {
+	if config.IdleTimeout, err = durationEnv(lookup, "CUELIGHT_CONTROL_IDLE_TIMEOUT", config.IdleTimeout); err != nil {
 		return Config{}, err
 	}
-	if config.ShutdownTimeout, err = durationEnv(lookup, "CABLE_CONTROL_SHUTDOWN_TIMEOUT", config.ShutdownTimeout); err != nil {
+	if config.ShutdownTimeout, err = durationEnv(lookup, "CUELIGHT_CONTROL_SHUTDOWN_TIMEOUT", config.ShutdownTimeout); err != nil {
 		return Config{}, err
 	}
-	if config.MaxHeaderBytes, err = intEnv(lookup, "CABLE_CONTROL_MAX_HEADER_BYTES", config.MaxHeaderBytes); err != nil {
+	if config.MaxHeaderBytes, err = intEnv(lookup, "CUELIGHT_CONTROL_MAX_HEADER_BYTES", config.MaxHeaderBytes); err != nil {
 		return Config{}, err
 	}
-	if config.MaxBodyBytes, err = int64Env(lookup, "CABLE_CONTROL_MAX_BODY_BYTES", config.MaxBodyBytes); err != nil {
+	if config.MaxBodyBytes, err = int64Env(lookup, "CUELIGHT_CONTROL_MAX_BODY_BYTES", config.MaxBodyBytes); err != nil {
 		return Config{}, err
 	}
-	if config.MaxUploadBytes, err = int64Env(lookup, "CABLE_CONTROL_MAX_UPLOAD_BYTES", config.MaxUploadBytes); err != nil {
+	if config.MaxUploadBytes, err = int64Env(lookup, "CUELIGHT_CONTROL_MAX_UPLOAD_BYTES", config.MaxUploadBytes); err != nil {
 		return Config{}, err
 	}
-	if config.MaxChunkBytes, err = int64Env(lookup, "CABLE_CONTROL_MAX_CHUNK_BYTES", config.MaxChunkBytes); err != nil {
+	if config.MaxChunkBytes, err = int64Env(lookup, "CUELIGHT_CONTROL_MAX_CHUNK_BYTES", config.MaxChunkBytes); err != nil {
 		return Config{}, err
 	}
-	if config.MaxLocalMediaBytes, err = int64Env(lookup, "CABLE_CONTROL_MAX_LOCAL_MEDIA_BYTES", config.MaxLocalMediaBytes); err != nil {
+	if config.MaxLocalMediaBytes, err = int64Env(lookup, "CUELIGHT_CONTROL_MAX_LOCAL_MEDIA_BYTES", config.MaxLocalMediaBytes); err != nil {
 		return Config{}, err
 	}
-	if config.MaxEvents, err = intEnv(lookup, "CABLE_CONTROL_MAX_EVENTS", config.MaxEvents); err != nil {
+	if config.MaxEvents, err = intEnv(lookup, "CUELIGHT_CONTROL_MAX_EVENTS", config.MaxEvents); err != nil {
 		return Config{}, err
 	}
-	if config.MaxWait, err = durationEnv(lookup, "CABLE_CONTROL_MAX_WAIT", config.MaxWait); err != nil {
+	if config.MaxWait, err = durationEnv(lookup, "CUELIGHT_CONTROL_MAX_WAIT", config.MaxWait); err != nil {
 		return Config{}, err
 	}
 	if err := config.Validate(); err != nil {
@@ -162,12 +162,12 @@ func (config Config) Validate() error {
 		name  string
 		value string
 	}{
-		{"CABLE_CONTROL_DATABASE_URL", config.DatabaseURL},
-		{"CABLE_CONTROL_MIGRATIONS_PATH", config.MigrationsPath},
-		{"CABLE_CONTROL_TLS_CERT_PATH", config.TLSCertificatePath},
-		{"CABLE_CONTROL_TLS_KEY_PATH", config.TLSPrivateKeyPath},
-		{"CABLE_CONTROL_PUBLISHER_KEY_PATH", config.PublisherPrivateKeyPath},
-		{"CABLE_CONTROL_CAS_PATH", config.CASPath},
+		{"CUELIGHT_CONTROL_DATABASE_URL", config.DatabaseURL},
+		{"CUELIGHT_CONTROL_MIGRATIONS_PATH", config.MigrationsPath},
+		{"CUELIGHT_CONTROL_TLS_CERT_PATH", config.TLSCertificatePath},
+		{"CUELIGHT_CONTROL_TLS_KEY_PATH", config.TLSPrivateKeyPath},
+		{"CUELIGHT_CONTROL_PUBLISHER_KEY_PATH", config.PublisherPrivateKeyPath},
+		{"CUELIGHT_CONTROL_CAS_PATH", config.CASPath},
 	}
 	for _, field := range required {
 		if strings.TrimSpace(field.value) == "" {
@@ -175,63 +175,63 @@ func (config Config) Validate() error {
 		}
 	}
 	if config.TLSCertificatePath == config.TLSPrivateKeyPath {
-		return &ConfigError{Field: "CABLE_CONTROL_TLS_KEY_PATH", Reason: "must differ from the certificate path"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_TLS_KEY_PATH", Reason: "must differ from the certificate path"}
 	}
 	if config.PublisherPrivateKeyPath == config.TLSPrivateKeyPath || config.PublisherPrivateKeyPath == config.TLSCertificatePath {
-		return &ConfigError{Field: "CABLE_CONTROL_PUBLISHER_KEY_PATH", Reason: "must differ from the TLS certificate and private key paths"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_PUBLISHER_KEY_PATH", Reason: "must differ from the TLS certificate and private key paths"}
 	}
 	if _, _, err := net.SplitHostPort(config.ListenAddress); err != nil {
-		return &ConfigError{Field: "CABLE_CONTROL_LISTEN_ADDR", Reason: "must be a host:port address"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_LISTEN_ADDR", Reason: "must be a host:port address"}
 	}
-	if err := boundedDuration("CABLE_CONTROL_DATABASE_TIMEOUT", config.DatabaseTimeout, time.Second, 30*time.Second); err != nil {
+	if err := boundedDuration("CUELIGHT_CONTROL_DATABASE_TIMEOUT", config.DatabaseTimeout, time.Second, 30*time.Second); err != nil {
 		return err
 	}
 	if config.DatabaseMaxConnections < 1 || config.DatabaseMaxConnections > 64 {
-		return &ConfigError{Field: "CABLE_CONTROL_DATABASE_MAX_CONNECTIONS", Reason: "must be between 1 and 64"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_DATABASE_MAX_CONNECTIONS", Reason: "must be between 1 and 64"}
 	}
 	if config.DatabaseMaxIdle < 0 || config.DatabaseMaxIdle > config.DatabaseMaxConnections {
-		return &ConfigError{Field: "CABLE_CONTROL_DATABASE_MAX_IDLE", Reason: "must be between 0 and database max connections"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_DATABASE_MAX_IDLE", Reason: "must be between 0 and database max connections"}
 	}
-	if err := boundedDuration("CABLE_CONTROL_DATABASE_CONN_LIFETIME", config.DatabaseConnLifetime, time.Minute, 24*time.Hour); err != nil {
+	if err := boundedDuration("CUELIGHT_CONTROL_DATABASE_CONN_LIFETIME", config.DatabaseConnLifetime, time.Minute, 24*time.Hour); err != nil {
 		return err
 	}
-	if err := boundedDuration("CABLE_CONTROL_READ_HEADER_TIMEOUT", config.ReadHeaderTimeout, time.Second, 30*time.Second); err != nil {
+	if err := boundedDuration("CUELIGHT_CONTROL_READ_HEADER_TIMEOUT", config.ReadHeaderTimeout, time.Second, 30*time.Second); err != nil {
 		return err
 	}
-	if err := boundedDuration("CABLE_CONTROL_IDLE_TIMEOUT", config.IdleTimeout, 5*time.Second, 5*time.Minute); err != nil {
+	if err := boundedDuration("CUELIGHT_CONTROL_IDLE_TIMEOUT", config.IdleTimeout, 5*time.Second, 5*time.Minute); err != nil {
 		return err
 	}
-	if err := boundedDuration("CABLE_CONTROL_SHUTDOWN_TIMEOUT", config.ShutdownTimeout, time.Second, time.Minute); err != nil {
+	if err := boundedDuration("CUELIGHT_CONTROL_SHUTDOWN_TIMEOUT", config.ShutdownTimeout, time.Second, time.Minute); err != nil {
 		return err
 	}
 	if config.MaxHeaderBytes < 4<<10 || config.MaxHeaderBytes > 1<<20 {
-		return &ConfigError{Field: "CABLE_CONTROL_MAX_HEADER_BYTES", Reason: "must be between 4096 and 1048576"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_MAX_HEADER_BYTES", Reason: "must be between 4096 and 1048576"}
 	}
 	if config.MaxBodyBytes < 1<<10 || config.MaxBodyBytes > 64<<20 {
-		return &ConfigError{Field: "CABLE_CONTROL_MAX_BODY_BYTES", Reason: "must be between 1024 and 67108864"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_MAX_BODY_BYTES", Reason: "must be between 1024 and 67108864"}
 	}
 	if config.MaxUploadBytes <= 0 || config.MaxUploadBytes > 1<<40 {
-		return &ConfigError{Field: "CABLE_CONTROL_MAX_UPLOAD_BYTES", Reason: "must be between 1 and 1099511627776"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_MAX_UPLOAD_BYTES", Reason: "must be between 1 and 1099511627776"}
 	}
 	if config.MaxChunkBytes <= 0 || config.MaxChunkBytes > config.MaxUploadBytes {
-		return &ConfigError{Field: "CABLE_CONTROL_MAX_CHUNK_BYTES", Reason: "must be positive and no greater than max upload bytes"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_MAX_CHUNK_BYTES", Reason: "must be positive and no greater than max upload bytes"}
 	}
 	if config.MaxLocalMediaBytes <= 0 || config.MaxLocalMediaBytes > config.MaxUploadBytes {
-		return &ConfigError{Field: "CABLE_CONTROL_MAX_LOCAL_MEDIA_BYTES", Reason: "must be positive and no greater than max upload bytes"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_MAX_LOCAL_MEDIA_BYTES", Reason: "must be positive and no greater than max upload bytes"}
 	}
 	if config.MaxEvents < 1 || config.MaxEvents > 10000 {
-		return &ConfigError{Field: "CABLE_CONTROL_MAX_EVENTS", Reason: "must be between 1 and 10000"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_MAX_EVENTS", Reason: "must be between 1 and 10000"}
 	}
-	if err := boundedDuration("CABLE_CONTROL_MAX_WAIT", config.MaxWait, 0, 5*time.Minute); err != nil {
+	if err := boundedDuration("CUELIGHT_CONTROL_MAX_WAIT", config.MaxWait, 0, 5*time.Minute); err != nil {
 		return err
 	}
 	if strings.TrimSpace(config.ProtocolVersion) == "" || strings.TrimSpace(config.PlaybackProfile) == "" {
-		return &ConfigError{Field: "CABLE_CONTROL_PROTOCOL_VERSION", Reason: "protocol version and playback profile are required"}
+		return &ConfigError{Field: "CUELIGHT_CONTROL_PROTOCOL_VERSION", Reason: "protocol version and playback profile are required"}
 	}
 	if config.PublicURL != "" {
 		publicURL, err := url.Parse(config.PublicURL)
 		if err != nil || publicURL.Scheme != "https" || publicURL.Host == "" || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" {
-			return &ConfigError{Field: "CABLE_CONTROL_PUBLIC_URL", Reason: "must be an absolute HTTPS URL without credentials, query, or fragment"}
+			return &ConfigError{Field: "CUELIGHT_CONTROL_PUBLIC_URL", Reason: "must be an absolute HTTPS URL without credentials, query, or fragment"}
 		}
 	}
 	return nil

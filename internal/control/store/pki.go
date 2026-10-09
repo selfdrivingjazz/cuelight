@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jmill/cable/internal/control/pki"
+	"github.com/jmilldotdev/cuelight/internal/control/pki"
 )
 
 var _ pki.Repository = (*Store)(nil)

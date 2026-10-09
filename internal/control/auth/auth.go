@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	SecretPrefix       = "cable_admin_"
+	SecretPrefix       = "cuelight_admin_"
 	ScopeSecurityAdmin = "security_admin"
 
 	secretBytes       = 32

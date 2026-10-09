@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 
-	controlrelease "github.com/jmill/cable/internal/control/release"
-	canonical "github.com/jmill/cable/internal/release"
+	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 var _ controlrelease.Repository = (*Store)(nil)

@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/jmill/cable/internal/control/remote"
+	"github.com/jmilldotdev/cuelight/internal/control/remote"
 )
 
 var _ remote.PolicyRepository = (*Store)(nil)

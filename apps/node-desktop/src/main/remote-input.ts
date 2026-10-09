@@ -1,4 +1,4 @@
-// Pure translation from Cable remote events to Electron webContents input events.
+// Pure translation from Cuelight remote events to Electron webContents input events.
 // Kept free of Electron runtime imports so it can be unit-tested.
 
 export interface RemoteEvent {

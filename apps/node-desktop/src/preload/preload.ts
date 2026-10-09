@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CableNodeDesktopAPI, DesktopSettings, DesktopStatus, ProvisionInput } from "../shared/contracts";
+import type { CuelightNodeDesktopAPI, DesktopSettings, DesktopStatus, ProvisionInput } from "../shared/contracts";
 
-const api: CableNodeDesktopAPI = {
+const api: CuelightNodeDesktopAPI = {
   status: () => ipcRenderer.invoke("node:status"),
   chooseCA: () => ipcRenderer.invoke("node:choose-ca"),
   provision: (input: ProvisionInput) => ipcRenderer.invoke("node:provision", input),
@@ -19,4 +19,4 @@ const api: CableNodeDesktopAPI = {
   },
 };
 
-contextBridge.exposeInMainWorld("cableNode", api);
+contextBridge.exposeInMainWorld("cuelightNode", api);

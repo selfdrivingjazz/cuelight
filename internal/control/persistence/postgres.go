@@ -111,7 +111,7 @@ func (locker postgresMigrationLocker) WithMigrationLock(ctx context.Context, app
 		return fmt.Errorf("acquire migration advisory lock: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-CREATE TABLE IF NOT EXISTS cable_schema_migrations (
+CREATE TABLE IF NOT EXISTS cuelight_schema_migrations (
     name text PRIMARY KEY,
     applied_at timestamptz NOT NULL DEFAULT now()
 )`); err != nil {
@@ -131,7 +131,7 @@ type postgresMigrationSession struct {
 }
 
 func (session postgresMigrationSession) AppliedMigrations(ctx context.Context) ([]string, error) {
-	rows, err := session.tx.QueryContext(ctx, "SELECT name FROM cable_schema_migrations ORDER BY name")
+	rows, err := session.tx.QueryContext(ctx, "SELECT name FROM cuelight_schema_migrations ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (session postgresMigrationSession) ApplyMigration(ctx context.Context, migr
 	if _, err := session.tx.ExecContext(ctx, migration.Up); err != nil {
 		return err
 	}
-	if _, err := session.tx.ExecContext(ctx, "INSERT INTO cable_schema_migrations (name) VALUES ($1)", migration.Name); err != nil {
+	if _, err := session.tx.ExecContext(ctx, "INSERT INTO cuelight_schema_migrations (name) VALUES ($1)", migration.Name); err != nil {
 		return err
 	}
 	return nil

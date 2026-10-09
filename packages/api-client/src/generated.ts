@@ -2558,7 +2558,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Asset copied into Cable storage. */
+            /** @description Asset copied into Cuelight storage. */
             201: {
                 headers: {
                     [name: string]: unknown;

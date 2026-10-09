@@ -16,9 +16,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	playerclient "github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/player/screenshot"
-	"github.com/jmill/cable/internal/release"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/player/screenshot"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type RemoteDescriptor struct {
@@ -452,7 +452,7 @@ func (m *MPV) Capture(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("cable-screenshot-%d.png", m.requestID.Add(1)))
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("cuelight-screenshot-%d.png", m.requestID.Add(1)))
 	defer os.Remove(path)
 	if _, err := m.command(ctx, []any{"screenshot-to-file", path, "video"}); err != nil {
 		return nil, err

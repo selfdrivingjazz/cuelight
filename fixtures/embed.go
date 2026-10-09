@@ -1,4 +1,4 @@
-// Package fixtures contains the versioned, redistribution-safe Cable test
+// Package fixtures contains the versioned, redistribution-safe Cuelight test
 // fixtures. Consumers should use internal/fixtures.Load for validated access;
 // this package only exposes the embedded file system to that loader.
 package fixtures

@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	playerclient "github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/player/screenshot"
-	"github.com/jmill/cable/internal/release"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/player/screenshot"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type RemoteEventSource interface {

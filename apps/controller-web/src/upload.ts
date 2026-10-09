@@ -1,4 +1,4 @@
-import type { components } from "@cable/api-client";
+import type { components } from "@cuelight/api-client";
 import { api, readApiResult } from "./api";
 
 /** Uploads a file through the resumable upload API and returns the completed asset. */

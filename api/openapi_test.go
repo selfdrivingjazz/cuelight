@@ -15,7 +15,7 @@ func TestOpenAPIValidates(t *testing.T) {
 	}
 }
 
-func TestOperatorOperationsDeclareCableScopes(t *testing.T) {
+func TestOperatorOperationsDeclareCuelightScopes(t *testing.T) {
 	doc := loadOpenAPI(t)
 	for path, item := range doc.Paths.Map() {
 		for method, operation := range item.Operations() {

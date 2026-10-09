@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jmill/cable/internal/control/webnode"
+	"github.com/jmilldotdev/cuelight/internal/control/webnode"
 )
 
 // lastSeenResolution bounds how often authenticated browser requests (which

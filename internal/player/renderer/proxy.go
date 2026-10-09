@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type Proxy struct {

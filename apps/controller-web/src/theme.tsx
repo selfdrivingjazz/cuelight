@@ -8,7 +8,7 @@ interface ControllerThemeContextValue {
   setPreference: (preference: ControllerThemePreference) => void;
 }
 
-const THEME_STORAGE_KEY = "cable.controller.theme";
+const THEME_STORAGE_KEY = "cuelight.controller.theme";
 const DARK_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 const ControllerThemeContext = React.createContext<ControllerThemeContextValue | null>(null);
 

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jmill/cable/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
 )
 
 const maxJSONBytes = 16 << 10

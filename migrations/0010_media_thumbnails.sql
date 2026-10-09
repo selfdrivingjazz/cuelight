@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 -- Poster thumbnails are keyed by the source artifact digest so identical
 -- content shares one thumbnail regardless of how many media rows reference it.
 CREATE TABLE media_thumbnails (
@@ -9,5 +9,5 @@ CREATE TABLE media_thumbnails (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- +cable Down
+-- +cuelight Down
 DROP TABLE media_thumbnails;

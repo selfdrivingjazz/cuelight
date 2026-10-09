@@ -26,8 +26,8 @@ for (const target of targets) {
   const outputDirectory = resolve(appRoot, "resources/bin", target.directory);
   rmSync(outputDirectory, { recursive: true, force: true });
   mkdirSync(outputDirectory, { recursive: true });
-  const executable = resolve(outputDirectory, target.goos === "windows" ? "cable-player.exe" : "cable-player");
-  const result = spawnSync("go", ["build", "-trimpath", "-ldflags", "-s -w -X main.version=0.1.0", "-o", executable, "./cmd/cable-player"], {
+  const executable = resolve(outputDirectory, target.goos === "windows" ? "cuelight-player.exe" : "cuelight-player");
+  const result = spawnSync("go", ["build", "-trimpath", "-ldflags", "-s -w -X main.version=0.1.0", "-o", executable, "./cmd/cuelight-player"], {
     cwd: repoRoot,
     env: { ...process.env, GOOS: target.goos, GOARCH: target.goarch, CGO_ENABLED: "0" },
     stdio: "inherit",
@@ -38,7 +38,7 @@ for (const target of targets) {
     const current = resolve(appRoot, "resources/bin/current");
     rmSync(current, { recursive: true, force: true });
     mkdirSync(current, { recursive: true });
-    const currentExecutable = resolve(current, target.goos === "windows" ? "cable-player.exe" : "cable-player");
+    const currentExecutable = resolve(current, target.goos === "windows" ? "cuelight-player.exe" : "cuelight-player");
     copyFileSync(executable, currentExecutable);
     if (target.goos !== "windows") chmodSync(currentExecutable, 0o755);
   }

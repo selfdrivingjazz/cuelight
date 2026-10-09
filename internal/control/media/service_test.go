@@ -10,7 +10,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/jmill/cable/internal/media/localcas"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
 )
 
 func TestUploadBoundsAndStrictOffsets(t *testing.T) {

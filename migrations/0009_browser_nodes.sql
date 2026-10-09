@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 ALTER TABLE nodes ADD COLUMN node_class text NOT NULL DEFAULT 'native' CHECK (node_class IN ('native', 'browser'));
 
 CREATE TABLE browser_node_claims (
@@ -29,7 +29,7 @@ CREATE TABLE browser_node_credentials (
 
 CREATE INDEX browser_node_credentials_node_idx ON browser_node_credentials (node_id);
 
--- +cable Down
+-- +cuelight Down
 DROP INDEX browser_node_credentials_node_idx;
 DROP TABLE browser_node_credentials;
 DROP INDEX browser_node_claims_expiry_idx;

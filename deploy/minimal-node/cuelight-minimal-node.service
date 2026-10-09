@@ -1,0 +1,22 @@
+[Unit]
+Description=Cuelight MPV minimal player node
+After=network-online.target cuelight-mpv.service
+Wants=network-online.target
+Requires=cuelight-mpv.service
+
+[Service]
+Type=simple
+User=cuelight
+Group=cuelight
+ExecStart=/usr/bin/cuelight-minimal-node
+EnvironmentFile=/etc/cuelight/minimal-node.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cuelight
+
+[Install]
+WantedBy=multi-user.target

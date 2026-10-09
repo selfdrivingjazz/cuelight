@@ -10,9 +10,9 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/webitem"
-	"github.com/jmill/cable/internal/media/localcas"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/webitem"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
 )
 
 // WebCaptureRepository persists web media thumbnails in the shared artifact CAS.
@@ -81,7 +81,7 @@ func (s *WebCaptureRepository) RecordWebCaptureFailure(ctx context.Context, id, 
 // AdoptNodeScreenshots takes, per web media item, the newest completed
 // screenshot from a node whose current assignment (made before the
 // screenshot) targets that item, when it is newer than the item's thumbnail.
-// Cable items have no server capture, so node screenshots are their only
+// Hosted items have no server capture, so node screenshots are their only
 // thumbnails.
 func (s *WebCaptureRepository) AdoptNodeScreenshots(ctx context.Context) (int, error) {
 	result, err := s.q(ctx).ExecContext(ctx, `

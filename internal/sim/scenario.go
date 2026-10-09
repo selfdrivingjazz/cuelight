@@ -15,11 +15,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jmill/cable/internal/media/localcas"
-	playerclient "github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/player/runtime"
-	playerstate "github.com/jmill/cable/internal/player/state"
-	"github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/player/runtime"
+	playerstate "github.com/jmilldotdev/cuelight/internal/player/state"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 // ScenarioConfig runs a named case without a control-plane process. It still
@@ -39,7 +39,7 @@ func RunScenario(ctx context.Context, config ScenarioConfig) error {
 		return errors.New("scenario name is required")
 	}
 	if config.Root == "" {
-		config.Root, _ = os.MkdirTemp("", "cable-node-sim-")
+		config.Root, _ = os.MkdirTemp("", "cuelight-node-sim-")
 		defer os.RemoveAll(config.Root)
 	}
 	if config.Data == nil {

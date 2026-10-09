@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmill/cable/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
 )
 
 const (
@@ -27,7 +27,7 @@ type Item struct {
 }
 
 type Repository interface {
-	// WebCaptureTarget returns the web media item; Cable items (no URL) and
+	// WebCaptureTarget returns the web media item; Hosted items (no URL) and
 	// file media report media.ErrNotFound.
 	WebCaptureTarget(ctx context.Context, id string) (Item, error)
 	// SetWebMetadata records the favicon and, when the title is still the

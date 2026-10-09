@@ -3,7 +3,7 @@ package media
 import (
 	"context"
 
-	"github.com/jmill/cable/internal/media/localcas"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
 )
 
 // LocalCASContent exposes only digest-addressed reads. CAS filesystem paths

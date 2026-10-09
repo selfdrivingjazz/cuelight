@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 ALTER TABLE cable_blocks
   ADD COLUMN asset_id uuid REFERENCES assets(id) ON DELETE RESTRICT;
@@ -14,7 +14,7 @@ ALTER TABLE cable_blocks
     tstzrange(starts_at, ends_at, '[)') WITH &&
   );
 
--- +cable Down
+-- +cuelight Down
 ALTER TABLE cable_blocks DROP CONSTRAINT cable_blocks_channel_time_excl;
 ALTER TABLE cable_blocks DROP CONSTRAINT cable_blocks_exactly_one_source;
 ALTER TABLE cable_blocks ALTER COLUMN playlist_id SET NOT NULL;

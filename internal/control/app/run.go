@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/jmill/cable/internal/control/persistence"
+	"github.com/jmilldotdev/cuelight/internal/control/persistence"
 )
 
 type Runtime struct {

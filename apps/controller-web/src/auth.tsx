@@ -1,6 +1,6 @@
 import * as React from "react";
-import type { components } from "@cable/api-client";
-import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState } from "@cable/controller-ui";
+import type { components } from "@cuelight/api-client";
+import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState } from "@cuelight/controller-ui";
 import { api, readApiResult, setApiToken } from "./api";
 
 type Operator = components["schemas"]["OperatorMe"];
@@ -14,7 +14,7 @@ interface AuthContextValue {
   signOut: () => void;
 }
 const AuthContext = React.createContext<AuthContextValue | null>(null);
-const TOKEN_KEY = "cable.controller.operatorToken";
+const TOKEN_KEY = "cuelight.controller.operatorToken";
 
 function readStoredToken(): string | undefined {
   if (typeof window === "undefined") return undefined;

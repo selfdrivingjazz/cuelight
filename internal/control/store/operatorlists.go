@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/operatorapi"
-	"github.com/jmill/cable/internal/control/page"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 var _ operatorapi.UploadPageService = (*Store)(nil)

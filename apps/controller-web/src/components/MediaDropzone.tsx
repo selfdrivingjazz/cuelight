@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useMutation } from "@tanstack/react-query";
-import { type components } from "@cable/api-client";
-import { Button, ErrorState } from "@cable/controller-ui";
+import { type components } from "@cuelight/api-client";
+import { Button, ErrorState } from "@cuelight/controller-ui";
 import { api, readApiResult } from "../api";
 import { uploadSelectedFile } from "../upload";
 

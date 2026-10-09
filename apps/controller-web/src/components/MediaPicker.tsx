@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import type { components } from "@cable/api-client";
-import { Button, EmptyState, ErrorState, Modal, Skeleton } from "@cable/controller-ui";
+import type { components } from "@cuelight/api-client";
+import { Button, EmptyState, ErrorState, Modal, Skeleton } from "@cuelight/controller-ui";
 import { api, readApiResult } from "../api";
 import { MediaThumbnail } from "../media-thumbnail";
 

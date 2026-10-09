@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/playlist"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/playlist"
 )
 
 func playlistMutation(r *http.Request, key string, expected int64) playlist.Mutation {

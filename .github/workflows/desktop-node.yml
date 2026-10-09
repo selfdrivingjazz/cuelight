@@ -5,14 +5,14 @@ on:
   push:
     paths:
       - "apps/node-desktop/**"
-      - "cmd/cable-player/**"
+      - "cmd/cuelight-player/**"
       - "internal/player/**"
       - "pnpm-lock.yaml"
       - ".github/workflows/desktop-node.yml"
   pull_request:
     paths:
       - "apps/node-desktop/**"
-      - "cmd/cable-player/**"
+      - "cmd/cuelight-player/**"
       - "internal/player/**"
 
 jobs:
@@ -31,13 +31,13 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: 22, cache: pnpm}
       - run: pnpm install --frozen-lockfile
-      - run: go test ./cmd/cable-player ./internal/player/...
-      - run: pnpm --filter @cable/node-desktop typecheck
-      - run: pnpm --filter @cable/node-desktop test
-      - run: pnpm --filter @cable/node-desktop sidecars
-      - run: pnpm --filter @cable/node-desktop build
-      - run: pnpm --filter @cable/node-desktop exec electron-builder --dir
+      - run: go test ./cmd/cuelight-player ./internal/player/...
+      - run: pnpm --filter @cuelight/node-desktop typecheck
+      - run: pnpm --filter @cuelight/node-desktop test
+      - run: pnpm --filter @cuelight/node-desktop sidecars
+      - run: pnpm --filter @cuelight/node-desktop build
+      - run: pnpm --filter @cuelight/node-desktop exec electron-builder --dir
       - uses: actions/upload-artifact@v4
         with:
-          name: cable-node-${{ runner.os }}-${{ runner.arch }}
+          name: cuelight-node-${{ runner.os }}-${{ runner.arch }}
           path: apps/node-desktop/release/

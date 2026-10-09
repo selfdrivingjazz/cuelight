@@ -52,7 +52,7 @@ func (c *fakeCommands) Run(_ context.Context, _ string, _ []string, _ []string, 
 type fakeContainers struct{ stopped int }
 
 func (c *fakeContainers) Ensure(context.Context, ContainerSpec) (ContainerInfo, error) {
-	return ContainerInfo{ID: "container-1", Endpoint: "postgres://cable:cable-development@127.0.0.1:5433/cable", Owned: true}, nil
+	return ContainerInfo{ID: "container-1", Endpoint: "postgres://cuelight:cuelight-development@127.0.0.1:5433/cuelight", Owned: true}, nil
 }
 func (c *fakeContainers) Stop(context.Context, ContainerInfo) error { c.stopped++; return nil }
 
@@ -128,7 +128,7 @@ func TestStatusRedactsSecrets(t *testing.T) {
 	if err := manager.ensureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	r := receipt{Version: stateVersion, Marker: rootMarker, Root: manager.config.Root, State: "ready", Endpoint: "https://127.0.0.1:8443", UpdatedAt: manager.clock(), Postgres: componentReceipt{Kind: "container", ID: "container", Endpoint: "postgres://user:super-secret@127.0.0.1:5433/cable", Owned: true}}
+	r := receipt{Version: stateVersion, Marker: rootMarker, Root: manager.config.Root, State: "ready", Endpoint: "https://127.0.0.1:8443", UpdatedAt: manager.clock(), Postgres: componentReceipt{Kind: "container", ID: "container", Endpoint: "postgres://user:super-secret@127.0.0.1:5433/cuelight", Owned: true}}
 	if err := manager.writeReceipt(r); err != nil {
 		t.Fatal(err)
 	}

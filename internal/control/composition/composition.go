@@ -21,28 +21,28 @@ import (
 	"strings"
 	"time"
 
-	apispec "github.com/jmill/cable/api"
-	"github.com/jmill/cable/internal/control/app"
-	"github.com/jmill/cable/internal/control/appaccess"
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/operatorapi"
-	"github.com/jmill/cable/internal/control/persistence"
-	"github.com/jmill/cable/internal/control/pki"
-	"github.com/jmill/cable/internal/control/playerapi"
-	"github.com/jmill/cable/internal/control/preview"
-	"github.com/jmill/cable/internal/control/profile"
-	controlrelease "github.com/jmill/cable/internal/control/release"
-	"github.com/jmill/cable/internal/control/remote"
-	"github.com/jmill/cable/internal/control/store"
-	"github.com/jmill/cable/internal/control/usage"
-	"github.com/jmill/cable/internal/control/webitem"
-	"github.com/jmill/cable/internal/control/webnode"
-	"github.com/jmill/cable/internal/media/localcas"
-	playerclient "github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/protocol"
-	canonical "github.com/jmill/cable/internal/release"
+	apispec "github.com/jmilldotdev/cuelight/api"
+	"github.com/jmilldotdev/cuelight/internal/control/app"
+	"github.com/jmilldotdev/cuelight/internal/control/appaccess"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
+	"github.com/jmilldotdev/cuelight/internal/control/persistence"
+	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	"github.com/jmilldotdev/cuelight/internal/control/playerapi"
+	"github.com/jmilldotdev/cuelight/internal/control/preview"
+	"github.com/jmilldotdev/cuelight/internal/control/profile"
+	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
+	"github.com/jmilldotdev/cuelight/internal/control/remote"
+	"github.com/jmilldotdev/cuelight/internal/control/store"
+	"github.com/jmilldotdev/cuelight/internal/control/usage"
+	"github.com/jmilldotdev/cuelight/internal/control/webitem"
+	"github.com/jmilldotdev/cuelight/internal/control/webnode"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/protocol"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 // HandlerFactory is suitable for app.Options.Handler.
@@ -358,23 +358,23 @@ func writePKIJSON(w http.ResponseWriter, status int, value any) {
 
 // ConfigureTLS configures direct TLS client-CA verification without requiring
 // mTLS on bearer-authenticated operator requests. A presented client cert is
-// always verified; player handlers additionally require its Cable node SAN.
+// always verified; player handlers additionally require its Cuelight node SAN.
 
 // BootstrapAdminToken initializes an actor and creates one administrator
 // credential. The returned Secret is intentionally never persisted and should
 // be displayed exactly once by the caller.
 func BootstrapAdminToken(ctx context.Context, config app.Config, actorID, actorName string, scopes []string) (auth.CreatedToken, error) {
 	if strings.TrimSpace(config.DatabaseURL) == "" {
-		return auth.CreatedToken{}, &app.ConfigError{Field: "CABLE_CONTROL_DATABASE_URL", Reason: "is required"}
+		return auth.CreatedToken{}, &app.ConfigError{Field: "CUELIGHT_CONTROL_DATABASE_URL", Reason: "is required"}
 	}
 	if strings.TrimSpace(config.MigrationsPath) == "" {
-		return auth.CreatedToken{}, &app.ConfigError{Field: "CABLE_CONTROL_MIGRATIONS_PATH", Reason: "is required"}
+		return auth.CreatedToken{}, &app.ConfigError{Field: "CUELIGHT_CONTROL_MIGRATIONS_PATH", Reason: "is required"}
 	}
 	if actorID == "" {
 		actorID = randomID()
 	}
 	if actorName == "" {
-		actorName = "cable-control administrator"
+		actorName = "cuelight-control administrator"
 	}
 	timeout := config.DatabaseTimeout
 	if timeout <= 0 {
@@ -434,6 +434,7 @@ func (a releaseAdapter) GetRelease(ctx context.Context, id string) (canonical.En
 }
 
 type staticProfile struct{ minimum string }
+
 func (p staticProfile) ProfileForPlayback(context.Context, canonical.PlaybackPayload) (controlrelease.Profile, error) {
 	return controlrelease.Profile{MinimumProtocolVersion: p.minimum}, nil
 }

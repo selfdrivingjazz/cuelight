@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 CREATE TABLE actors (
   id uuid PRIMARY KEY,
   name text NOT NULL,
@@ -181,7 +181,7 @@ CREATE TABLE audit_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- +cable Down
+-- +cuelight Down
 DROP TABLE audit_events;
 DROP TABLE node_release_authorizations;
 DROP TABLE node_events;

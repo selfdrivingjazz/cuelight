@@ -185,7 +185,7 @@ func TestProblemParsingAndRedactedErrors(t *testing.T) {
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(Problem{
-			Type:          "urn:cable:invalid-token",
+			Type:          "urn:cuelight:invalid-token",
 			Title:         "rejected " + secret,
 			Status:        http.StatusUnauthorized,
 			Detail:        "the supplied token was " + secret,

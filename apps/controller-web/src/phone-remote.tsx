@@ -246,7 +246,7 @@ export function RemoteControlPage() {
   const button = (label: React.ReactNode, key: string, className = "") => <button className={`remote-button ${className}`} type="button" onClick={() => send(key)}>{label}</button>;
   return <main className="remote-shell">
     <section className="remote-body">
-      <header className="remote-top"><div><p>Cable</p><h1>Remote</h1></div><span className={`remote-status ${status}`}>{status === "ready" ? "Connected" : "Connection error"}</span></header>
+      <header className="remote-top"><div><p>Cuelight</p><h1>Remote</h1></div><span className={`remote-status ${status}`}>{status === "ready" ? "Connected" : "Connection error"}</span></header>
       <div className="remote-modes" role="tablist" aria-label="Remote mode">
         <button role="tab" type="button" aria-selected={mode === "remote"} className={`remote-button${mode === "remote" ? " active" : ""}`} onClick={() => setMode("remote")}>Remote</button>
         <button role="tab" type="button" aria-selected={mode === "trackpad"} className={`remote-button${mode === "trackpad" ? " active" : ""}`} onClick={() => setMode("trackpad")}>Trackpad</button>

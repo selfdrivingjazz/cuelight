@@ -1,9 +1,9 @@
 {
-  "name": "@cable/node-desktop",
+  "name": "@cuelight/node-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Cross-platform Cable player node with bundled Chromium",
-  "author": "Cable contributors",
+  "description": "Cross-platform Cuelight player node with bundled Chromium",
+  "author": "Cuelight contributors",
   "main": "dist-electron/main/main.js",
   "scripts": {
     "sidecars": "node scripts/build-sidecars.mjs",
@@ -35,10 +35,10 @@
     "wait-on": "8.0.4"
   },
   "build": {
-    "appId": "com.jmill.cablenode",
-    "productName": "Cable Node",
-    "executableName": "Cable Node",
-    "artifactName": "Cable-Node-${version}-${os}-${arch}.${ext}",
+    "appId": "com.jmilldotdev.cuelight",
+    "productName": "Cuelight",
+    "executableName": "Cuelight",
+    "artifactName": "Cuelight-${version}-${os}-${arch}.${ext}",
     "asar": true,
     "extraResources": [
       {

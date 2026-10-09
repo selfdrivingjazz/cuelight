@@ -7,9 +7,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/pki"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 var _ assignment.Repository = (*Store)(nil)

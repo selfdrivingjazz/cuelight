@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/page"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
 )
 
 type authoredRepo struct {

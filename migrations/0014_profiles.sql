@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 CREATE TABLE profiles (
   id uuid PRIMARY KEY,
   name text NOT NULL UNIQUE CHECK (length(btrim(name)) > 0),
@@ -37,7 +37,7 @@ CREATE TABLE profile_activations (
 CREATE INDEX profile_activations_latest_idx ON profile_activations (activated_at DESC, id DESC);
 CREATE INDEX profile_activations_profile_idx ON profile_activations (profile_id, activated_at DESC);
 
--- +cable Down
+-- +cuelight Down
 DROP TABLE profile_activations;
 DROP TABLE profile_screens;
 DROP TABLE profiles;

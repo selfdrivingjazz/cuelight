@@ -16,17 +16,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/persistence"
-	controlplayerapi "github.com/jmill/cable/internal/control/playerapi"
-	controlrelease "github.com/jmill/cable/internal/control/release"
-	"github.com/jmill/cable/internal/media/localcas"
-	playerclient "github.com/jmill/cable/internal/player/client"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/control/persistence"
+	controlplayerapi "github.com/jmilldotdev/cuelight/internal/control/playerapi"
+	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
-const postgresTestDSN = "CABLE_POSTGRES_TEST_DSN"
+const postgresTestDSN = "CUELIGHT_POSTGRES_TEST_DSN"
 
 var testSchemaSequence atomic.Uint64
 
@@ -41,7 +41,7 @@ func newPostgresTestStore(t *testing.T) (*Store, *sql.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := fmt.Sprintf("cable_store_%d_%d", time.Now().UnixNano(), testSchemaSequence.Add(1))
+	schema := fmt.Sprintf("cuelight_store_%d_%d", time.Now().UnixNano(), testSchemaSequence.Add(1))
 	if _, err := admin.ExecContext(ctx, `CREATE SCHEMA `+schema); err != nil {
 		admin.Close()
 		t.Fatal(err)

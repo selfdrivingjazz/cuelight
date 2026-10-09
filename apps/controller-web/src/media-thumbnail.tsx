@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import type { components } from "@cable/api-client";
-import { PreviewSurface } from "@cable/controller-ui";
+import type { components } from "@cuelight/api-client";
+import { PreviewSurface } from "@cuelight/controller-ui";
 import { ApiRequestError, controllerBaseUrl, getApiToken, hasCapability } from "./api";
 import { useAuth } from "./auth";
 

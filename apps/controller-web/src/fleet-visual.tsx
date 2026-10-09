@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { components } from "@cable/api-client";
+import type { components } from "@cuelight/api-client";
 import {
   Card,
   CardContent,
@@ -13,7 +13,7 @@ import {
   type PreviewMedia,
   type StatusTone,
   type TechnicalDetail,
-} from "@cable/controller-ui";
+} from "@cuelight/controller-ui";
 
 type Node = components["schemas"]["Node"];
 export type NodeReport = components["schemas"]["NodeReport"];

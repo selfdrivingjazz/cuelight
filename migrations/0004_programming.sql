@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 CREATE TABLE cable_playlists (
   id uuid PRIMARY KEY,
   name text NOT NULL UNIQUE,
@@ -44,7 +44,7 @@ CREATE TABLE cable_profiles (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- +cable Down
+-- +cuelight Down
 DROP TABLE cable_profiles;
 DROP INDEX cable_blocks_channel_time_idx;
 DROP TABLE cable_blocks;

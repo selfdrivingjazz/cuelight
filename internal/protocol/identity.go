@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const NodeSANPrefix = "cable-node-"
+const NodeSANPrefix = "cuelight-node-"
 
 type RevocationChecker interface {
 	Revoked(nodeID, serial string) bool
@@ -27,7 +27,7 @@ func NodeIdentity(request *http.Request, checker RevocationChecker) (string, err
 		}
 	}
 	if nodeID == "" {
-		return "", errors.New("client certificate has no Cable node SAN")
+		return "", errors.New("client certificate has no Cuelight node SAN")
 	}
 	if checker != nil && checker.Revoked(nodeID, certificate.SerialNumber.String()) {
 		return "", errors.New("node credential is revoked")

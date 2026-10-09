@@ -4,8 +4,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/jmill/cable/internal/control/preview"
-	"github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/preview"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type ScreenshotJob = preview.ScreenshotJob

@@ -8,11 +8,11 @@ import (
 func TestLoadConfigRequiresEveryDurableAndSecretPath(t *testing.T) {
 	values := validConfigEnvironment()
 	for _, required := range []string{
-		"CABLE_CONTROL_DATABASE_URL",
-		"CABLE_CONTROL_TLS_CERT_PATH",
-		"CABLE_CONTROL_TLS_KEY_PATH",
-		"CABLE_CONTROL_PUBLISHER_KEY_PATH",
-		"CABLE_CONTROL_CAS_PATH",
+		"CUELIGHT_CONTROL_DATABASE_URL",
+		"CUELIGHT_CONTROL_TLS_CERT_PATH",
+		"CUELIGHT_CONTROL_TLS_KEY_PATH",
+		"CUELIGHT_CONTROL_PUBLISHER_KEY_PATH",
+		"CUELIGHT_CONTROL_CAS_PATH",
 	} {
 		t.Run(required, func(t *testing.T) {
 			copy := cloneEnvironment(values)
@@ -32,13 +32,13 @@ func TestLoadConfigRejectsOutOfBoundsValues(t *testing.T) {
 		field string
 		value string
 	}{
-		{"zero database connections", "CABLE_CONTROL_DATABASE_MAX_CONNECTIONS", "0"},
-		{"too many database connections", "CABLE_CONTROL_DATABASE_MAX_CONNECTIONS", "65"},
-		{"idle exceeds open", "CABLE_CONTROL_DATABASE_MAX_IDLE", "17"},
-		{"unbounded database wait", "CABLE_CONTROL_DATABASE_TIMEOUT", "31s"},
-		{"short shutdown", "CABLE_CONTROL_SHUTDOWN_TIMEOUT", "500ms"},
-		{"large headers", "CABLE_CONTROL_MAX_HEADER_BYTES", "1048577"},
-		{"insecure public URL", "CABLE_CONTROL_PUBLIC_URL", "http://controller.example"},
+		{"zero database connections", "CUELIGHT_CONTROL_DATABASE_MAX_CONNECTIONS", "0"},
+		{"too many database connections", "CUELIGHT_CONTROL_DATABASE_MAX_CONNECTIONS", "65"},
+		{"idle exceeds open", "CUELIGHT_CONTROL_DATABASE_MAX_IDLE", "17"},
+		{"unbounded database wait", "CUELIGHT_CONTROL_DATABASE_TIMEOUT", "31s"},
+		{"short shutdown", "CUELIGHT_CONTROL_SHUTDOWN_TIMEOUT", "500ms"},
+		{"large headers", "CUELIGHT_CONTROL_MAX_HEADER_BYTES", "1048577"},
+		{"insecure public URL", "CUELIGHT_CONTROL_PUBLIC_URL", "http://controller.example"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -68,12 +68,12 @@ func TestLoadConfigUsesBoundedDefaults(t *testing.T) {
 
 func validConfigEnvironment() map[string]string {
 	return map[string]string{
-		"CABLE_CONTROL_DATABASE_URL":       "postgres://cable@localhost/cable",
-		"CABLE_CONTROL_TLS_CERT_PATH":      "/run/cable/server.crt",
-		"CABLE_CONTROL_TLS_KEY_PATH":       "/run/cable/server.key",
-		"CABLE_CONTROL_PUBLISHER_KEY_PATH": "/run/cable/publisher.key",
-		"CABLE_CONTROL_CAS_PATH":           "/var/lib/cable/cas",
-		"CABLE_CONTROL_PUBLIC_URL":         "https://controller.example",
+		"CUELIGHT_CONTROL_DATABASE_URL":       "postgres://cuelight@localhost/cuelight",
+		"CUELIGHT_CONTROL_TLS_CERT_PATH":      "/run/cuelight/server.crt",
+		"CUELIGHT_CONTROL_TLS_KEY_PATH":       "/run/cuelight/server.key",
+		"CUELIGHT_CONTROL_PUBLISHER_KEY_PATH": "/run/cuelight/publisher.key",
+		"CUELIGHT_CONTROL_CAS_PATH":           "/var/lib/cuelight/cas",
+		"CUELIGHT_CONTROL_PUBLIC_URL":         "https://controller.example",
 	}
 }
 

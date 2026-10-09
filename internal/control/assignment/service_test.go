@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	canonical "github.com/jmill/cable/internal/release"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type assignmentRepositoryFixture struct {

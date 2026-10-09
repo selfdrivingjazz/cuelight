@@ -293,7 +293,7 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 	}
 	caTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(9000),
-		Subject:               pkix.Name{CommonName: "Cable test CA"},
+		Subject:               pkix.Name{CommonName: "Cuelight test CA"},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,

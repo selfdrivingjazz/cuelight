@@ -1,4 +1,4 @@
-// Package fixtures loads and validates Cable's versioned, deterministic fixtures.
+// Package fixtures loads and validates Cuelight's versioned, deterministic fixtures.
 package fixtures
 
 import (
@@ -16,7 +16,7 @@ import (
 	"slices"
 	"strings"
 
-	embedded "github.com/jmill/cable/fixtures"
+	embedded "github.com/jmilldotdev/cuelight/fixtures"
 )
 
 const (
@@ -613,7 +613,7 @@ func Deterministic(name string) ([]byte, error) {
 		}
 		return out
 	}
-	mp4 := join(box("ftyp", []byte("isom\x00\x00\x02\x00isomiso2avc1mp41")), box("moov", []byte("cable-fixture-h264-aac-v1")), box("mdat", []byte("CABLE-H264-AAC-DETERMINISTIC-FRAME")))
+	mp4 := join(box("ftyp", []byte("isom\x00\x00\x02\x00isomiso2avc1mp41")), box("moov", []byte("cuelight-fixture-h264-aac-v1")), box("mdat", []byte("CUELIGHT-H264-AAC-DETERMINISTIC-FRAME")))
 	switch name {
 	case "phase1.jpg":
 		return jpeg, nil

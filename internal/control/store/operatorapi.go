@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/operatorapi"
-	"github.com/jmill/cable/internal/control/page"
-	"github.com/jmill/cable/internal/control/pki"
-	playerclient "github.com/jmill/cable/internal/player/client"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
+	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 type OperatorAdapter struct{ Store *Store }

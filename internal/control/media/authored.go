@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/page"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 var (
@@ -45,24 +45,24 @@ type Playback struct {
 // showing them mint an app token that lets the page read the library and the
 // screen's remote events.
 type Media struct {
-	ID             string   `json:"id"`
-	Kind           string   `json:"kind"`
-	AssetID        string   `json:"assetId,omitempty"`
-	URL            string   `json:"url,omitempty"`
-	AppAccess      bool     `json:"appAccess"`
-	FaviconURL     string   `json:"faviconUrl,omitempty"`
-	Title          string   `json:"title"`
-	Description    string   `json:"description,omitempty"`
-	Artist         string   `json:"artist,omitempty"`
-	Tags           []string `json:"tags"`
-	ArtworkAssetID string   `json:"artworkAssetId,omitempty"`
-	Playback       Playback `json:"playback,omitzero"`
-	Artifact       Artifact `json:"artifact,omitzero"`
-	Version        int64    `json:"version"`
-	CreatedBy      string   `json:"createdBy"`
-	UpdatedBy      string   `json:"updatedBy"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID             string     `json:"id"`
+	Kind           string     `json:"kind"`
+	AssetID        string     `json:"assetId,omitempty"`
+	URL            string     `json:"url,omitempty"`
+	AppAccess      bool       `json:"appAccess"`
+	FaviconURL     string     `json:"faviconUrl,omitempty"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description,omitempty"`
+	Artist         string     `json:"artist,omitempty"`
+	Tags           []string   `json:"tags"`
+	ArtworkAssetID string     `json:"artworkAssetId,omitempty"`
+	Playback       Playback   `json:"playback,omitzero"`
+	Artifact       Artifact   `json:"artifact,omitzero"`
+	Version        int64      `json:"version"`
+	CreatedBy      string     `json:"createdBy"`
+	UpdatedBy      string     `json:"updatedBy"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 	Thumbnail      *Thumbnail `json:"thumbnail,omitempty"`
 	// ThumbnailError and ThumbnailAttemptedAt describe the last web capture.
 	ThumbnailError       string     `json:"thumbnailError,omitempty"`

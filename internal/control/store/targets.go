@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	controlrelease "github.com/jmill/cable/internal/control/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
 )
 
 var _ controlrelease.TargetCatalog = (*Store)(nil)

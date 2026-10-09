@@ -23,10 +23,10 @@ importers:
 
   apps/controller-web:
     dependencies:
-      '@cable/api-client':
+      '@cuelight/api-client':
         specifier: workspace:0.1.0
         version: link:../../packages/api-client
-      '@cable/controller-ui':
+      '@cuelight/controller-ui':
         specifier: workspace:0.1.0
         version: link:../../packages/controller-ui
       '@tanstack/react-query':

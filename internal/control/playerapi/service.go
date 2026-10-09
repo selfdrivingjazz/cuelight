@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/protocol"
-	canonical "github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/protocol"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 func NewService(repository Repository, loader ReleaseLoader, cas CASReader, limits Limits) (*Service, error) {

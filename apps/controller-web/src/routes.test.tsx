@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fixturePage, nodeFixtures } from "@cable/api-client";
+import { fixturePage, nodeFixtures } from "@cuelight/api-client";
 import type { NodeSearch } from "./kit";
 import { disposeNodeCapture, requestNodeScreenshot, ScreenshotLifecycleError } from "./screens";
 

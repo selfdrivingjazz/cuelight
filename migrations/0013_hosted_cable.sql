@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 -- Cable is a control-hosted web page: each deployment is one web media item
 -- (its URL is derived from the control origin at publish time) and the guide
 -- authenticates with per-node, per-deployment guide tokens. Shell builds,
@@ -51,7 +51,7 @@ DROP TABLE cable_revisions;
 DROP TABLE cable_shell_build_artifacts;
 DROP TABLE cable_shell_builds;
 
--- +cable Down
+-- +cuelight Down
 CREATE TABLE cable_shell_builds (
   id uuid PRIMARY KEY,
   digest text NOT NULL UNIQUE CHECK (digest ~ '^[a-f0-9]{64}$'),

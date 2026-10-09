@@ -1,4 +1,4 @@
-// Package dev owns the explicitly development-only Cable process lifecycle.
+// Package dev owns the explicitly development-only Cuelight process lifecycle.
 //
 // The package deliberately keeps all credentials and generated state below a
 // caller-declared development root. Status values contain paths and identities,
@@ -29,20 +29,20 @@ import (
 	"syscall"
 	"time"
 
-	operator "github.com/jmill/cable/internal/client"
-	"github.com/jmill/cable/internal/control/pki"
+	operator "github.com/jmilldotdev/cuelight/internal/client"
+	"github.com/jmilldotdev/cuelight/internal/control/pki"
 )
 
 const (
 	stateVersion           = 1
-	rootMarker             = "cable-development-root-v1"
+	rootMarker             = "cuelight-development-root-v1"
 	defaultPostgresImage   = "postgres:17-alpine"
-	defaultControlBinary   = "cable-control"
-	defaultSimulatorBinary = "cable-node-sim"
+	defaultControlBinary   = "cuelight-control"
+	defaultSimulatorBinary = "cuelight-node-sim"
 )
 
 var (
-	ErrNotRunning = errors.New("cable development lifecycle is not running")
+	ErrNotRunning = errors.New("cuelight development lifecycle is not running")
 	ErrUnsafeRoot = errors.New("development root is not declared or is unsafe")
 	ErrNotOwned   = errors.New("resource is not owned by this development lifecycle")
 )
@@ -96,13 +96,13 @@ func (c Config) normalized() (Config, error) {
 		c.PostgresImage = defaultPostgresImage
 	}
 	if c.PostgresUser == "" {
-		c.PostgresUser = "cable"
+		c.PostgresUser = "cuelight"
 	}
 	if c.PostgresPassword == "" {
-		c.PostgresPassword = "cable-development"
+		c.PostgresPassword = "cuelight-development"
 	}
 	if c.PostgresDatabase == "" {
-		c.PostgresDatabase = "cable"
+		c.PostgresDatabase = "cuelight"
 	}
 	if c.ReadinessTimeout <= 0 {
 		c.ReadinessTimeout = 30 * time.Second
@@ -235,7 +235,7 @@ func (m *Manager) Up(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	container, err := m.containers.Ensure(ctx, ContainerSpec{Name: "cable-dev-postgres", Image: m.config.PostgresImage, User: m.config.PostgresUser, Password: m.config.PostgresPassword, Database: m.config.PostgresDatabase, Root: m.config.Root, HostPort: port + 1})
+	container, err := m.containers.Ensure(ctx, ContainerSpec{Name: "cuelight-dev-postgres", Image: m.config.PostgresImage, User: m.config.PostgresUser, Password: m.config.PostgresPassword, Database: m.config.PostgresDatabase, Root: m.config.Root, HostPort: port + 1})
 	if err != nil {
 		return Status{}, fmt.Errorf("start PostgreSQL: %w", err)
 	}
@@ -639,7 +639,7 @@ func (m *Manager) ensureAssets() error {
 	}
 	clock := pkiClock{now: m.clock}
 	authority, err := pki.BootstrapAuthority(context.Background(), clock, pki.CryptoSerialSource{Reader: m.random}, pki.AuthorityBootstrapOptions{
-		CommonName: "Cable development CA (NON-PRODUCTION)",
+		CommonName: "Cuelight development CA (NON-PRODUCTION)",
 		Lifetime:   365 * 24 * time.Hour, Backdate: time.Minute, Random: m.random,
 	})
 	if err != nil {
@@ -681,7 +681,7 @@ type pkiClock struct{ now func() time.Time }
 
 func (c pkiClock) Now() time.Time { return c.now() }
 func (m *Manager) controlEnv(port int, database string) []string {
-	return []string{"CABLE_CONTROL_LISTEN_ADDR=127.0.0.1:" + strconv.Itoa(port), "CABLE_CONTROL_DATABASE_URL=" + database, "CABLE_CONTROL_MIGRATIONS_PATH=" + m.config.MigrationsPath, "CABLE_CONTROL_TLS_CERT_PATH=" + m.path("trust", "server.pem"), "CABLE_CONTROL_TLS_KEY_PATH=" + m.path("trust", "server-key.pem"), "CABLE_CONTROL_PUBLISHER_KEY_PATH=" + m.path("trust", "publisher-key.pem"), "CABLE_CONTROL_PUBLISHER_KEY_ID=dev-publisher", "CABLE_CONTROL_CAS_PATH=" + m.path("cas"), "CABLE_CONTROL_CA_PATH=" + m.path("trust", "ca.pem"), "CABLE_CONTROL_CA_KEY_PATH=" + m.path("trust", "ca-key.pem"), "CABLE_CONTROL_SEAL_KEY_PATH=" + m.path("trust", "seal.key"), "CABLE_CONTROL_TEMP_ROOT=" + m.path("state", "tmp")}
+	return []string{"CUELIGHT_CONTROL_LISTEN_ADDR=127.0.0.1:" + strconv.Itoa(port), "CUELIGHT_CONTROL_DATABASE_URL=" + database, "CUELIGHT_CONTROL_MIGRATIONS_PATH=" + m.config.MigrationsPath, "CUELIGHT_CONTROL_TLS_CERT_PATH=" + m.path("trust", "server.pem"), "CUELIGHT_CONTROL_TLS_KEY_PATH=" + m.path("trust", "server-key.pem"), "CUELIGHT_CONTROL_PUBLISHER_KEY_PATH=" + m.path("trust", "publisher-key.pem"), "CUELIGHT_CONTROL_PUBLISHER_KEY_ID=dev-publisher", "CUELIGHT_CONTROL_CAS_PATH=" + m.path("cas"), "CUELIGHT_CONTROL_CA_PATH=" + m.path("trust", "ca.pem"), "CUELIGHT_CONTROL_CA_KEY_PATH=" + m.path("trust", "ca-key.pem"), "CUELIGHT_CONTROL_SEAL_KEY_PATH=" + m.path("trust", "seal.key"), "CUELIGHT_CONTROL_TEMP_ROOT=" + m.path("state", "tmp")}
 }
 func (m *Manager) waitReady(ctx context.Context, endpoint string) error {
 	probeCtx, cancel := context.WithTimeout(ctx, m.config.ReadinessTimeout)
@@ -702,7 +702,7 @@ func (m *Manager) waitReady(ctx context.Context, endpoint string) error {
 func (m *Manager) bootstrapAdmin(ctx context.Context, env []string) (string, error) {
 	var out strings.Builder
 	scopes := "security_admin,node_enroll,node_read,node_write,assignment_read,assignment_write,media_write,local_media_read,media_read,release_write,release_read"
-	code, err := m.commands.Run(ctx, m.config.ControlBinary, []string{"admin", "token", "create", "--actor-name", "cable development", "--scopes", scopes}, env, &out, io.Discard)
+	code, err := m.commands.Run(ctx, m.config.ControlBinary, []string{"admin", "token", "create", "--actor-name", "cuelight development", "--scopes", scopes}, env, &out, io.Discard)
 	if err != nil {
 		return "", fmt.Errorf("bootstrap admin token: %w", err)
 	}
@@ -723,7 +723,7 @@ func (m *Manager) createEnrollment(ctx context.Context, endpoint, admin string) 
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+admin)
-	req.Header.Set("Idempotency-Key", "cable-dev-enrollment")
+	req.Header.Set("Idempotency-Key", "cuelight-dev-enrollment")
 	tr := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: mustCA(m.path("trust", "ca.pem"))}}
 	resp, err := (&http.Client{Transport: tr}).Do(req)
 	if err != nil {
@@ -937,7 +937,7 @@ func (d dockerRuntime) Ensure(ctx context.Context, s ContainerSpec) (ContainerIn
 		return ContainerInfo{}, err
 	}
 	var out strings.Builder
-	args := []string{"run", "-d", "--rm", "--name", s.Name, "--label", "com.cable.dev.root=" + s.Root, "-v", postgresRoot + ":/var/lib/postgresql/data", "-e", "POSTGRES_USER=" + s.User, "-e", "POSTGRES_PASSWORD=" + s.Password, "-e", "POSTGRES_DB=" + s.Database, "-p", fmt.Sprintf("127.0.0.1:%d:5432", port), s.Image}
+	args := []string{"run", "-d", "--rm", "--name", s.Name, "--label", "com.cuelight.dev.root=" + s.Root, "-v", postgresRoot + ":/var/lib/postgresql/data", "-e", "POSTGRES_USER=" + s.User, "-e", "POSTGRES_PASSWORD=" + s.Password, "-e", "POSTGRES_DB=" + s.Database, "-p", fmt.Sprintf("127.0.0.1:%d:5432", port), s.Image}
 	code, err := d.runner.Run(ctx, "docker", args, nil, &out, io.Discard)
 	if err != nil || code != 0 {
 		return ContainerInfo{}, fmt.Errorf("docker run: %w (exit %d)", err, code)

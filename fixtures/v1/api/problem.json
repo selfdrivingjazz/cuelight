@@ -2,5 +2,5 @@
   "schemaVersion": "1.0",
   "operation": "putNodeAssignment",
   "request": {"method": "PUT", "path": "/nodes/00000000-0000-4000-8000-000000000001/assignment", "security": "operatorToken"},
-  "response": {"status": 409, "mediaType": "application/problem+json", "body": {"type": "https://cable.example/problems/generation-conflict", "title": "Assignment generation conflict", "status": 409, "detail": "expected generation does not match the current assignment", "correlationId": "fixture-correlation-0001"}}
+  "response": {"status": 409, "mediaType": "application/problem+json", "body": {"type": "https://cuelight.example/problems/generation-conflict", "title": "Assignment generation conflict", "status": 409, "detail": "expected generation does not match the current assignment", "correlationId": "fixture-correlation-0001"}}
 }

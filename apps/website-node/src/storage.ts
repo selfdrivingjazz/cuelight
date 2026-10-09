@@ -1,6 +1,6 @@
 import type { BrowserCredential } from "./types";
 
-export const STORAGE_KEY = "cable.browser-node.credential";
+export const STORAGE_KEY = "cuelight.browser-node.credential";
 
 export interface CredentialStorage {
   load(): BrowserCredential | null;

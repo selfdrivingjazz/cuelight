@@ -1,8 +1,8 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import type { components } from "@cable/api-client";
-import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, PageFrame, PageHeader, StatusBadge, TanStackDataTable, useToast } from "@cable/controller-ui";
+import type { components } from "@cuelight/api-client";
+import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, PageFrame, PageHeader, StatusBadge, TanStackDataTable, useToast } from "@cuelight/controller-ui";
 import { api, ApiRequestError, readApiResult } from "./api";
 import { useAuth } from "./auth";
 import { DeliveryField, fieldClass, type DeliveryChoice } from "./assignment";

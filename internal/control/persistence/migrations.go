@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	upMarker   = "-- +cable Up"
-	downMarker = "-- +cable Down"
+	upMarker   = "-- +cuelight Up"
+	downMarker = "-- +cuelight Down"
 )
 
 type Migration struct {

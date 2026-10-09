@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
 )
 
 var (

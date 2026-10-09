@@ -1,4 +1,4 @@
--- +cable Up
+-- +cuelight Up
 ALTER TABLE idempotency_records
   ALTER COLUMN response_body TYPE bytea
   USING convert_to(response_body::text, 'UTF8');
@@ -56,7 +56,7 @@ CREATE TABLE assignment_idempotency_records (
 CREATE INDEX assignments_node_digest_generation_idx
   ON assignments (node_id, release_digest, desired_generation DESC);
 
--- +cable Down
+-- +cuelight Down
 DROP INDEX assignments_node_digest_generation_idx;
 DROP TABLE assignment_idempotency_records;
 DROP TABLE release_publications;

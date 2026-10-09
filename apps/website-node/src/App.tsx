@@ -13,7 +13,7 @@ type Report = (render: RenderState) => void;
 
 /** Injected by apps/node-android's WebView; absent in plain browsers. */
 declare global {
-  interface Window { CableAndroid?: { isAvailable(): boolean; injectInput(json: string): number } }
+  interface Window { CuelightAndroid?: { isAvailable(): boolean; injectInput(json: string): number } }
 }
 
 export function WebsiteNodeApp({ controller: provided }: { controller?: BrowserNodeController }) {
@@ -53,9 +53,9 @@ export function WebsiteNodeApp({ controller: provided }: { controller?: BrowserN
   const report: Report = (render) => { void controller.reportRender(render); };
   return (
     <main className="node-shell">
-      {view.phase === "starting" && <Message title="Starting Cable…" />}
+      {view.phase === "starting" && <Message title="Starting Cuelight…" />}
       {view.phase === "pairing" && <PairingScreen claim={view.claim} />}
-      {view.phase === "idle" && <Message title="Paired with Cable" detail="Waiting for an assignment from the controller." small={`Node ${view.nodeId}`} />}
+      {view.phase === "idle" && <Message title="Paired with Cuelight" detail="Waiting for an assignment from the controller." small={`Node ${view.nodeId}`} />}
       {view.phase === "presenting" && (
         <PresentationView
           key={`${view.assignment.desiredGeneration}`}
@@ -67,7 +67,7 @@ export function WebsiteNodeApp({ controller: provided }: { controller?: BrowserN
       )}
       {soundBlocked && view.phase === "presenting" && <div className="hint">Press OK or tap to turn on sound</div>}
       {snapshot.remote && snapshot.remote.showQr && !(view.phase === "presenting" && view.presentation.kind === "web" && view.presentation.appAccess) && <RemoteBadge session={snapshot.remote} />}
-      {snapshot.offline && <div className="offline" role="status">Reconnecting to Cable…</div>}
+      {snapshot.offline && <div className="offline" role="status">Reconnecting to Cuelight…</div>}
     </main>
   );
 }
@@ -87,10 +87,10 @@ function PairingScreen({ claim }: { claim: ClaimStarted }) {
   return (
     <section className="pairing" aria-label="Pair this screen">
       <div className="pairing-text">
-        <p className="eyebrow">Cable · pair this screen</p>
-        <h1>Enter this code in the Cable controller</h1>
+        <p className="eyebrow">Cuelight · pair this screen</p>
+        <h1>Enter this code in the Cuelight controller</h1>
         <p className="code" aria-label="Pairing code">{claim.displayCode}</p>
-        <p className="instructions">Open <strong>{claim.pairUrl ? displayUrl(claim.pairUrl) : "the Cable controller"}</strong> on your phone or computer, or scan the QR code.</p>
+        <p className="instructions">Open <strong>{claim.pairUrl ? displayUrl(claim.pairUrl) : "the Cuelight controller"}</strong> on your phone or computer, or scan the QR code.</p>
         <p className="small">The code refreshes automatically every few minutes.</p>
       </div>
       {qr && <img className="qr" src={qr} alt="QR code for the pairing page" />}
@@ -186,7 +186,7 @@ function handleRemoteEvent(event: RemoteEvent, snapshot: NodeSnapshot, video: HT
     if (view.presentation.appAccess) return;
     // Cross-origin frames cannot receive synthetic input from this page. The
     // Android shell exposes a native injector; plain browsers drop the event.
-    const bridge = window.CableAndroid;
+    const bridge = window.CuelightAndroid;
     if (bridge && bridge.isAvailable()) bridge.injectInput(JSON.stringify({ events: [event] }));
     return;
   }

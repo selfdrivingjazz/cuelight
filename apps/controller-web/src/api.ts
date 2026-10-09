@@ -1,4 +1,4 @@
-import { createApiClient, type ApiClient, type components } from "@cable/api-client";
+import { createApiClient, type ApiClient, type components } from "@cuelight/api-client";
 
 export const controllerBaseUrl = import.meta.env.VITE_CONTROLLER_API_URL ?? (typeof window === "undefined" ? "http://localhost/api/v1" : "/api/v1");
 let currentToken: string | undefined;

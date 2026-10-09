@@ -18,7 +18,7 @@ func TestPutConvergesAndReadsRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := bytes.Repeat([]byte("cable"), 1<<18)
+	content := bytes.Repeat([]byte("cuelight"), 1<<18)
 	sum := sha256.Sum256(content)
 	digest := hex.EncodeToString(sum[:])
 

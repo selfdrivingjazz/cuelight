@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/client"
-	"github.com/jmill/cable/internal/dev"
-	"github.com/jmill/cable/internal/fixtures"
+	"github.com/jmilldotdev/cuelight/internal/client"
+	"github.com/jmilldotdev/cuelight/internal/dev"
+	"github.com/jmilldotdev/cuelight/internal/fixtures"
 )
 
 type fakeLifecycle struct{ ups, downs int }

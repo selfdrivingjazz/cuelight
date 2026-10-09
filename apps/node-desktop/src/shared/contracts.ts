@@ -40,7 +40,7 @@ export interface DesktopStatus {
   logPath: string;
 }
 
-export interface CableNodeDesktopAPI {
+export interface CuelightNodeDesktopAPI {
   status(): Promise<DesktopStatus>;
   chooseCA(): Promise<string | undefined>;
   provision(input: ProvisionInput): Promise<DesktopStatus>;
@@ -56,6 +56,6 @@ export interface CableNodeDesktopAPI {
 
 declare global {
   interface Window {
-    cableNode: CableNodeDesktopAPI;
+    cuelightNode: CuelightNodeDesktopAPI;
   }
 }

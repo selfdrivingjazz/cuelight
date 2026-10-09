@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// Problem is an RFC 9457 problem detail returned by the Cable API.
+// Problem is an RFC 9457 problem detail returned by the Cuelight API.
 type Problem struct {
 	Type          string         `json:"type"`
 	Title         string         `json:"title"`

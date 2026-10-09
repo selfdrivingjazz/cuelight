@@ -1,7 +1,7 @@
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { components } from "@cable/api-client";
+import type { components } from "@cuelight/api-client";
 import {
   NodePlaybackView,
   ScreenTile,

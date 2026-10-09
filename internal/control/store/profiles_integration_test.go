@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jmill/cable/internal/control/assignment"
-	"github.com/jmill/cable/internal/control/operatorapi"
-	"github.com/jmill/cable/internal/control/profile"
+	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
+	"github.com/jmilldotdev/cuelight/internal/control/profile"
 )
 
 func TestPostgresProfileActivationOverHTTP(t *testing.T) {

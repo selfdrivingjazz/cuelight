@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/page"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
 )
 
 func seedListMedia(t *testing.T, repository *Store, rows []struct {

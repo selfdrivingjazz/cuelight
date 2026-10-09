@@ -1,0 +1,17 @@
+[Unit]
+Description=MPV renderer for Cuelight minimal player node
+After=graphical-session.target
+
+[Service]
+Type=simple
+User=cuelight
+Group=cuelight
+RuntimeDirectory=mpv
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/mpv --idle=yes --no-terminal --input-ipc-server=/run/mpv/socket --keep-open=yes
+ExecStartPost=/bin/sh -c 'attempt=0; while [ ! -S /run/mpv/socket ]; do attempt=$((attempt + 1)); [ "$attempt" -lt 150 ] || exit 1; sleep 0.1; done'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

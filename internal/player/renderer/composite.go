@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jmill/cable/internal/player/screenshot"
-	"github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/player/screenshot"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 // Composite dispatches a materialized candidate to the adapter that owns its

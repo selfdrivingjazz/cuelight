@@ -26,7 +26,7 @@ func TestRequestMappingAndProblemDecoding(t *testing.T) {
 		}
 		response.Header().Set("Content-Type", "application/problem+json")
 		response.WriteHeader(http.StatusConflict)
-		fmt.Fprint(response, `{"type":"https://cable.test/problems/revoked","title":"Already revoked","status":409,"detail":"token cannot be changed","correlationId":"corr-1","retryable":false}`)
+		fmt.Fprint(response, `{"type":"https://cuelight.test/problems/revoked","title":"Already revoked","status":409,"detail":"token cannot be changed","correlationId":"corr-1","retryable":false}`)
 	}))
 	defer server.Close()
 

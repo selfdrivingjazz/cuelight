@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/protocol"
+	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/jmilldotdev/cuelight/internal/protocol"
 )
 
 // NewOperatorHandler mounts operator screenshot creation and inspection routes.

@@ -8,11 +8,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/jmill/cable/internal/media/localcas"
-	playerclient "github.com/jmill/cable/internal/player/client"
-	"github.com/jmill/cable/internal/player/renderer"
-	playerstate "github.com/jmill/cable/internal/player/state"
-	"github.com/jmill/cable/internal/release"
+	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/jmilldotdev/cuelight/internal/player/renderer"
+	playerstate "github.com/jmilldotdev/cuelight/internal/player/state"
+	"github.com/jmilldotdev/cuelight/internal/release"
 )
 
 const (

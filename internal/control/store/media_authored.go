@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmill/cable/internal/control/media"
-	"github.com/jmill/cable/internal/control/page"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/page"
 )
 
 var _ media.MediaRepository = (*Store)(nil)

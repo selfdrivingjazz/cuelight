@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jmill/cable/internal/control/playlist"
+	"github.com/jmilldotdev/cuelight/internal/control/playlist"
 )
 
 var _ playlist.Repository = (*Store)(nil)

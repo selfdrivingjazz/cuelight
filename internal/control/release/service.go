@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"slices"
 
-	canonical "github.com/jmill/cable/internal/release"
+	canonical "github.com/jmilldotdev/cuelight/internal/release"
 )
 
 const (

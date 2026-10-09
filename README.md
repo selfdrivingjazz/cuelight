@@ -1,8 +1,8 @@
-# Cable
+# Cuelight
 
-Cable is an open-source control plane and player runtime for sending media to physical screens.
+Cuelight is an open-source control plane and player runtime for sending media to physical screens.
 
-The first supported path is a Raspberry Pi-class Linux player controlled through a stable HTTP API. Cable publishes immutable signed releases, assigns them to players, streams or caches content-addressed media, supervises playback, and reports what is actually running.
+The first supported path is a Raspberry Pi-class Linux player controlled through a stable HTTP API. Cuelight publishes immutable signed releases, assigns them to players, streams or caches content-addressed media, supervises playback, and reports what is actually running.
 
 ## Status
 
@@ -55,25 +55,25 @@ profile by name; every entity has its own URL and the top bar shows its breadcru
 Frontend checks, from the repository root:
 
 ```sh
-pnpm --filter @cable/controller-web typecheck
-pnpm --filter @cable/controller-web test
-pnpm --filter @cable/controller-web build
-pnpm --filter @cable/controller-web e2e
+pnpm --filter @cuelight/controller-web typecheck
+pnpm --filter @cuelight/controller-web test
+pnpm --filter @cuelight/controller-web build
+pnpm --filter @cuelight/controller-web e2e
 ```
 
 ## Web pages and phone remote
 
 Web pages are media items (`kind: web`) in the one media library
 (**Library → Media**, `POST /media {kind:"web", url}` or
-`cable media add-web --url URL`). Assign any media by `mediaId`
-(`PUT /nodes/{id}/assignment`, `cable assignment set --media-id`); control
+`cuelight media add-web --url URL`). Assign any media by `mediaId`
+(`PUT /nodes/{id}/assignment`, `cuelight assignment set --media-id`); control
 publishes or reuses the signed release itself (file → `media`, web → `web`,
 playlist → `media-schedule`). A `web` release shows a live website on a desktop
 (Electron) node or a browser node (in an iframe); appliance nodes reject it.
 Playlists may hold web media too; such schedules require the `web` feature.
 Web thumbnails are 1920×1080 viewport captures taken by the controller with
 headless Chromium on create, on `POST /media/{id}/refresh`, and every 6 hours
-(`CABLE_CONTROL_WEB_CAPTURE_BROWSER`, otherwise the first `chromium`/`google-chrome`
+(`CUELIGHT_CONTROL_WEB_CAPTURE_BROWSER`, otherwise the first `chromium`/`google-chrome`
 on `PATH`; without one only node captures are used). A node screenshot taken
 while a screen shows the page replaces the thumbnail when newer.
 
@@ -84,7 +84,7 @@ hold-then-drag, two-finger or strip scrolling, a keyboard, and
 Back/Forward/Reload. On `web` releases the player forwards these events to the
 desktop renderer, which injects them as native input. Get a phone link for a
 node's active session on the screen's **Remote** tab (`/screens/{id}/remote`) or with
-`cable node remote-link NODE_ID`; **Show QR** also draws one in the corner of the output.
+`cuelight node remote-link NODE_ID`; **Show QR** also draws one in the corner of the output.
 
 ## Web apps with app access
 
@@ -113,8 +113,8 @@ example app built on this contract.
 ## Browser and smart-TV nodes
 
 Any modern browser can be a node: control serves the `apps/website-node` build at
-`https://<public origin>/node/` (set `CABLE_CONTROL_WEB_NODE_DIR` to its `dist`;
-the dev stack does this and rebuilds it on `sdj cable-dev apply`).
+`https://<public origin>/node/` (set `CUELIGHT_CONTROL_WEB_NODE_DIR` to its `dist`;
+the dev stack does this and rebuilds it on `sdj cuelight-dev apply`).
 
 1. On the TV (Samsung Tizen/LG webOS browser, Fire TV Silk, or any desktop
    browser), open `https://<public origin>/node/`. In dev:
@@ -142,7 +142,7 @@ The screen wake lock is used where the browser supports it.
 
 Remote input: media keys (Enter/Space, volume, mute) control playback. A plain
 browser can't send input into a cross-origin iframe, so `web` presentations ignore
-remote events unless the Android WebView shell (`window.CableAndroid`) is present.
+remote events unless the Android WebView shell (`window.CuelightAndroid`) is present.
 The build targets ES2019 with ES modules, which means Chromium 61+ or Safari 11+
 (roughly Tizen 5+/2019 and webOS 5+/2020 TVs).
 

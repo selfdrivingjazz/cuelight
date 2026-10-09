@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jmill/cable/internal/control/media"
+	"github.com/jmilldotdev/cuelight/internal/control/media"
 )
 
 type temporaryStore struct{ root string }

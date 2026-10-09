@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { components } from "@cable/api-client";
+import type { components } from "@cuelight/api-client";
 import { MediaThumbnail } from "../media-thumbnail";
 
 type Media = components["schemas"]["Media"];

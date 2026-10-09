@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Asset, components } from "@cable/api-client";
+import type { Asset, components } from "@cuelight/api-client";
 import {
   Button,
   Card,
@@ -19,7 +19,7 @@ import {
   StatusBadge,
   TechnicalDetails,
   useToast,
-} from "@cable/controller-ui";
+} from "@cuelight/controller-ui";
 import { ApiRequestError, api, readApiResult } from "./api";
 import { AuthoringMediaPreview } from "./components/AuthoringMediaPreview";
 import { MediaPicker } from "./components/MediaPicker";

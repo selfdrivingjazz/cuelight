@@ -19,13 +19,13 @@ type Config struct {
 
 func DefaultConfigPath() (string, error) {
 	if root := os.Getenv("XDG_CONFIG_HOME"); root != "" {
-		return filepath.Join(root, "cable", "config.json"), nil
+		return filepath.Join(root, "cuelight", "config.json"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("find home directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "cable", "config.json"), nil
+	return filepath.Join(home, ".config", "cuelight", "config.json"), nil
 }
 
 func LoadConfig(path string) (Config, error) {
