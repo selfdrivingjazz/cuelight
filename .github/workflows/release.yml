@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      rebuild_clients:
+        description: Rebuild every client even if nothing it is built from changed since it last shipped
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,8 +35,18 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      mac: ${{ steps.clients.outputs.mac }}
+      windows: ${{ steps.clients.outputs.windows }}
+      linux: ${{ steps.clients.outputs.linux }}
+      android: ${{ steps.clients.outputs.android }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
       - id: version
         name: tag matches VERSION
         env:
@@ -46,6 +61,15 @@ jobs:
           case "$version" in *-*) prerelease=true ;; *) prerelease=false ;; esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+      # Client builds (the slow, notarized ones) run only when their sources
+      # changed since the release that last shipped them; server-only releases
+      # leave screens on that build, which control keeps reporting as current.
+      - id: clients
+        name: which clients changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.rebuild_clients && 'true' || 'false' }}
+        run: scripts/client-builds.sh >> "$GITHUB_OUTPUT"
 
   go:
     needs: prepare
@@ -81,7 +105,7 @@ jobs:
   # latest-mac.yml listing the arm64 and x64 zips.
   desktop-mac:
     needs: prepare
-    if: ${{ !inputs.skip_mac }}
+    if: ${{ !inputs.skip_mac && needs.prepare.outputs.mac == 'true' }}
     runs-on: macos-15
     steps:
       - name: Apple signing secrets present
@@ -142,6 +166,7 @@ jobs:
 
   desktop-windows:
     needs: prepare
+    if: ${{ needs.prepare.outputs.windows == 'true' }}
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,6 +198,7 @@ jobs:
   # latest-linux-arm64.yml.
   desktop-linux:
     needs: prepare
+    if: ${{ needs.prepare.outputs.linux == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -210,6 +236,7 @@ jobs:
 
   android:
     needs: prepare
+    if: ${{ needs.prepare.outputs.android == 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -242,7 +269,7 @@ jobs:
 
   publish:
     needs: [prepare, go, desktop-mac, desktop-windows, desktop-linux, android]
-    # desktop-mac may be skipped (skip_mac); every other job must succeed.
+    # Client jobs are skipped when their sources did not change; every job that runs must succeed.
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-24.04
     permissions:

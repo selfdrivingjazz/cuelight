@@ -33,7 +33,14 @@ version.
 `.github/workflows/release.yml` (tags `v*`, or manual):
 
 1. **prepare** — the tag (or `version` input) must equal `VERSION` and every
-   package.json (`check-version.mjs --expect`).
+   package.json (`check-version.mjs --expect`). `scripts/client-builds.sh` then decides
+   which client jobs (3–6) run: a client is rebuilt only when something it is built from
+   (the desktop app, the Go packages in its bundled player, `go.mod`/`go.sum`, the
+   lockfile; or `apps/node-android`) changed since the newest release that shipped it.
+   Version-only `package.json` bumps don't count. A server-only release therefore
+   finishes in ~4 minutes and contains no client builds; screens keep the build from
+   the release that last shipped one, and control still reports them as current.
+   `-f rebuild_clients=true` forces every client build.
 2. **go** — `scripts/build-release.sh`: web apps embedded into `cuelight-control`,
    GoReleaser archives and `.deb`s for control, CLI, and the player appliance bundle.
 3. **desktop-mac** (`macos-15`) — sidecars for arm64 and x64, then one electron-builder run
@@ -59,9 +66,9 @@ go run ./cmd/cuelight-release verify --manifest /tmp/cuelight-0.3.0/cuelight-rel
 ```
 
 **Actions minutes.** The repo is private, so macOS minutes bill at 10× and Windows at 2×.
-A release costs roughly one macOS job (signing + notarization, ~15–25 min → 150–250
-billed minutes) plus one Windows job; CI stays on Linux for that reason. Use
-`skip_mac=true` for test releases.
+A release that rebuilds clients costs roughly one macOS job (signing + notarization,
+~15–25 min → 150–250 billed minutes) plus one Windows job; server-only releases skip
+both. CI stays on Linux for that reason. Use `skip_mac=true` for test releases.
 
 ## GitHub secrets
 
