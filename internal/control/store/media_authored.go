@@ -38,7 +38,7 @@ func (s *Store) CreateMedia(ctx context.Context, mutation media.Mutation, value 
 			}
 			_, err := tx.ExecContext(txCtx, `INSERT INTO media
 				(id, asset_id, title, description, artist, tags, artwork_asset_id, fit, loop, muted, volume, orientation, version, created_by, updated_by)
-				VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), ARRAY(SELECT jsonb_array_elements_text($6::jsonb)), NULLIF($7, '') , $8, $9, $10, $11, $12, 1, $13, $13)`,
+				VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), ARRAY(SELECT jsonb_array_elements_text($6::jsonb)), NULLIF($7, '')::uuid, $8, $9, $10, $11, $12, 1, $13, $13)`,
 				value.ID, value.AssetID, value.Title, value.Description, value.Artist, jsonStrings(value.Tags), value.ArtworkAssetID,
 				value.Playback.Fit, value.Playback.Loop, value.Playback.Muted, value.Playback.Volume, value.Playback.Orientation, mutation.ActorID)
 			if err != nil {
@@ -234,7 +234,7 @@ func (s *Store) UpdateMedia(ctx context.Context, mutation media.Mutation, id str
 				n++
 			}
 			if patch.ArtworkAssetID != nil {
-				sets = append(sets, "artwork_asset_id = NULLIF($"+strconv.Itoa(n)+", '')")
+				sets = append(sets, "artwork_asset_id = NULLIF($"+strconv.Itoa(n)+", '')::uuid")
 				args = append(args, *patch.ArtworkAssetID)
 				n++
 			}
