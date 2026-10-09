@@ -35,6 +35,12 @@ export interface OutputHost {
 
 const qrSize = 168;
 const qrMargin = 24;
+/**
+ * How long a closed output's last frame stays up waiting for its replacement.
+ * The player closes the old window before opening the next, so without this
+ * every switch would briefly hide the output and show the desktop.
+ */
+const handoverMs = 3000;
 let sequence = 0;
 /** Process-wide monotonic counter ordering outputs and assignment reports. */
 export function nextSequence(): number { return ++sequence; }
@@ -58,6 +64,8 @@ export class RendererServer {
   private readonly cursor: Point = { x: 0, y: 0 };
   private output?: ManagedOutput;
   private onAir = false;
+  /** Set while a closed output's frame is held for a replacement (see handoverMs). */
+  private handover?: NodeJS.Timeout;
 
   constructor(private readonly delegate: OutputHost, private readonly webPartition: string) {}
 
@@ -73,7 +81,13 @@ export class RendererServer {
     return this.baseUrl;
   }
 
-  hasOutput(): boolean { return Boolean(this.output); }
+  hasOutput(): boolean { return Boolean(this.output) || this.handover !== undefined; }
+
+  private endHandover(): void {
+    if (this.handover === undefined) return;
+    clearTimeout(this.handover);
+    this.handover = undefined;
+  }
 
   /** Moves this membership's views into `window` (its display's output window). */
   attach(window: BrowserWindow): void {
@@ -111,7 +125,8 @@ export class RendererServer {
 
   /** The sidecar stopped: drop its output. */
   closeWindows(): void {
-    const had = Boolean(this.output);
+    const had = this.hasOutput();
+    this.endHandover();
     this.output = undefined;
     this.outputSeq = undefined;
     this.setOnAir(false);
@@ -121,6 +136,7 @@ export class RendererServer {
   }
 
   async close(): Promise<void> {
+    this.endHandover();
     this.output = undefined;
     this.destroyView();
     this.glow.close();
@@ -315,6 +331,8 @@ export class RendererServer {
         remoteURL = remote.qrURL;
       }
       const id = randomUUID();
+      // A replacement arriving during handover takes over the held frame in place.
+      this.endHandover();
       this.output = { id, kind, origin: target.origin };
       const view = this.ensureView(kind);
       this.cursor.x = 0;
@@ -406,9 +424,15 @@ export class RendererServer {
     }
     if (windowID && request.method === "DELETE") {
       if (this.output?.id !== decodeURIComponent(windowID)) return this.problem(response, 404, "renderer window not found");
+      // The window is gone for the player at once; its frame stays up briefly for a replacement.
       this.output = undefined;
-      this.outputSeq = undefined;
-      this.delegate.outputChanged();
+      this.endHandover();
+      this.handover = setTimeout(() => {
+        this.handover = undefined;
+        if (this.output) return;
+        this.outputSeq = undefined;
+        this.delegate.outputChanged();
+      }, handoverMs);
       response.writeHead(204).end();
       return;
     }
