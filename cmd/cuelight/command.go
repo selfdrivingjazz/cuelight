@@ -848,8 +848,7 @@ func runAssignment(ctx context.Context, args []string, options globalOptions, st
 	mediaID := flags.String("media-id", "", "media item to show")
 	playlistID := flags.String("playlist-id", "", "playlist to loop")
 	mode := flags.String("delivery-mode", "", "stream or cache_then_play (defaults from the release)")
-	remoteInput := flags.Bool("remote-input", false, "accept remote input")
-	showQR := flags.Bool("show-qr", false, "show the remote QR code (requires --remote-input)")
+	remote := addRemoteFlags(flags)
 	generation := flags.Int64("expected-generation", -1, "expected assignment generation")
 	ifMatch := flags.String("if-match", "", "current assignment ETag")
 	key := flags.String("idempotency-key", "", "idempotency key")
@@ -858,6 +857,10 @@ func runAssignment(ctx context.Context, args []string, options globalOptions, st
 	}
 	if flags.NArg() != 1 || (*mediaID == "") == (*playlistID == "") || *generation < 0 || *ifMatch == "" || (*mode != "" && *mode != "stream" && *mode != "cache_then_play") {
 		return usageError(streams.stderr, "usage: cuelight assignment set (--media-id ID|--playlist-id ID) --expected-generation N --if-match ETAG [flags] NODE_ID")
+	}
+	remoteInput, showQR, err := remote.values()
+	if err != nil {
+		return usageError(streams.stderr, err.Error())
 	}
 	api, code := configuredClient(options, streams)
 	if code != exitOK {
@@ -872,8 +875,8 @@ func runAssignment(ctx context.Context, args []string, options globalOptions, st
 		PlaylistID:         *playlistID,
 		DeliveryMode:       *mode,
 		ExpectedGeneration: *generation,
-		RemoteInput:        *remoteInput,
-		ShowQR:             *showQR,
+		RemoteInput:        remoteInput,
+		ShowQR:             showQR,
 	})
 	if err != nil {
 		return renderAPIError(streams, options.json, err)
@@ -948,7 +951,7 @@ func runEvents(ctx context.Context, args []string, options globalOptions, stream
 }
 
 func runPlay(ctx context.Context, args []string, options globalOptions, streams commandIO) int {
-	const usage = "usage: cuelight play [--file FILE|--asset ASSET_ID|--media MEDIA_ID|--url URL] NODE_ID"
+	const usage = "usage: cuelight play [--file FILE|--asset ASSET_ID|--media MEDIA_ID|--url URL] [--remote-input|--show-qr|--no-remote] NODE_ID"
 	flags := commandFlags("play")
 	filePath := flags.String("file", "", "media file to upload")
 	assetID := flags.String("asset", "", "existing asset ID")
@@ -961,6 +964,7 @@ func runPlay(ctx context.Context, args []string, options globalOptions, streams 
 	interval := flags.Duration("interval", 250*time.Millisecond, "poll interval")
 	noWait := flags.Bool("no-wait", false, "do not wait for convergence")
 	key := flags.String("idempotency-key", "", "idempotency key (generated when omitted)")
+	remote := addRemoteFlags(flags)
 	if code := parseCommand(flags, args, streams); code != exitOK {
 		return code
 	}
@@ -975,6 +979,10 @@ func runPlay(ctx context.Context, args []string, options globalOptions, streams 
 	}
 	if *mode != "" && *mode != "stream" && *mode != "cache_then_play" {
 		return usageError(streams.stderr, "play --delivery-mode must be stream or cache_then_play")
+	}
+	remoteInput, showQR, err := remote.values()
+	if err != nil {
+		return usageError(streams.stderr, err.Error())
 	}
 	resolvedKey, err := mutationKey(*key)
 	if err != nil {
@@ -1042,10 +1050,12 @@ func runPlay(ctx context.Context, args []string, options globalOptions, streams 
 	if target == "" {
 		return renderFailure(streams, options.json, exitAPI, errors.New("media response omitted an id"))
 	}
-	return convergePlay(ctx, api, options, streams, nodeID, target, *mode, resolvedKey, *timeout, *interval, *noWait)
+	return convergePlay(ctx, api, options, streams, nodeID, operator.AssignmentInput{MediaID: target, DeliveryMode: *mode, RemoteInput: remoteInput, ShowQR: showQR}, resolvedKey, *timeout, *interval, *noWait)
 }
 
-func convergePlay(ctx context.Context, api *operator.Client, options globalOptions, streams commandIO, nodeID, mediaID, mode, key string, timeout, interval time.Duration, noWait bool) int {
+// convergePlay assigns input over the node's current generation and waits
+// for the node to converge.
+func convergePlay(ctx context.Context, api *operator.Client, options globalOptions, streams commandIO, nodeID string, input operator.AssignmentInput, key string, timeout, interval time.Duration, noWait bool) int {
 	current, err := api.GetAssignment(ctx, nodeID)
 	if err != nil {
 		var problem *operator.Problem
@@ -1057,9 +1067,8 @@ func convergePlay(ctx context.Context, api *operator.Client, options globalOptio
 	if current.DesiredGeneration > 0 {
 		expected = current.DesiredGeneration
 	}
-	assignment, err := api.PutAssignment(ctx, nodeID, fmt.Sprintf("\"generation:%d\"", expected), key, operator.AssignmentInput{
-		MediaID: mediaID, DeliveryMode: mode, ExpectedGeneration: expected,
-	})
+	input.ExpectedGeneration = expected
+	assignment, err := api.PutAssignment(ctx, nodeID, fmt.Sprintf("\"generation:%d\"", expected), key, input)
 	if err != nil {
 		return renderAPIError(streams, options.json, err)
 	}
@@ -1287,6 +1296,49 @@ func commandFlags(name string) *flag.FlagSet {
 	return flags
 }
 
+// remoteFlags are a command's phone remote flags. Flags left unset keep the
+// screen's current remote settings.
+type remoteFlags struct {
+	flags                         *flag.FlagSet
+	remoteInput, showQR, noRemote *bool
+}
+
+func addRemoteFlags(flags *flag.FlagSet) remoteFlags {
+	return remoteFlags{
+		flags:       flags,
+		remoteInput: flags.Bool("remote-input", false, "accept phone remote input (default: keep the screen's setting)"),
+		showQR:      flags.Bool("show-qr", false, "show the phone remote QR code; implies --remote-input (default: keep the screen's setting)"),
+		noRemote:    flags.Bool("no-remote", false, "turn phone remote input and the QR code off"),
+	}
+}
+
+// values returns the assignment's remote fields; nil keeps the screen's value.
+func (r remoteFlags) values() (remoteInput, showQR *bool, err error) {
+	set := map[string]bool{}
+	r.flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set["remote-input"] {
+		remoteInput = r.remoteInput
+	}
+	if set["show-qr"] {
+		showQR = r.showQR
+	}
+	if set["no-remote"] && *r.noRemote {
+		if (remoteInput != nil && *remoteInput) || (showQR != nil && *showQR) {
+			return nil, nil, errors.New("--no-remote conflicts with --remote-input and --show-qr")
+		}
+		off := false
+		return &off, &off, nil
+	}
+	if showQR != nil && *showQR {
+		if remoteInput != nil && !*remoteInput {
+			return nil, nil, errors.New("--show-qr requires remote input")
+		}
+		on := true
+		remoteInput = &on
+	}
+	return remoteInput, showQR, nil
+}
+
 // parseCommand parses subcommand flags. -h/--help prints the flags to stdout
 // and returns exitHelp, so callers stop before loading config or calling the API.
 func parseCommand(flags *flag.FlagSet, args []string, streams commandIO) int {
@@ -1501,7 +1553,7 @@ var commandUsage = map[string][]string{
 	"assignment": {"cuelight assignment set (--media-id ID|--playlist-id ID) --expected-generation N --if-match ETAG [flags] NODE_ID"},
 	"status":     {"cuelight status NODE_ID"},
 	"events":     {"cuelight events [--cursor CURSOR] NODE_ID"},
-	"play":       {"cuelight play [--file FILE|--asset ASSET_ID|--media MEDIA_ID|--url URL] [--timeout DURATION] NODE_ID"},
+	"play":       {"cuelight play [--file FILE|--asset ASSET_ID|--media MEDIA_ID|--url URL] [--remote-input|--show-qr|--no-remote] [--timeout DURATION] NODE_ID"},
 	"wait":       {"cuelight wait [--generation N|--condition CONDITION] [--timeout DURATION] NODE_ID"},
 	"fixture":    {"cuelight fixture [--root DIR] <list|path NAME>"},
 }

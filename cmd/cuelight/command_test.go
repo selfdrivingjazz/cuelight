@@ -40,7 +40,7 @@ func TestAssignmentCommandMapsRequest(t *testing.T) {
 		if err := json.Unmarshal(body, &input); err != nil {
 			t.Error(err)
 		}
-		if input.MediaID != "media-1" || input.PlaylistID != "" || input.ExpectedGeneration != 4 || input.DeliveryMode != "cache_then_play" || !input.RemoteInput {
+		if input.MediaID != "media-1" || input.PlaylistID != "" || input.ExpectedGeneration != 4 || input.DeliveryMode != "cache_then_play" || input.RemoteInput == nil || !*input.RemoteInput || input.ShowQR != nil {
 			t.Errorf("input = %#v", input)
 		}
 		response.Header().Set("Content-Type", "application/json")
@@ -426,5 +426,52 @@ func TestHelpNeedsNoConfig(t *testing.T) {
 	run(context.Background(), []string{"--config", missing, "playlist", "create", "--help"}, commandIO{stdout: &stdout, stderr: io.Discard})
 	if !strings.Contains(stdout.String(), "-item") || !strings.Contains(stdout.String(), "-idempotency-key") {
 		t.Fatalf("playlist create help = %q", stdout.String())
+	}
+}
+
+func TestRemoteFlagsKeepScreenSettingsUnlessGiven(t *testing.T) {
+	var body map[string]any
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if request.Method == http.MethodGet {
+			fmt.Fprint(response, `{"id":"a","nodeId":"node-1","releaseId":"r","releaseDigest":"d","deliveryMode":"stream","expectedGeneration":2,"desiredGeneration":3,"remoteInput":true,"showQr":true}`)
+			return
+		}
+		body = nil
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		response.WriteHeader(http.StatusCreated)
+		fmt.Fprint(response, `{"mediaId":"media-1","releaseId":"r","releaseDigest":"d","deliveryMode":"stream","expectedGeneration":3,"desiredGeneration":4}`)
+	}))
+	defer server.Close()
+
+	assign := []string{"assignment", "set", "--media-id", "media-1", "--expected-generation", "3", "--if-match", `"generation:3"`, "--idempotency-key", "0123456789abcdef"}
+	play := []string{"play", "--media", "media-1", "--no-wait", "--idempotency-key", "0123456789abcdef"}
+	for _, test := range []struct {
+		name string
+		args []string
+		want map[string]any
+	}{
+		{name: "play keeps", args: play, want: map[string]any{}},
+		{name: "play show-qr", args: append(append([]string{}, play...), "--show-qr"), want: map[string]any{"remoteInput": true, "showQr": true}},
+		{name: "play no-remote", args: append(append([]string{}, play...), "--no-remote"), want: map[string]any{"remoteInput": false, "showQr": false}},
+		{name: "assignment keeps", args: assign, want: map[string]any{}},
+		{name: "assignment no-remote", args: append(append([]string{}, assign...), "--no-remote"), want: map[string]any{"remoteInput": false, "showQr": false}},
+	} {
+		result := executeCLI(t, server, nil, append(test.args, "node-1")...)
+		if result.code != exitOK {
+			t.Fatalf("%s: code = %d, stderr = %s", test.name, result.code, result.stderr)
+		}
+		for _, field := range []string{"remoteInput", "showQr"} {
+			got, sent := body[field]
+			want, expected := test.want[field]
+			if sent != expected || got != want {
+				t.Errorf("%s: %s = %v (sent %v), want %v (sent %v)", test.name, field, got, sent, want, expected)
+			}
+		}
+	}
+	if result := executeCLI(t, server, nil, append(play, "--no-remote", "--show-qr", "node-1")...); result.code != exitUsage {
+		t.Fatalf("conflicting remote flags: code = %d", result.code)
 	}
 }
