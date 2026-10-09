@@ -1,6 +1,6 @@
 {
   "name": "@cuelight/node-desktop",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Cross-platform Cuelight player node with bundled Chromium",
   "author": "Cuelight contributors",
