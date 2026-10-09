@@ -30,7 +30,8 @@ mode, nothing published) to produce:
 
 Sign them with `go run ./cmd/cuelight-release manifest --version <v> --dir OUTDIR --out
 OUTDIR/cuelight-release.json --key-file <release key>` and check with `cuelight-release
-verify --manifest OUTDIR/cuelight-release.json --dir OUTDIR`.
+verify --manifest OUTDIR/cuelight-release.json --dir OUTDIR`. Published releases are built,
+signed, and uploaded by `.github/workflows/release.yml`; see [RELEASING.md](RELEASING.md).
 
 ## Install a server
 
