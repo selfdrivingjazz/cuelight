@@ -12,8 +12,13 @@ import (
 	"testing"
 )
 
+// newAPIServer serves handler at /api/v1, where a bare server origin points.
+func newAPIServer(handler http.Handler) *httptest.Server {
+	return httptest.NewServer(http.StripPrefix("/api/v1", handler))
+}
+
 func TestRequestMappingAndProblemDecoding(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost || request.URL.EscapedPath() != "/admin-tokens/token%2Fid/revoke" {
 			http.Error(response, "wrong request", http.StatusInternalServerError)
 			return
@@ -103,7 +108,7 @@ func TestClientBlocksHTTPSDowngradeRedirect(t *testing.T) {
 func TestUploadAssetStreamsContentAcrossWorkflow(t *testing.T) {
 	const content = "a streamed media payload"
 	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		requests++
 		switch requests {
 		case 1:

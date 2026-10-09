@@ -77,6 +77,10 @@ func New(baseURL, token string, httpClient *http.Client, provided ...Option) (*C
 		}
 		return nil
 	}
+	// A bare origin (what people and agents naturally type) means the API on that server.
+	if strings.Trim(parsed.Path, "/") == "" {
+		parsed.Path = "/api/v1"
+	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/"
 	parsed.RawPath = ""
 	return &Client{baseURL: parsed, token: token, httpClient: &configuredHTTPClient}, nil

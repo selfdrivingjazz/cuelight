@@ -16,8 +16,13 @@ import (
 	operator "github.com/jmilldotdev/cuelight/internal/client"
 )
 
+// newAPIServer serves handler at /api/v1, where a bare --server origin points.
+func newAPIServer(handler http.Handler) *httptest.Server {
+	return httptest.NewServer(http.StripPrefix("/api/v1", handler))
+}
+
 func TestAssignmentCommandMapsRequest(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPut || request.URL.Path != "/nodes/node-1/assignment" {
 			t.Errorf("request = %s %s", request.Method, request.URL.Path)
 		}
@@ -63,7 +68,7 @@ func TestAssignmentCommandMapsRequest(t *testing.T) {
 }
 
 func TestNodeListJSONAndHumanOutput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet || request.URL.Path != "/nodes" {
 			t.Errorf("request = %s %s", request.Method, request.URL.Path)
 		}
@@ -92,7 +97,7 @@ func TestNodeListJSONAndHumanOutput(t *testing.T) {
 }
 
 func TestProblemRenderingHasStableExitCategories(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/problem+json")
 		response.WriteHeader(http.StatusNotFound)
 		fmt.Fprint(response, `{"type":"https://cuelight.test/problems/not-found","title":"Node not found","status":404,"detail":"no such node","correlationId":"corr-42"}`)
@@ -117,7 +122,7 @@ func TestProblemRenderingHasStableExitCategories(t *testing.T) {
 }
 
 func TestSecretsPrintOnlyFromCreationCommands(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/admin-tokens":
@@ -184,7 +189,7 @@ func TestLoginWritesPrivateConfigWithoutEchoingToken(t *testing.T) {
 }
 
 func TestTokenlessCLISendsNoAuthorization(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if _, present := request.Header["Authorization"]; present {
 			t.Errorf("token-less request carried Authorization: %q", request.Header.Get("Authorization"))
 		}
@@ -220,7 +225,7 @@ func TestMediaUploadCommandStreamsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	step := 0
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		step++
 		switch step {
 		case 1:
