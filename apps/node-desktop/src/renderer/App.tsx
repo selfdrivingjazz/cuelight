@@ -1,8 +1,9 @@
 import * as React from "react";
 import type { DesktopPreferences, DesktopStatus, DisplayInfo, ManualJoinInput, NetworkStatus } from "../shared/contracts";
+import { updateLabel } from "../shared/update-label";
 
 const EMPTY_STATUS: DesktopStatus = {
-  preferences: { autoStart: false, fullScreen: true, presentationMode: "automatic" },
+  preferences: { launchAtLogin: false, fullScreen: true, presentationMode: "automatic" },
   networks: [],
   displays: [],
   update: { appVersion: __CUELIGHT_VERSION__, state: "idle" },
@@ -59,7 +60,7 @@ export function App() {
         <div className="settings">
           <p className="eyebrow">PREFERENCES</p>
           <label className="check"><input type="checkbox" checked={status.preferences.fullScreen} onChange={(event) => updatePreferences({ fullScreen: event.currentTarget.checked })} />Full-screen output</label>
-          <label className="check"><input type="checkbox" checked={status.preferences.autoStart} onChange={(event) => updatePreferences({ autoStart: event.currentTarget.checked })} />Open at login and start every network</label>
+          <label className="check"><input type="checkbox" checked={status.preferences.launchAtLogin} onChange={(event) => updatePreferences({ launchAtLogin: event.currentTarget.checked })} />Open Cuelight at login (started networks resume)</label>
           <label>Presentation mode<select value={status.preferences.presentationMode} onChange={(event) => updatePreferences({ presentationMode: event.currentTarget.value as DesktopPreferences["presentationMode"] })}><option value="automatic">Automatic</option><option value="media">Media</option><option value="media-schedule">Media schedule</option><option value="web">Web</option></select></label>
           <div className="actions"><button disabled={onAir.length === 0} onClick={() => void perform("Showing", () => window.cuelightNode.showOutput())}>Show output</button></div>
         </div>
@@ -71,10 +72,10 @@ export function App() {
 }
 
 function UpdateChip({ status }: { status: DesktopStatus }) {
-  const update = status.update;
-  if (update.state === "idle") return null;
-  const label = update.state === "staged" ? `update ${update.version} ready` : update.state === "error" ? "update failed" : `update ${update.version ?? ""} ${update.state}${update.percent === undefined ? "" : ` ${update.percent}%`}`;
-  return <span className={`phase ${update.state === "error" ? "phase-error" : "phase-running"}`} title={update.detail}>{label}</span>;
+  // Main re-sends status every second during the restart countdown.
+  const label = updateLabel(status.update);
+  if (!label) return null;
+  return <span className={`phase ${status.update.state === "error" ? "phase-error" : "phase-running"}`} title={status.update.detail}>{label}</span>;
 }
 
 function PendingJoinCard({ status, busy, perform }: { status: DesktopStatus; busy?: string; perform: Perform }) {

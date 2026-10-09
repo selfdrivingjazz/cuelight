@@ -42,14 +42,14 @@ export class NetworkManager {
   private pendingJoin?: { raw: string; link: JoinLink };
 
   constructor(private readonly layout: Layout, private readonly onChange: (status: DesktopStatus) => void, private readonly showControls: () => void) {
-    this.updater = new DesktopUpdater(() => this.emit(), () => this.arbitration.onAir.size === 0, async () => {
+    this.updater = new DesktopUpdater(() => this.emit(), async () => {
       const running = [...this.runtimes.entries()].filter(([, runtime]) => runtime.sidecar.running).map(([id]) => id);
       await Promise.all(running.map((id) => this.runtimes.get(id)!.sidecar.stop()));
       // Installers relaunch the new version immediately; it must be able to take the lock.
       app.releaseSingleInstanceLock();
       return () => {
         app.requestSingleInstanceLock();
-        for (const id of running) void this.start(id).catch((error: unknown) => console.error(`restart ${id} after failed update:`, error));
+        for (const id of running) void this.launch(id).catch((error: unknown) => console.error(`restart ${id} after failed update:`, error));
       };
     });
   }
@@ -83,6 +83,7 @@ export class NetworkManager {
         displayId: runtime?.displayId,
         pinned: membership.pinned === true,
         node: runtime?.node,
+        enabled: membership.enabled,
         phase: runtime ? runtime.sidecar.phase : "error",
         playerPid: runtime?.sidecar.pid,
         lastError: runtime?.node ? runtime.sidecar.lastError : "node identity is missing; remove and re-join this network",
@@ -94,7 +95,7 @@ export class NetworkManager {
     });
     const pending = this.pendingJoin;
     return {
-      preferences: { autoStart: this.settings.autoStart, fullScreen: this.settings.fullScreen, presentationMode: this.settings.presentationMode },
+      preferences: { launchAtLogin: this.settings.launchAtLogin, fullScreen: this.settings.fullScreen, presentationMode: this.settings.presentationMode },
       networks,
       displays,
       update: this.updater.status(),
@@ -185,33 +186,26 @@ export class NetworkManager {
     return this.status();
   }
 
+  /** Starts a network and records it as enabled, so it also starts at every launch. */
   async start(id: string): Promise<DesktopStatus> {
-    const runtime = this.runtimes.get(id);
-    if (!runtime?.node) throw new Error("this network has no node identity; remove and re-join it");
-    if (runtime.sidecar.running) return this.status();
-    const rendererUrl = await runtime.renderer.start();
-    await runtime.sidecar.start({
-      node: runtime.node,
-      stateDirectory: this.layout.state(id),
-      logPath: this.layout.logFile(id),
-      rendererUrl,
-      rendererToken: runtime.renderer.token,
-      presentationMode: this.settings.presentationMode,
-    });
-    this.rearbitrate();
+    await this.setEnabled(id, true);
+    await this.launch(id);
     return this.status();
   }
 
+  /** Stops a network and records it as disabled. */
   async stop(id: string): Promise<DesktopStatus> {
+    await this.setEnabled(id, false);
     await this.runtimes.get(id)?.sidecar.stop();
     this.rearbitrate();
     return this.status();
   }
 
-  async startAll(): Promise<string[]> {
+  /** Launch-time start of every enabled network; returns per-network failures. */
+  async startEnabled(): Promise<string[]> {
     const failures: string[] = [];
-    for (const membership of this.settings.networks) {
-      try { await this.start(membership.id); }
+    for (const membership of this.settings.networks.filter((candidate) => candidate.enabled)) {
+      try { await this.launch(membership.id); }
       catch (error) { failures.push(`${membership.name}: ${error instanceof Error ? error.message : String(error)}`); }
     }
     return failures;
@@ -229,12 +223,12 @@ export class NetworkManager {
     const restart = next.presentationMode !== this.settings.presentationMode
       ? [...this.runtimes.entries()].filter(([, runtime]) => runtime.sidecar.running).map(([id]) => id)
       : [];
-    for (const id of restart) await this.stop(id);
+    for (const id of restart) await this.runtimes.get(id)?.sidecar.stop();
     Object.assign(this.settings, next);
     this.windows.setFullScreen(next.fullScreen);
     await this.layout.saveSettings(this.settings);
     await this.updateLoginItem();
-    for (const id of restart) await this.start(id);
+    for (const id of restart) await this.launch(id);
     this.emit();
     return this.status();
   }
@@ -270,11 +264,34 @@ export class NetworkManager {
       await rm(this.layout.networkRoot(id), { recursive: true, force: true });
       throw error;
     }
-    const membership: Membership = { id, name: request.name, controlUrl: request.controlUrl, displayBinding: "shared" };
+    const membership: Membership = { id, name: request.name, controlUrl: request.controlUrl, displayBinding: "shared", enabled: true };
     this.settings.networks.push(membership);
     await this.layout.saveSettings(this.settings);
     await this.addRuntime(membership, node);
-    await this.start(id);
+    await this.launch(id);
+  }
+
+  private async setEnabled(id: string, enabled: boolean): Promise<void> {
+    const membership = this.membership(id);
+    if (membership.enabled === enabled) return;
+    membership.enabled = enabled;
+    await this.layout.saveSettings(this.settings);
+  }
+
+  private async launch(id: string): Promise<void> {
+    const runtime = this.runtimes.get(id);
+    if (!runtime?.node) throw new Error("this network has no node identity; remove and re-join it");
+    if (runtime.sidecar.running) return;
+    const rendererUrl = await runtime.renderer.start();
+    await runtime.sidecar.start({
+      node: runtime.node,
+      stateDirectory: this.layout.state(id),
+      logPath: this.layout.logFile(id),
+      rendererUrl,
+      rendererToken: runtime.renderer.token,
+      presentationMode: this.settings.presentationMode,
+    });
+    this.rearbitrate();
   }
 
   private async addRuntime(membership: Membership, node?: ProvisionedNode): Promise<void> {
@@ -331,7 +348,6 @@ export class NetworkManager {
       outputSeq: runtime.renderer.outputSeq,
     })));
     this.windows.apply(running.map((runtime) => ({ id: runtime.membership.id, displayId: runtime.displayId, renderer: runtime.renderer })), this.arbitration);
-    this.updater.maybeInstall();
     this.emit();
   }
 
@@ -348,13 +364,13 @@ export class NetworkManager {
   /** Launch at login is one entry for the whole app, whatever the number of networks. */
   private async updateLoginItem(): Promise<void> {
     if (process.platform === "darwin" || process.platform === "win32") {
-      app.setLoginItemSettings({ openAtLogin: this.settings.autoStart });
+      app.setLoginItemSettings({ openAtLogin: this.settings.launchAtLogin });
       return;
     }
     if (process.platform !== "linux") return;
     const autostartDirectory = path.join(app.getPath("appData"), "autostart");
     const desktopFile = path.join(autostartDirectory, "cuelight-node.desktop");
-    if (!this.settings.autoStart) {
+    if (!this.settings.launchAtLogin) {
       try { await unlink(desktopFile); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
       return;

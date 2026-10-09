@@ -339,6 +339,38 @@ func TestControllerLossUsesBoundedReconnectBackoff(t *testing.T) {
 	}
 }
 
+func TestUnassignedNodeStaysConnectedWithoutFlapping(t *testing.T) {
+	h := newHarness(t, []byte("unassigned"), DeliveryStream)
+	h.controller.assignmentErr = &playerclient.ProblemError{StatusError: playerclient.StatusError{Method: "GET", Path: "/player/assignment", StatusCode: 404}}
+	ctx, cancel := context.WithCancel(context.Background())
+	h.clock.onSleep = func() {
+		if len(h.clock.sleeps) == 3 {
+			cancel()
+		}
+	}
+	if err := h.runtime.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v", err)
+	}
+	if !h.runtime.Snapshot().ControllerAvailable {
+		t.Fatal("controller reported unavailable for an unassigned node")
+	}
+	if h.controller.capabilityPuts != 1 {
+		t.Fatalf("capability puts = %d, want 1", h.controller.capabilityPuts)
+	}
+	for _, sleep := range h.clock.sleeps {
+		if sleep != h.config.ReconnectMinimum {
+			t.Fatalf("sleeps = %v", h.clock.sleeps)
+		}
+	}
+	for _, batch := range h.controller.events {
+		for _, event := range batch.Events {
+			if event.Type == "controller_lost" {
+				t.Fatalf("events = %+v", h.controller.events)
+			}
+		}
+	}
+}
+
 func TestObservedGenerationAndOutputBounds(t *testing.T) {
 	h := newHarness(t, []byte("bounds"), DeliveryStream)
 	for range h.config.MaxEvents + 5 {
@@ -438,6 +470,8 @@ type fakeController struct {
 	fetches, downloads int
 	artifacts          map[string][]byte
 	capabilityErr      error
+	capabilityPuts     int
+	assignmentErr      error
 	reports            []playerclient.NodeReport
 	events             []playerclient.EventBatch
 	remoteCreates      int
@@ -452,9 +486,13 @@ func (c *fakeController) PollRemoteEvents(context.Context, string, int64, time.D
 }
 
 func (c *fakeController) PutCapabilities(context.Context, playerclient.CapabilityReport, string) error {
+	c.capabilityPuts++
 	return c.capabilityErr
 }
 func (c *fakeController) GetAssignment(context.Context, string, time.Duration) (playerclient.AssignmentResult, error) {
+	if c.assignmentErr != nil {
+		return playerclient.AssignmentResult{}, c.assignmentErr
+	}
 	return playerclient.AssignmentResult{NotModified: true}, nil
 }
 func (c *fakeController) FetchRelease(context.Context, string) (playerclient.ReleaseEnvelope, error) {

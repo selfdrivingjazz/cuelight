@@ -7,6 +7,9 @@ import path from "node:path";
 import type { UpdateStatus } from "../shared/contracts";
 import { compareVersions } from "../shared/version";
 
+/** Time between a staged update and the restart that installs it, shown as a countdown. */
+const installGraceMs = 10_000;
+
 /**
  * Applies app updates handed over by a sidecar (`POST /v1/software-update`).
  * The sidecar already downloaded and verified the electron-updater feed
@@ -20,25 +23,25 @@ export class DesktopUpdater {
   private staged?: string;
   private feed?: { server: Server; directory: string; url: string };
   private rollback?: () => void;
+  private countdown?: NodeJS.Timeout;
 
   /**
    * `prepareInstall` runs right before the installer takes over (stop sidecars,
    * release the single-instance lock so the relaunched app can start) and
    * returns how to undo that if the installer fails.
    */
-  constructor(private readonly onChange: () => void, private readonly nothingOnAir: () => boolean, private readonly prepareInstall: () => Promise<() => void>) {
+  constructor(private readonly onChange: () => void, private readonly prepareInstall: () => Promise<() => void>) {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowDowngrade = false;
     // The feed is local disk; differential (Range) downloads would only add failure modes.
     autoUpdater.disableDifferentialDownload = true;
     autoUpdater.on("checking-for-update", () => this.set({ state: "checking" }));
-    autoUpdater.on("update-not-available", (info: UpdateInfo) => this.set({ state: this.staged ? "staged" : "idle", version: this.staged, detail: `feed offers ${info.version}, nothing newer than ${app.getVersion()}` }));
+    autoUpdater.on("update-not-available", (info: UpdateInfo) => this.set({ state: "idle", version: undefined, detail: `feed offers ${info.version}, nothing newer than ${app.getVersion()}` }));
     autoUpdater.on("download-progress", (progress: { percent: number }) => this.set({ state: "downloading", percent: Math.round(progress.percent) }));
     autoUpdater.on("update-downloaded", (info: UpdateInfo) => {
       this.staged = info.version;
-      this.set({ state: "staged", version: info.version, percent: undefined, detail: "installs when nothing is on air, or at quit" });
-      this.maybeInstall();
+      this.scheduleInstall(info.version);
     });
     autoUpdater.on("error", (error: Error) => {
       const rollback = this.rollback;
@@ -46,6 +49,7 @@ export class DesktopUpdater {
         // The installer failed after we stopped everything: resume, and do not retry this download.
         this.rollback = undefined;
         this.staged = undefined;
+        this.countdown = undefined;
         rollback();
       }
       this.set({ state: "error", detail: error.message });
@@ -57,8 +61,9 @@ export class DesktopUpdater {
   /** Queues `version` from `feedDir`; returns an error message when the request is malformed. */
   request(version: string, feedDir: string): string | undefined {
     const floor = [app.getVersion(), this.staged, this.requested].filter((value): value is string => Boolean(value));
-    if (floor.some((current) => compareVersions(version, current) <= 0)) {
-      // Not an error for the sidecar: it is simply not newer than what runs or is queued.
+    // Not an error for the sidecar: it is simply not newer than what runs or is queued,
+    // or a restart is already under way (the restarted app re-evaluates the target).
+    if (this.countdown || floor.some((current) => compareVersions(version, current) <= 0)) {
       return undefined;
     }
     this.requested = version;
@@ -67,20 +72,34 @@ export class DesktopUpdater {
     return undefined;
   }
 
-  /** Installs a staged update once no membership is on air. */
-  maybeInstall(): void {
-    if (!this.staged || this.state.state === "installing" || !this.nothingOnAir()) return;
-    this.set({ state: "installing", detail: undefined });
-    void this.prepareInstall().then((rollback) => {
-      this.rollback = rollback;
-      autoUpdater.quitAndInstall(true, true);
-    });
+  /**
+   * An operator targeted this version, so a staged update installs after a
+   * short visible countdown whether or not something is on air; the restart
+   * takes a few seconds and enabled networks start again in the new version.
+   */
+  private scheduleInstall(version: string): void {
+    if (this.countdown) return;
+    const installAt = Date.now() + installGraceMs;
+    // Re-emit every second so the setup window and tray can show the countdown.
+    this.countdown = setInterval(() => {
+      if (Date.now() < installAt) return this.onChange();
+      clearInterval(this.countdown);
+      void this.prepareInstall().then((rollback) => {
+        this.rollback = rollback;
+        autoUpdater.quitAndInstall(true, true);
+      });
+    }, 1_000);
+    this.set({ state: "installing", version, percent: undefined, installAt, detail: undefined });
   }
 
   async close(): Promise<void> {
+    clearInterval(this.countdown);
     const feed = this.feed;
     this.feed = undefined;
-    if (feed) await new Promise<void>((resolve) => feed.server.close(() => resolve()));
+    if (!feed) return;
+    // Never let a lingering updater connection hold up quitting.
+    feed.server.closeAllConnections();
+    await new Promise<void>((resolve) => feed.server.close(() => resolve()));
   }
 
   private async check(version: string, feedDir: string): Promise<void> {

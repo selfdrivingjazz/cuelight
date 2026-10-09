@@ -12,11 +12,14 @@ export const membershipSchema = z.object({
   controlUrl: z.string().url(),
   displayBinding: displayBindingSchema.default("shared"),
   pinned: z.boolean().optional(),
+  /** Desired state: the app starts enabled networks at launch (including after an update restart). */
+  enabled: z.boolean().default(true),
 });
 export type Membership = z.infer<typeof membershipSchema>;
 
 export const preferencesSchema = z.object({
-  autoStart: z.boolean().default(false),
+  /** Open the app at login; it then starts every enabled network. */
+  launchAtLogin: z.boolean().default(false),
   fullScreen: z.boolean().default(true),
   presentationMode: z.enum(["automatic", "media", "media-schedule", "web"]).default("automatic"),
 });
@@ -69,6 +72,7 @@ export interface NetworkStatus {
   /** Display the binding currently resolves to (primary for `shared` or a missing display). */
   displayId?: number;
   pinned: boolean;
+  enabled: boolean;
   node?: ProvisionedNode;
   phase: NetworkPhase;
   playerPid?: number;
@@ -92,9 +96,11 @@ export interface DisplayInfo {
 
 export interface UpdateStatus {
   appVersion: string;
-  state: "idle" | "checking" | "downloading" | "staged" | "installing" | "error";
+  state: "idle" | "checking" | "downloading" | "installing" | "error";
   version?: string;
   percent?: number;
+  /** While `installing`: epoch ms when the app restarts into `version`. */
+  installAt?: number;
   detail?: string;
 }
 

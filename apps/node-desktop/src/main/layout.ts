@@ -15,12 +15,24 @@ export class Layout {
   logFile(id: string): string { return path.join(this.logs(id), "player.log"); }
 
   async loadSettings(): Promise<SettingsFile> {
-    const stored = await readJSON<Record<string, unknown>>(this.settingsPath());
-    if (stored && Array.isArray(stored.networks)) return settingsFileSchema.parse(stored);
-    // Settings without a membership list predate multi-network: migrate once.
-    const migrated = await this.migrateLegacy();
-    const settings = settingsFileSchema.parse({ ...(stored ?? {}), networks: migrated ? [migrated] : [] });
-    await this.saveSettings(settings);
+    const stored = await readJSON<Record<string, unknown>>(this.settingsPath()) ?? {};
+    let migrated = false;
+    if (!Array.isArray(stored.networks)) {
+      // Settings without a membership list predate multi-network: migrate once.
+      const legacy = await this.migrateLegacy();
+      stored.networks = legacy ? [legacy] : [];
+      migrated = true;
+    }
+    if (migrated || "autoStart" in stored) {
+      // `autoStart` (open at login + start every network) became launchAtLogin plus per-network `enabled`.
+      const autoStart = stored.autoStart === true;
+      stored.launchAtLogin ??= autoStart;
+      for (const network of stored.networks as Record<string, unknown>[]) if (network && typeof network === "object") network.enabled ??= autoStart;
+      delete stored.autoStart;
+      migrated = true;
+    }
+    const settings = settingsFileSchema.parse(stored);
+    if (migrated) await this.saveSettings(settings);
     return settings;
   }
 
@@ -34,7 +46,7 @@ export class Layout {
    * `networks/default/` and rewrites node.json paths. Returns the resulting
    * membership, or undefined when there was no provisioned legacy identity.
    */
-  private async migrateLegacy(): Promise<Membership | undefined> {
+  private async migrateLegacy(): Promise<Omit<Membership, "enabled"> | undefined> {
     const legacy = { identity: path.join(this.root, "identity"), state: path.join(this.root, "state"), logs: path.join(this.root, "logs") };
     const id = "default";
     const nodePath = path.join(this.identity(id), "node.json");

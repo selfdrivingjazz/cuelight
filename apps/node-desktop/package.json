@@ -42,6 +42,7 @@
     "productName": "Cuelight",
     "executableName": "Cuelight",
     "artifactName": "Cuelight-${version}-${os}-${arch}.${ext}",
+    "detectUpdateChannel": false,
     "asar": true,
     "files": [
       "package.json",

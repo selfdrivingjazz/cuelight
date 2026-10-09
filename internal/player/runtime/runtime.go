@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -172,6 +173,14 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		}
 
 		result, err := r.deps.Controller.GetAssignment(ctx, r.etag, r.config.PollWait)
+		// 404: control is reachable but has nothing for this node yet (never assigned, no
+		// software target). It answers at once, so pace polls instead of flapping
+		// controller_lost/controller_restored once per reconnect.
+		var statusErr *playerclient.StatusError
+		unassigned := errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotFound
+		if unassigned {
+			result, err = playerclient.AssignmentResult{NotModified: true}, nil
+		}
 		if err != nil {
 			r.controllerLost(err)
 			capabilitiesSent = false
@@ -221,6 +230,11 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		if r.screenshot != nil {
 			if _, screenshotErr := r.screenshot.RunOnce(ctx); screenshotErr != nil && ctx.Err() == nil {
 				r.event("screenshot_execution_failed", r.snapshot.ObservedGeneration, map[string]any{"reason": screenshotErr.Error()})
+			}
+		}
+		if unassigned {
+			if err := r.deps.Clock.Sleep(ctx, r.config.ReconnectMinimum); err != nil {
+				return err
 			}
 		}
 	}

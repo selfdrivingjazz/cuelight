@@ -263,12 +263,18 @@ the player uses system roots. Recovery tokens have no link: use *Advanced: recov
 enroll with a token* (control URL, token, optional CA SHA-256 fingerprint).
 
 **Layout.** `settings.json` in the app's user-data directory holds preferences and the
-membership list (`{id, name, controlUrl, displayBinding, pinned?}`); each membership
+membership list (`{id, name, controlUrl, displayBinding, pinned?, enabled}`); each membership
 has `networks/<id>/{identity,state,logs}` and its own `cuelight-player` sidecar with its
 own loopback renderer endpoint and token. A pre-multi-network install migrates its
 `identity/`, `state/`, `logs/` into `networks/default` on first launch. Removing a
-network stops its sidecar and deletes its directory (after confirmation). Launch at
-login is a single entry for the app; it starts every network.
+network stops its sidecar and deletes its directory (after confirmation).
+
+**Desired state.** `enabled` records whether a network should run: Start/Stop in the
+setup window toggle it, newly joined networks are enabled, and every app launch —
+including the restart after an update — starts all enabled networks. *Open Cuelight at
+login* (`launchAtLogin`) is a single login entry for the app. Settings from builds with the
+old `autoStart` flag migrate once: `autoStart: true` becomes `launchAtLogin: true` with every
+network enabled; `false` leaves networks disabled until started.
 
 **Displays and arbitration.** Each membership binds to `shared` (the primary display)
 or a specific display; bindings to a disconnected display fall back to the primary.
@@ -284,8 +290,11 @@ network. Esc on an output hides it until something new goes on air.
 **Updates.** When control targets a newer version, the sidecar downloads and verifies the
 platform's `latest*.yml` and referenced files into its state directory and calls
 `POST /v1/software-update {version, feedDir}`. The app serves that directory on loopback
-to electron-updater (generic provider), downloads it, and installs once no network is on
-air (or at quit). Requests not newer than the running or already-staged version are ignored.
+to electron-updater (generic provider) and downloads it. Because an operator targeted that
+version, a staged update installs after a 10 s countdown ("Updating to X — restarting in
+N s" in the setup window and tray) whether or not something is on air; the restart takes a
+few seconds and enabled networks start again in the new version. Requests not newer than
+the running or already-staged version, or arriving during the countdown, are ignored.
 
 **Packaging.** `pnpm --filter @cuelight/node-desktop dist` cross-compiles every sidecar
 and runs electron-builder: macOS `zip` + `dmg` per architecture (arm64 and x64 rather than

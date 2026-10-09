@@ -1,5 +1,6 @@
 import { Menu, nativeImage, Tray } from "electron";
 import type { DesktopStatus } from "../shared/contracts";
+import { updateLabel } from "../shared/update-label";
 
 export interface TrayActions {
   showControls(): void;
@@ -31,9 +32,8 @@ export class StatusTray {
       }))
       : [{ label: "No networks — open Cuelight to join one", enabled: false }];
     const update = status.update;
-    const updateLine: Electron.MenuItemConstructorOptions[] = update.state === "idle"
-      ? []
-      : [{ label: update.state === "staged" ? `Update ${update.version} ready — installs when nothing is on air` : update.state === "error" ? `Update failed: ${update.detail ?? "unknown error"}` : `Update ${update.version ?? ""}: ${update.state}${update.percent === undefined ? "" : ` ${update.percent}%`}`, enabled: false }, { type: "separator" }];
+    const label = updateLabel(update);
+    const updateLine: Electron.MenuItemConstructorOptions[] = label ? [{ label, enabled: false }, { type: "separator" }] : [];
     this.tray.setContextMenu(Menu.buildFromTemplate([
       { label: "Networks (check to pin)", enabled: false },
       ...networks,

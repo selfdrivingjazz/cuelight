@@ -123,10 +123,9 @@ function run(): void {
     await manager.initialize();
     await createSetupWindow();
     tray.update(manager.status());
-    if (manager.status().preferences.autoStart) {
-      const failures = await manager.startAll();
-      if (failures.length) dialog.showErrorBox("Some networks could not start", failures.join("\n"));
-    }
+    // Enabled networks resume on every launch, including the restart after an update.
+    const failures = await manager.startEnabled();
+    if (failures.length) dialog.showErrorBox("Some networks could not start", failures.join("\n"));
     for (const link of pendingLinks.splice(0)) openLink(link);
   }).catch((error: unknown) => {
     reportError("Cuelight could not start", error);
@@ -144,7 +143,10 @@ function run(): void {
     void manager.shutdown().finally(() => {
       tray.destroy();
       // Quit for real (not app.exit) so electron-updater's quit hook can install a staged update.
-      app.quit();
+      // Deferred: with nothing running, shutdown settles in this emit's microtask checkpoint, and a
+      // re-entrant app.quit() here would be undone when the outer, prevented quit returns — the app
+      // then closes its windows but never exits.
+      setImmediate(() => app.quit());
     });
   });
   // Session logout and service managers send SIGTERM; shut sidecars down like an explicit Quit.

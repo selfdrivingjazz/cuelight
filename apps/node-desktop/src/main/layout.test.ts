@@ -27,7 +27,7 @@ test("legacy single-network layout moves into networks/default once, keeping pre
   const layout = new Layout(root);
   const settings = await layout.loadSettings();
 
-  expect(settings).toEqual({ autoStart: true, fullScreen: false, presentationMode: "web", networks: [{ id: "default", name: "desk.tail.example", controlUrl: "https://desk.tail.example", displayBinding: "shared" }] });
+  expect(settings).toEqual({ launchAtLogin: true, fullScreen: false, presentationMode: "web", networks: [{ id: "default", name: "desk.tail.example", controlUrl: "https://desk.tail.example", displayBinding: "shared", enabled: true }] });
   const node = JSON.parse(await readFile(path.join(root, "networks/default/identity/node.json"), "utf8"));
   expect(node.certificatePath).toBe(path.join(root, "networks/default/identity/node.pem"));
   expect(node.caPath).toBe(path.join(root, "networks/default/identity/controller-ca.pem"));
@@ -39,6 +39,20 @@ test("legacy single-network layout moves into networks/default once, keeping pre
   await mkdir(path.join(root, "identity"));
   await writeFile(path.join(root, "identity", "node.json"), "{}");
   expect((await new Layout(root).loadSettings()).networks).toHaveLength(1);
+});
+
+test("multi-network settings with the old autoStart flag become per-network desired state", async () => {
+  const network = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id, controlUrl: `https://${id}.example`, displayBinding: "shared", ...extra });
+  await writeFile(path.join(root, "settings.json"), JSON.stringify({ autoStart: false, fullScreen: true, presentationMode: "automatic", networks: [network("home"), network("mars", { enabled: true })] }));
+  const settings = await new Layout(root).loadSettings();
+  expect(settings.launchAtLogin).toBe(false);
+  // Without autoStart nothing started at launch before; an explicit enabled wins.
+  expect(settings.networks.map(({ id, enabled }) => [id, enabled])).toEqual([["home", false], ["mars", true]]);
+  expect(JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"))).not.toHaveProperty("autoStart");
+
+  await writeFile(path.join(root, "settings.json"), JSON.stringify({ autoStart: true, networks: [network("home")] }));
+  const enabled = await new Layout(root).loadSettings();
+  expect([enabled.launchAtLogin, enabled.networks[0]?.enabled]).toEqual([true, true]);
 });
 
 test("migration resumes after an interruption between moving identity and saving settings", async () => {

@@ -131,6 +131,7 @@ export class RendererServer {
     }
     this.host = undefined;
     if (!this.server.listening) return;
+    this.server.closeAllConnections();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.baseUrl = undefined;
   }
