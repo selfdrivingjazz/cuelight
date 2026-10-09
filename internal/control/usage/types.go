@@ -26,17 +26,13 @@ type Kind string
 const (
 	KindMedia      Kind = "media"
 	KindPlaylist   Kind = "playlist"
-	KindBlock      Kind = "block"
-	KindChannel    Kind = "channel"
-	KindProfile    Kind = "profile"
-	KindRevision   Kind = "revision"
 	KindRelease    Kind = "release"
 	KindAssignment Kind = "assignment"
 )
 
 func (k Kind) Valid() bool {
 	switch k {
-	case KindMedia, KindPlaylist, KindBlock, KindChannel, KindProfile, KindRevision, KindRelease, KindAssignment:
+	case KindMedia, KindPlaylist, KindRelease, KindAssignment:
 		return true
 	default:
 		return false

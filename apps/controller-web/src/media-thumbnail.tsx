@@ -124,9 +124,7 @@ export function useMediaThumbnail(media?: Media): MediaThumbnailState {
   });
   if (!media || (media.kind !== "web" && !fileKind)) return { status: "empty" };
   if (digest) return thumbnail.data ? { status: "ready", url: thumbnail.data } : { status: thumbnail.isError ? "error" : "loading" };
-  // Cable guides are never captured by the controller (they need a node's guide
-  // token); their thumbnail comes from a screen playing them.
-  if (media.kind === "web") return { status: media.thumbnailError || media.deploymentId ? "empty" : "loading" };
+  if (media.kind === "web") return { status: media.thumbnailError ? "empty" : "loading" };
   if (!canCapture || capture.isError) return { status: "empty" };
   return { status: "loading" };
 }
@@ -153,7 +151,7 @@ export function MediaThumbnail({ media, className, label, aspectRatio = "16 / 9"
     state={thumbnail.status}
     loadingLabel={media?.kind === "web" ? "Capturing page…" : "Preparing thumbnail…"}
     emptyTitle={media?.kind === "web" ? (media.thumbnailError ? "Capture failed" : "No capture yet") : media?.artifact ? media.artifact.mediaType : "Preview not resolved"}
-    emptyDescription={media?.kind === "web" ? media.thumbnailError ?? (media.deploymentId ? "Captured when a screen plays this guide." : media.url ?? "") : media ? "No thumbnail is available for this media." : "Media details have not been resolved for this item."}
+    emptyDescription={media?.kind === "web" ? media.thumbnailError ?? media.url ?? "" : media ? "No thumbnail is available for this media." : "Media details have not been resolved for this item."}
     errorDescription="The thumbnail could not be loaded."
     overlay={overlay}
   />;

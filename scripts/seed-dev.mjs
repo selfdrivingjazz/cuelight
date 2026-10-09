@@ -104,77 +104,20 @@ async function seed() {
     assets.push(asset);
     mediaReleases.push(await publishMedia(asset, video.key));
   }
-  const deployment = await createNamed("/cable/deployments", "Cable Dev Lineup", {
-    name: "Cable Dev Lineup", timezone: "America/New_York", theme: "nebula", guideHorizonSeconds: 86400,
-    guideDensity: "half-hour", placardDefaults: {}, fallbackMetadata: {},
-  }, "seed-cable-deployment");
-
   const playlistSpecs = [
     { name: "Signal Rotation", description: "Three deterministic generated videos.", order: [0, 1, 2] },
     { name: "Night Rotation", description: "The generated videos in reverse order.", order: [2, 1, 0] },
   ];
   const playlists = [];
   for (const spec of playlistSpecs) {
-    playlists.push(await createNamed("/cable/playlists", spec.name, {
+    playlists.push(await createNamed("/playlists", spec.name, {
       name: spec.name,
       description: spec.description,
-      items: spec.order.map((index, position) => ({ assetId: assets[index].id, position: position + 1, durationSeconds: 1200, title: videos[index].title, subtitle: "Generated Cable development programme" })),
+      items: spec.order.map((index, position) => ({ assetId: assets[index].id, position: position + 1, durationSeconds: 1200, title: videos[index].title, subtitle: "Generated development video" })),
     }, `seed-playlist-${spec.name.toLowerCase().replaceAll(" ", "-")}`));
   }
 
-  const channelSpecs = [
-    {
-      number: 7, name: "Signal One", callsign: "SIG1", accent: "#5eead4",
-      blocks: [
-        { source: { playlist: playlists[0] }, offsetMinutes: 0, durationMinutes: 180, title: "Signal One rotation" },
-        { source: { asset: assets[0] }, offsetMinutes: 180, durationMinutes: 120, title: "Signal One direct media" },
-      ],
-    },
-    {
-      number: 12, name: "Night Gallery", callsign: "NGHT", accent: "#c084fc",
-      blocks: [
-        { source: { asset: assets[1] }, offsetMinutes: 0, durationMinutes: 90, title: "Night Gallery direct media" },
-        { source: { playlist: playlists[1] }, offsetMinutes: 90, durationMinutes: 210, title: "Night Gallery rotation" },
-      ],
-    },
-    {
-      number: 24, name: "Test Pattern", callsign: "TEST", accent: "#fbbf24",
-      blocks: [
-        { source: { playlist: playlists[0] }, offsetMinutes: 0, durationMinutes: 240, title: "Test Pattern long rotation" },
-        { source: { asset: assets[2] }, offsetMinutes: 240, durationMinutes: 120, title: "Test Pattern direct media" },
-      ],
-    },
-  ];
-  const channelPage = await list(`/cable/deployments/${deployment.id}/channels`);
-  const blockStart = new Date();
-  blockStart.setUTCMinutes(0, 0, 0);
-  blockStart.setUTCHours(blockStart.getUTCHours() - 1);
-  const blockDate = blockStart.toISOString().slice(0, 10);
-  const channels = [];
-  const blocks = [];
-  for (const spec of channelSpecs) {
-    const channel = channelPage.items.find((item) => item.number === spec.number) ?? await request(`/cable/deployments/${deployment.id}/channels`, {
-      method: "POST", headers: { "Idempotency-Key": `seed-cable-channel-${spec.number}` },
-      body: { number: spec.number, name: spec.name, callsign: spec.callsign, description: "Generated development channel", accent: spec.accent, enabled: true, standby: false },
-    });
-    channels.push(channel);
-    const existingBlocks = await list(`/cable/channels/${channel.id}/blocks`);
-    for (const blockSpec of spec.blocks) {
-      const startsAt = new Date(blockStart.getTime() + blockSpec.offsetMinutes * 60_000);
-      const endsAt = new Date(startsAt.getTime() + blockSpec.durationMinutes * 60_000);
-      const title = `${blockSpec.title} ${blockDate}`;
-      const body = {
-        startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), title,
-        playlistId: blockSpec.source.playlist?.id, assetId: blockSpec.source.asset?.id,
-      };
-      blocks.push(existingBlocks.items.find((item) => item.title === title) ?? await request(`/cable/channels/${channel.id}/blocks`, {
-        method: "POST", headers: { "Idempotency-Key": `seed-block-${spec.number}-${blockSpec.offsetMinutes}-${blockDate}` },
-        body,
-      }));
-    }
-  }
-
-  console.log(JSON.stringify({ assets, mediaReleases, playlists, blocks, channels, deployment }, null, 2));
+  console.log(JSON.stringify({ assets, mediaReleases, playlists }, null, 2));
 }
 
 await seed();

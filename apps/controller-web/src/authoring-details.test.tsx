@@ -3,8 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { components } from "@cable/api-client";
 import { describe, expect, it } from "vitest";
 import {
-  BlockInspector,
-  ChannelInspector,
   PlaylistInspector,
   authoringIfMatch,
   webPlaylistHint,
@@ -13,9 +11,7 @@ import {
   formatTimestamp,
 } from "./authoring-details";
 
-type Playlist = components["schemas"]["CablePlaylist"];
-type Block = components["schemas"]["CableBlock"];
-type Channel = components["schemas"]["CableChannel"];
+type Playlist = components["schemas"]["Playlist"];
 
 const playlist: Playlist = {
   id: "playlist-technical-id",
@@ -26,49 +22,12 @@ const playlist: Playlist = {
   createdAt: "2026-09-01T08:00:00Z",
   updatedAt: "2026-09-01T09:00:00Z",
   items: [
-    { id: "item-2", playlistId: "playlist-technical-id", assetId: "asset-2", position: 2, durationSeconds: 65, title: "City walk", subtitle: "Northbound" },
-    { id: "item-1", playlistId: "playlist-technical-id", assetId: "asset-1", position: 1, durationSeconds: 60, title: "First light", subtitle: "" },
+    { id: "item-2", playlistId: "playlist-technical-id", mediaId: "media-2", assetId: "asset-2", position: 2, durationSeconds: 65, title: "City walk", subtitle: "Northbound" },
+    { id: "item-1", playlistId: "playlist-technical-id", mediaId: "media-1", assetId: "asset-1", position: 1, durationSeconds: 60, title: "First light", subtitle: "" },
   ],
 };
 
-const currentBlock = {
-  id: "block-current",
-  channelId: "channel-1",
-  playlistId: playlist.id,
-  title: "Morning loop",
-  startsAt: "2026-09-02T09:00:00Z",
-  endsAt: "2026-09-02T10:00:00Z",
-  version: 2,
-  createdBy: "operator-1",
-  createdAt: "2026-09-01T08:00:00Z",
-} as Block;
-
-const nextBlock = {
-  ...currentBlock,
-  id: "block-next",
-  playlistId: undefined,
-  assetId: "asset-3",
-  title: "Gallery hour",
-  startsAt: "2026-09-02T10:00:00Z",
-  endsAt: "2026-09-02T12:00:00Z",
-} as Block;
-
-const channel: Channel = {
-  id: "channel-1",
-  deploymentId: "deployment-1",
-  number: 7,
-  name: "Commons",
-  callsign: "CMNS",
-  description: "Shared spaces",
-  accent: "slate",
-  enabled: true,
-  standby: false,
-  version: 4,
-  createdAt: "2026-09-01T08:00:00Z",
-  updatedAt: "2026-09-01T09:00:00Z",
-};
-
-describe("Cable authoring detail workflows", () => {
+describe("Playlist authoring detail workflows", () => {
   it("builds stable cross-links with encoded resource IDs", () => {
     expect(authoringLinks.playlist("playlist/one")).toEqual({ href: "/library/playlists/playlist%2Fone", label: "View playlist" });
     expect(authoringLinks.asset("asset one").href).toBe("/library/assets/asset%20one");
@@ -117,32 +76,5 @@ describe("Cable authoring detail workflows", () => {
 
   it("uses version ETags as the conflict boundary for every authored replacement", () => {
     expect(authoringIfMatch(12)).toBe('"v12"');
-  });
-
-  it("keeps block source and timing visible when visual enrichment is unavailable", () => {
-    const markup = renderToStaticMarkup(<BlockInspector block={currentBlock} playlist={playlist} visualState="Visual enrichment is not connected on this route." action={<button type="button">Edit block</button>} />);
-
-    expect(markup).toContain("Schedule window");
-    expect(markup).toContain("Edit block");
-    expect(markup).toContain("1h 0m");
-  });
-
-  it("shows current, next, and proportional channel schedule hierarchy responsively", () => {
-    const markup = renderToStaticMarkup(<ChannelInspector channel={channel} blocks={[nextBlock, currentBlock]} now={new Date("2026-09-02T09:30:00Z")} />);
-    expect(markup).toContain("Open full block schedule");
-
-    expect(markup).toContain("Scheduled now");
-    expect(markup).toContain("Current and next");
-    expect(markup).toContain("Morning loop");
-    expect(markup).toContain("Gallery hour");
-    expect(markup).toContain("Proportional channel schedule");
-  });
-
-  it("renders compact current and next empty states when the channel window is empty", () => {
-    const markup = renderToStaticMarkup(<ChannelInspector channel={channel} blocks={[]} now={new Date("2026-09-02T09:30:00Z")} />);
-
-    expect(markup).toContain("Nothing scheduled now");
-    expect(markup).toContain("No next block");
-    expect(markup).toContain("No scheduled blocks");
   });
 });

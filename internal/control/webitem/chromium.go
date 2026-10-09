@@ -61,7 +61,7 @@ func (c ChromiumCapturer) Capture(ctx context.Context, pageURL string) (Capture,
 	if c.Binary == "" {
 		return Capture{}, media.ErrCaptureDisabled
 	}
-	dir, err := os.MkdirTemp("", "cable-web-capture-")
+	dir, err := os.MkdirTemp("", "web-capture-")
 	if err != nil {
 		return Capture{}, err
 	}

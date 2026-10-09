@@ -68,9 +68,11 @@ type Candidate struct {
 	WindowEnd           time.Time
 	Schedule            []ScheduleItem
 	// WebURL is the live website shown by the Chromium adapter for web
-	// presentations.
-	WebURL string
-	Remote *RemoteDescriptor
+	// presentations. AppAccess pages (MediaID names their media item) are
+	// opened with an app token and consume remote input themselves.
+	WebURL    string
+	AppAccess bool
+	Remote    *RemoteDescriptor
 }
 
 func sameCandidate(a, b Candidate) bool { return reflect.DeepEqual(a, b) }

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/cable"
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
+	"github.com/jmill/cable/internal/control/playlist"
 	"github.com/jmill/cable/internal/control/release"
 	"github.com/jmill/cable/internal/control/remote"
 	playerclient "github.com/jmill/cable/internal/player/client"
@@ -30,8 +30,6 @@ const (
 	ScopeLocalMediaRead  = "local_media_read"
 	ScopeReleaseRead     = "release_read"
 	ScopeReleaseWrite    = "release_write"
-	ScopeCableRead       = "cable_read"
-	ScopeCableWrite      = "cable_write"
 )
 
 var (
@@ -199,7 +197,7 @@ func (a ScopeAuthorizer) Authorize(actor auth.Actor, action, resourceType, resou
 		return ErrInvalidRequest
 	}
 	switch resourceType {
-	case "node", "upload", "asset", "media", "release", "token", "enrollment-token", "operator", "assignment", "assignments", "cable", "deployment", "channel", "program", "profile":
+	case "node", "upload", "asset", "media", "release", "token", "enrollment-token", "operator", "assignment", "assignments", "playlist", "profile":
 	default:
 		return fmt.Errorf("%w: unknown resource %q", ErrForbidden, resourceType)
 	}
@@ -303,8 +301,7 @@ type Dependencies struct {
 	Uploads         UploadPageService
 	AssignmentPages AssignmentPageService
 	ReleasePages    ReleasePageService
-	Cable           *cable.Service
-	CableRepository cable.Repository
+	Playlists       playlist.Repository
 	MaxJSONBytes    int64
 	MaxChunkBytes   int64
 	Idempotency     *IdempotencyCache

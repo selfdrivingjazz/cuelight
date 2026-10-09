@@ -19,7 +19,7 @@ func (i fixedIDs) NewID() (string, error) { return i.id, nil }
 var testTime = time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 
 func testExpected() ExpectedPreview {
-	return ExpectedPreview{Expected: true, ReleaseDigest: strings.Repeat("a", 64), RevisionDigest: strings.Repeat("b", 64), EffectiveAt: testTime}
+	return ExpectedPreview{Expected: true, ReleaseDigest: strings.Repeat("a", 64), EffectiveAt: testTime}
 }
 func testService(clock *fixedClock) (*Service, *MemoryRepository) {
 	repository := NewMemoryRepository()

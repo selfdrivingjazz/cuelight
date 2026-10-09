@@ -30,9 +30,8 @@ Pointer mapping: `down`/`move`/`up` become a touch drag; `move` without a press 
 hover; `click` is a touch tap; `wheel` is a mouse `ACTION_SCROLL` at the last pointer position.
 For `web`-kind presentations the browser node, when `window.CableAndroid` exists,
 forwards polled remote events to `injectInput` instead of handling them in JS — except
-for the control-hosted Cable guide (`<control>/cable/?deployment=…`), which the node loads
-same-origin with a guide token and which polls the remote session itself (Guide/Channel
-and other remote buttons reach it without native injection).
+for app access pages (web media with `appAccess`), which the node opens with an app token
+in the URL fragment and which poll `/app/remote/events` themselves (no native injection).
 
 ## Toolchain setup (user-local, no sudo)
 

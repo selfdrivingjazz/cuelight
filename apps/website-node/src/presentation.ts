@@ -17,8 +17,11 @@ export type ScheduleItem = MediaItem | WebItem;
 export type Presentation =
   | { kind: "media"; releaseDigest: string; item: MediaItem }
   | { kind: "media-schedule"; releaseDigest: string; items: ScheduleItem[] }
-  /** `guide` marks the control-hosted Cable guide: `url` carries its token and it reads remote input itself. */
-  | { kind: "web"; releaseDigest: string; url: string; guide: boolean }
+  /**
+   * `appAccess` pages get an app token for `mediaId` in their URL fragment and read
+   * remote input themselves; the node neither forwards remote events nor shows its QR.
+   */
+  | { kind: "web"; releaseDigest: string; url: string; appAccess: boolean; mediaId?: string }
   | { kind: "unsupported"; releaseDigest: string; presentationKind: PresentationKind; reason: string };
 
 export function isWebItem(item: ScheduleItem): item is WebItem {
@@ -53,7 +56,9 @@ export function toPresentation(release: ReleaseEnvelope, artifactUrl: (digest: s
     return { kind: "media-schedule", releaseDigest, items };
   }
   if (presentation.kind === "web" && presentation.web && /^https?:\/\//i.test(presentation.web.url)) {
-    return { kind: "web", releaseDigest, url: presentation.web.url, guide: false };
+    const { url, appAccess, mediaId } = presentation.web;
+    if (appAccess && !mediaId) return { kind: "unsupported", releaseDigest, presentationKind: "web", reason: "App access page has no media id" };
+    return appAccess ? { kind: "web", releaseDigest, url, appAccess: true, mediaId } : { kind: "web", releaseDigest, url, appAccess: false };
   }
   return { kind: "unsupported", releaseDigest, presentationKind: presentation.kind, reason: "Release presentation is incomplete" };
 }
@@ -66,24 +71,18 @@ function mediaElement(mediaType: string): "image" | "video" | null {
 }
 
 /**
- * The deployment of a control-hosted Cable guide URL (same origin as control,
- * path `/cable/`, `deployment` param), or null for any other page.
+ * Appends the app token fragment params to `pageUrl`, keeping its other fragment
+ * params and dropping stale `cuelight-token`/`cuelight-api` ones.
  */
-export function hostedGuideDeployment(pageUrl: string, controlOrigin: string): string | null {
-  if (!controlOrigin) return null;
-  try {
-    const page = new URL(pageUrl);
-    if (page.origin !== new URL(controlOrigin).origin || page.pathname !== "/cable/") return null;
-    return page.searchParams.get("deployment") || null;
-  } catch {
-    return null;
-  }
-}
-
-/** Replaces any fragment of `pageUrl` with the guide token fragment. */
-export function withGuideToken(pageUrl: string, token: string): string {
+export function withAppToken(pageUrl: string, token: string, apiUrl: string): string {
   const hash = pageUrl.indexOf("#");
-  return `${hash < 0 ? pageUrl : pageUrl.slice(0, hash)}#token=${encodeURIComponent(token)}`;
+  const base = hash < 0 ? pageUrl : pageUrl.slice(0, hash);
+  const kept = hash < 0 ? [] : pageUrl.slice(hash + 1).split("&").filter((part) => {
+    const name = part.split("=")[0];
+    return part !== "" && name !== "cuelight-token" && name !== "cuelight-api";
+  });
+  kept.push(`cuelight-token=${encodeURIComponent(token)}`, `cuelight-api=${encodeURIComponent(apiUrl)}`);
+  return `${base}#${kept.join("&")}`;
 }
 
 /** The schedule item airing at `now`, or null when the schedule is off air. */

@@ -203,7 +203,7 @@ async function resolveExpectedContent(nodeId: string): Promise<PlaybackMetadata 
   }
   if (assignment.playlistId) {
     try {
-      const playlist = readApiResult(await api.GET("/cable/playlists/{playlistId}", { params: { path: { playlistId: assignment.playlistId } } }));
+      const playlist = readApiResult(await api.GET("/playlists/{playlistId}", { params: { path: { playlistId: assignment.playlistId } } }));
       return { title: `Playlist · ${playlist.name}`, subtitle: `${playlist.items.length} ${playlist.items.length === 1 ? "item" : "items"}` };
     } catch {
       return { title: "Assigned playlist", subtitle: "Playlist details are unavailable." };
@@ -473,7 +473,7 @@ function DangerRow({ title, description, label, confirming, pending, onAsk, onCa
 }
 
 export function AssignPage() {
-  return <PageFrame width="narrow"><PageHeader title="Assign content" description="Choose what to show — an image, video, web page, or Cable guide — then pick the screen." /><NodeAssignmentComposer /></PageFrame>;
+  return <PageFrame width="narrow"><PageHeader title="Assign content" description="Choose what to show — an image, video, or web page — then pick the screen." /><NodeAssignmentComposer /></PageFrame>;
 }
 
 /** Normalises a pairing code the way the controller does: case, spaces, and dashes do not matter. */

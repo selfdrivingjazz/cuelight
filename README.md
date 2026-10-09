@@ -24,17 +24,19 @@ go test ./...
 The React control application lives in `apps/controller-web`; its shared layout,
 navigation, theme tokens, and UI primitives live in `packages/controller-ui`.
 
-Sections (left rail; `⌘K`/`Ctrl+K` jumps to any screen, media, playlist, deployment, or
+Sections (left rail; `⌘K`/`Ctrl+K` jumps to any screen, media, playlist, or
 profile by name; every entity has its own URL and the top bar shows its breadcrumb):
 
 - **Overview** (`/`): controller health, on-air/attention counts, a screen wall, recent events.
 - **Screens** (`/screens`): every display with its expected/captured picture. A screen
   (`/screens/{id}`) has **Now playing** (screenshot capture), **Assignment** (one media
-  picker over files, web pages, and Cable guides; remote-control and QR toggles), **Remote** (phone link +
+  picker over files, web pages, and playlists; remote-control and QR toggles), **Remote** (phone link +
   QR), **Events**, and **System** (capabilities, revoke/unregister). **Pair a screen**
   (`/pair`) claims a browser screen's code or mints a desktop enrollment token.
 - **Library**: media (`/library/media`, sortable by date added, name, size, or type via
-  `?sort=`/`?order=`, cursor-paginated server-side), playlists, and raw files/uploads.
+  `?sort=`/`?order=`, cursor-paginated server-side), playlists (`/api/v1/playlists`,
+  `media_read`/`media_write`; ordered file or web media items with per-item durations),
+  and raw files/uploads.
   Every image or video gets a persisted 640px JPEG poster (`media.thumbnail`, served from
   `GET /media/{id}/thumbnail?v={digest}` as immutable): the controller generates it for
   PNG/JPEG/GIF at ingest and backfills on startup; for formats it cannot decode (video,
@@ -47,7 +49,6 @@ profile by name; every entity has its own URL and the top bar shows its breadcru
   screen in the profile at once and leaves other screens untouched;
   `GET /profiles/active` reports the last-activated profile and which of its screens
   have drifted (`assignment_changed`, `unassigned`, `node_missing`).
-- **Programming**: deployments → channels → blocks/programs and playlists.
 - **Releases** (`/releases`, read-only audit of the signed releases control publishes per
   assignment), **Activity**, and **Settings** (theme, operator session).
 
@@ -85,23 +86,29 @@ desktop renderer, which injects them as native input. Get a phone link for a
 node's active session on the screen's **Remote** tab (`/screens/{id}/remote`) or with
 `cable node remote-link NODE_ID`; **Show QR** also draws one in the corner of the output.
 
-## Hosted Cable guide
+## Web apps with app access
 
-The Cable TV guide (`apps/cable-web`) is a web page served by control at
-`https://<public origin>/cable/` (set `CABLE_CONTROL_CABLE_WEB_DIR` to its `dist`; the
-dev stack builds and sets it on `sdj cable-dev apply`). Every deployment has a Cable
-media item (`Cable · <name>`, kept in sync on rename, deleted with the deployment);
-assigning it publishes a web release for `/cable/?deployment=<id>`. The node mints a
-24-hour guide token (`POST /api/v1/player/cable-guide-tokens`, or
-`/api/v1/browser-node/player/cable-guide-tokens`), allowed only while its assignment
-targets that deployment's Cable item, and opens the page with `#token=<token>`. The
-guide reads `/api/v1/cable-guide/presentation` (computed live from the deployment's
-channels and blocks, so edits show without publishing), `/api/v1/cable-guide/media/{assetId}`,
-and the node's remote session through `/api/v1/cable-guide/remote/events`; tokens stop
-working when the node is reassigned, revoked, or unregistered. Because the guide
-polls the remote session itself, the phone remote's Guide, channel, number and arrow
-keys drive it on desktop, browser and Android nodes; nodes don't inject native input
-into guide pages.
+A web media item can be given **app access** (`appAccess: true` on `POST /media` or
+`PATCH /media/{id}`; web media only, default off; the **Cuelight app** toggle in the
+library). Its signed `web` release then carries `appAccess: true` and `mediaId`.
+When presenting it, the node mints a 24-hour app token (`POST /api/v1/player/app-tokens`
+for desktop/appliance nodes, `POST /api/v1/browser-node/player/app-tokens` for browser
+nodes, body `{mediaId}`, allowed only while its assignment targets that item) and opens
+the page with `#cuelight-token=<token>&cuelight-api=<encoded API base>` appended to any
+existing fragment. If minting fails the presentation fails. Tokens stop working when
+the node is reassigned, revoked, or unregistered; the page renews with
+`POST /api/v1/app/token:renew`.
+
+The page calls the read-only `/api/v1/app/*` endpoints with `Authorization: Bearer
+<token>` (CORS `*`, no cookies): `app/context`, `app/media` (+ `/{id}`, `/content`,
+`/thumbnail`; the last two also accept `?access_token=`), `app/playlists`, and
+`app/remote/events` (long-poll the phone remote's events). Nodes don't inject native
+input or draw their remote QR on app-access pages; the page handles remote input itself.
+The spec is served at `GET /api/v1/openapi.yaml`. An integration server uses a normal
+operator token with `media_read` (plus `media_write` to create its web media item).
+
+Cuelight Cable, the cable-TV guide, now lives in `projects/cuelight-cable` as an
+example app built on this contract.
 
 ## Browser and smart-TV nodes
 
@@ -131,7 +138,7 @@ The screen wake lock is used where the browser supports it.
 | --- | --- |
 | `media`, `media-schedule` | `<video>`/`<img>`; formats depend on the browser's codecs |
 | `web` | iframe; sites that send `X-Frame-Options`/`frame-ancestors` stay blank |
-| hosted Cable guide (`web`) | same-origin iframe with a guide token; the guide handles remote events itself |
+| app-access `web` | iframe with `#cuelight-token=…`; the page handles remote events itself |
 
 Remote input: media keys (Enter/Space, volume, mute) control playback. A plain
 browser can't send input into a cross-origin iframe, so `web` presentations ignore

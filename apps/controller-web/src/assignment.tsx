@@ -21,7 +21,7 @@ async function nodes() {
   return readApiResult(await api.GET("/nodes", { params: { query: { limit: 100, sort: "name", order: "asc" } } }));
 }
 
-/** Delivery is only a choice for files; web pages and Cable guides always stream. */
+/** Delivery is only a choice for files; web pages always stream. */
 export function DeliveryField({ media, value, onChange, disabled, label = "Delivery" }: { media?: Pick<Media, "kind">; value: DeliveryChoice; onChange: (value: DeliveryChoice) => void; disabled?: boolean; label?: string }) {
   if (media?.kind === "web") return null;
   return <label className="block text-sm font-medium">{label}<select className={fieldClass} value={value} disabled={disabled} onChange={(event) => onChange(event.currentTarget.value as DeliveryChoice)}>

@@ -131,7 +131,7 @@ func TestAssignmentCarriesReleasePresentationKind(t *testing.T) {
 			SchemaVersion: canonical.SchemaVersion,
 			Presentation: canonical.Presentation{
 				Kind: canonical.PresentationWeb,
-				Web:  &canonical.WebPresentation{URL: "https://control.example/cable/?deployment=d"},
+				Web:  &canonical.WebPresentation{URL: "https://example.com/board"},
 			},
 		},
 	}}, fakeCAS{body: "abcdef"}, Limits{})

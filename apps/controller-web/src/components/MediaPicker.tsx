@@ -31,7 +31,7 @@ export function pickableMedia(pages: readonly MediaPage[], excludeAssetIds: Read
 }
 
 export function mediaKindLabel(media: Media): string {
-  if (media.kind === "web") return media.deploymentId ? "Cable guide" : "Web page";
+  if (media.kind === "web") return media.appAccess ? "Cuelight app" : "Web page";
   const type = media.artifact?.mediaType ?? "";
   return type.startsWith("image/") ? "Image" : type.startsWith("video/") ? "Video" : type.startsWith("audio/") ? "Audio" : type || "File";
 }
@@ -50,7 +50,7 @@ export interface MediaPickerProps {
   kinds?: readonly Exclude<MediaPickerKind, "all">[];
   /** Extra controls rendered in the footer next to the confirm button (e.g. default duration). */
   footerStart?: React.ReactNode;
-  /** Extra predicate for choosable media (e.g. hide Cable guides or items already present). */
+  /** Extra predicate for choosable media (e.g. hide items already present). */
   filter?: (media: Media) => boolean;
 }
 
@@ -189,7 +189,7 @@ export function MediaField({ label, value, onChange, noneLabel, disabled = false
 
 export interface MediaTargetFieldProps {
   label: string;
-  /** Selected media id (any kind, including web pages and Cable guides). */
+  /** Selected media id (any kind, including web pages). */
   value?: string;
   onChange: (media: Media | undefined) => void;
   disabled?: boolean;
@@ -217,6 +217,6 @@ export function MediaTargetField({ label, value, onChange, disabled = false, cla
         : <span className="text-muted-foreground">Nothing selected</span>}</span>
       <Button type="button" variant="secondary" size="sm" aria-haspopup="dialog" aria-describedby={labelId} disabled={disabled} onClick={() => setOpen(true)}>{value ? "Change" : "Choose"} {label.toLocaleLowerCase()}</Button>
     </div>
-    <MediaPicker open={open} onOpenChange={setOpen} title={`Choose ${label.toLocaleLowerCase()}`} description="Images, videos, web pages, and Cable guides." multiple={false} onConfirm={([media]) => { setChosen(media); onChange(media); }} />
+    <MediaPicker open={open} onOpenChange={setOpen} title={`Choose ${label.toLocaleLowerCase()}`} description="Images, videos, and web pages." multiple={false} onConfirm={([media]) => { setChosen(media); onChange(media); }} />
   </div>;
 }

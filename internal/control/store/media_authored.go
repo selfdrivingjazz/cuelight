@@ -68,7 +68,7 @@ func (s *Store) GetMedia(ctx context.Context, id string) (media.Media, error) {
 // authoredMediaSelect reads every media kind: file media join their asset's
 // original artifact and poster; web media carry their own capture columns.
 const authoredMediaSelect = `SELECT m.id::text, m.kind, COALESCE(m.asset_id::text, ''), COALESCE(m.url, ''),
-	COALESCE(m.deployment_id::text, ''), m.favicon_url, m.title, m.description, m.artist,
+	m.app_access, m.favicon_url, m.title, m.description, m.artist,
 	array_to_json(m.tags), m.artwork_asset_id::text, m.fit, m.loop, m.muted, m.volume, m.orientation, m.version,
 	m.created_by::text, m.updated_by::text, m.created_at, m.updated_at,
 	COALESCE(r.digest, ''), COALESCE(r.size_bytes, 0), COALESCE(r.media_type, ''), COALESCE(r.state, ''),
@@ -90,7 +90,7 @@ func scanAuthoredMedia(row rowScanner) (media.Media, error) {
 	var thumbWidth, thumbHeight sql.NullInt64
 	var attempted, captured sql.NullTime
 	var state string
-	if err := row.Scan(&value.ID, &value.Kind, &value.AssetID, &value.URL, &value.DeploymentID, &value.FaviconURL,
+	if err := row.Scan(&value.ID, &value.Kind, &value.AssetID, &value.URL, &value.AppAccess, &value.FaviconURL,
 		&value.Title, &description, &artist, &tags, &artwork, &value.Playback.Fit,
 		&value.Playback.Loop, &value.Playback.Muted, &value.Playback.Volume, &value.Playback.Orientation,
 		&value.Version, &value.CreatedBy, &value.UpdatedBy, &value.CreatedAt, &value.UpdatedAt,
@@ -144,10 +144,10 @@ func (s *Store) CreateWebMedia(ctx context.Context, mutation media.Mutation, val
 	var created bool
 	err := s.inTransaction(ctx, func(txCtx context.Context, tx *sql.Tx) error {
 		var id string
-		err := tx.QueryRowContext(txCtx, `INSERT INTO media (id, kind, url, title, description, tags, version, created_by, updated_by)
-			VALUES ($1, 'web', $2, $3, NULLIF($4, ''), ARRAY(SELECT jsonb_array_elements_text($5::jsonb)), 1, $6, $6)
+		err := tx.QueryRowContext(txCtx, `INSERT INTO media (id, kind, url, app_access, title, description, tags, version, created_by, updated_by)
+			VALUES ($1, 'web', $2, $3, $4, NULLIF($5, ''), ARRAY(SELECT jsonb_array_elements_text($6::jsonb)), 1, $7, $7)
 			ON CONFLICT (url) WHERE url IS NOT NULL DO NOTHING RETURNING id::text`,
-			value.ID, value.URL, value.Title, value.Description, jsonStrings(value.Tags), mutation.ActorID).Scan(&id)
+			value.ID, value.URL, value.AppAccess, value.Title, value.Description, jsonStrings(value.Tags), mutation.ActorID).Scan(&id)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			if err := tx.QueryRowContext(txCtx, `SELECT id::text FROM media WHERE url = $1`, value.URL).Scan(&id); err != nil {
@@ -170,7 +170,7 @@ func (s *Store) DeleteWebMedia(ctx context.Context, id string) error {
 	if !webItemIDPattern.MatchString(id) {
 		return media.ErrNotFound
 	}
-	result, err := s.q(ctx).ExecContext(ctx, `DELETE FROM media WHERE id = $1 AND kind = 'web' AND deployment_id IS NULL`, id)
+	result, err := s.q(ctx).ExecContext(ctx, `DELETE FROM media WHERE id = $1 AND kind = 'web'`, id)
 	if postgresCode(err) == "23503" {
 		return media.ErrInUse
 	}
@@ -198,11 +198,11 @@ func (s *Store) UpdateMedia(ctx context.Context, mutation media.Mutation, id str
 		if err != nil {
 			return err
 		}
-		if current.DeploymentID != "" {
-			return media.ErrManaged
-		}
 		if current.Kind == media.KindWeb && (patch.Playback != nil || patch.ArtworkAssetID != nil || patch.Artist != nil) {
-			return fmt.Errorf("%w: web media support title, description, and tags only", media.ErrWrongKind)
+			return fmt.Errorf("%w: web media support title, description, tags, and appAccess only", media.ErrWrongKind)
+		}
+		if current.Kind != media.KindWeb && patch.AppAccess != nil {
+			return &media.ValidationError{Field: "appAccess", Reason: "applies to web media only"}
 		}
 		responseID, replayed, err := s.mediaIdempotency(txCtx, tx, authoredMediaUpdate, mutation, hash, func() (string, error) {
 			if patch.ArtworkAssetID != nil {
@@ -243,6 +243,11 @@ func (s *Store) UpdateMedia(ctx context.Context, mutation media.Mutation, id str
 				sets = append(sets, "fit = $"+strconv.Itoa(n), "loop = $"+strconv.Itoa(n+1), "muted = $"+strconv.Itoa(n+2), "volume = $"+strconv.Itoa(n+3), "orientation = $"+strconv.Itoa(n+4))
 				args = append(args, p.Fit, p.Loop, p.Muted, p.Volume, p.Orientation)
 				n += 5
+			}
+			if patch.AppAccess != nil {
+				sets = append(sets, "app_access = $"+strconv.Itoa(n))
+				args = append(args, *patch.AppAccess)
+				n++
 			}
 			if len(sets) == 0 {
 				return current.ID, nil

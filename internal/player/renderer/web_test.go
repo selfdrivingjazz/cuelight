@@ -224,27 +224,28 @@ func TestChromiumWebRenewsGoneRemoteSession(t *testing.T) {
 	}
 }
 
-type guideTokens struct {
-	deployments []string
+type appTokens struct {
+	media []string
 }
 
-func (g *guideTokens) CreateCableGuideToken(_ context.Context, deploymentID string) (playerclient.CableGuideToken, error) {
-	g.deployments = append(g.deployments, deploymentID)
-	return playerclient.CableGuideToken{Token: "guide/token+1", ExpiresAt: time.Now().Add(time.Hour)}, nil
+func (a *appTokens) CreateAppToken(_ context.Context, mediaID string) (playerclient.AppToken, error) {
+	a.media = append(a.media, mediaID)
+	return playerclient.AppToken{Token: "app/token+1", ExpiresAt: time.Now().Add(time.Hour), APIURL: "https://control.example/api/v1"}, nil
 }
 
 // startWebCandidate runs a web candidate with an active remote session and
 // returns the launch plus the remote poll cursors observed shortly after.
-func startWebCandidate(t *testing.T, webURL string, tokens *guideTokens) (WebLaunch, *inputSession, *scriptedRemote) {
+func startWebCandidate(t *testing.T, candidate Candidate, tokens *appTokens) (WebLaunch, *inputSession, *scriptedRemote) {
 	t.Helper()
 	session := &inputSession{capturingBrowserSession: capturingBrowserSession{alive: true}, batches: make(chan []playerclient.RemoteEvent, 4)}
 	launcher := &webLauncher{launches: make(chan WebLaunch, 1), session: session}
 	remote := &scriptedRemote{pages: []playerclient.RemoteEventPage{{Events: []playerclient.RemoteEvent{{Sequence: 1, Type: "key", Key: "Enter"}}, NextSequence: 1}}}
-	adapter, err := NewChromium(ChromiumConfig{RuntimeRoot: t.TempDir(), Timeout: 2 * time.Second, Launcher: launcher, Remote: remote, GuideTokens: tokens})
+	adapter, err := NewChromium(ChromiumConfig{RuntimeRoot: t.TempDir(), Timeout: 2 * time.Second, Launcher: launcher, Remote: remote, AppTokens: tokens})
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate := Candidate{Kind: release.PresentationWeb, ReleaseDigest: "web-digest", WebURL: webURL, Remote: &RemoteDescriptor{SessionID: "remote-one", URL: "https://control.example/remote/x", ShowQR: true}}
+	candidate.Kind, candidate.ReleaseDigest = release.PresentationWeb, "web-digest"
+	candidate.Remote = &RemoteDescriptor{SessionID: "remote-one", URL: "https://control.example/remote/x", ShowQR: true}
 	if err := adapter.Prepare(context.Background(), candidate); err != nil {
 		t.Fatal(err)
 	}
@@ -255,50 +256,47 @@ func startWebCandidate(t *testing.T, webURL string, tokens *guideTokens) (WebLau
 	return <-launcher.launches, session, remote
 }
 
-func TestChromiumHostedGuideGetsTokenAndNoNativeInput(t *testing.T) {
-	// The guide's public origin differs from the player's control address
-	// (players often reach control through a tunnel); it is still a guide.
-	tokens := &guideTokens{}
-	launch, session, remote := startWebCandidate(t, "https://control.example:443/cable/?deployment=dep-1#stale", tokens)
-	if launch.URL != "https://control.example:443/cable/?deployment=dep-1#token=guide%2Ftoken%2B1" {
-		t.Fatalf("guide URL = %q", launch.URL)
+func TestChromiumAppAccessPageGetsTokenAndNoNativeInput(t *testing.T) {
+	tokens := &appTokens{}
+	launch, session, remote := startWebCandidate(t, Candidate{WebURL: "https://apps.example/guide?x=1#view=grid&cuelight-token=stale", AppAccess: true, MediaID: "media-7"}, tokens)
+	if launch.URL != "https://apps.example/guide?x=1#view=grid&cuelight-token=app%2Ftoken%2B1&cuelight-api=https%3A%2F%2Fcontrol.example%2Fapi%2Fv1" {
+		t.Fatalf("app URL = %q", launch.URL)
 	}
 	if launch.Remote != nil {
-		t.Fatalf("guide draws its own remote QR; overlay = %#v", launch.Remote)
+		t.Fatalf("app pages draw their own remote; overlay = %#v", launch.Remote)
 	}
-	if len(tokens.deployments) != 1 || tokens.deployments[0] != "dep-1" {
-		t.Fatalf("minted for %v", tokens.deployments)
+	if len(tokens.media) != 1 || tokens.media[0] != "media-7" {
+		t.Fatalf("minted for %v", tokens.media)
 	}
 	select {
 	case batch := <-session.batches:
-		t.Fatalf("guide received native input %v", batch)
+		t.Fatalf("app page received native input %v", batch)
 	case <-time.After(100 * time.Millisecond):
 	}
 	remote.mu.Lock()
 	defer remote.mu.Unlock()
 	if len(remote.afters) != 0 {
-		t.Fatalf("player polled the guide's remote session: %v", remote.afters)
+		t.Fatalf("player polled the app's remote session: %v", remote.afters)
+	}
+}
+
+func TestWithAppTokenAddsFragmentWhenAbsent(t *testing.T) {
+	if got := WithAppToken("https://apps.example/", "t", "https://c.example/api/v1"); got != "https://apps.example/#cuelight-token=t&cuelight-api=https%3A%2F%2Fc.example%2Fapi%2Fv1" {
+		t.Fatalf("URL = %q", got)
 	}
 }
 
 func TestChromiumPlainWebPageIsUnchanged(t *testing.T) {
-	for _, webURL := range []string{
-		"http://control.example/cable/?deployment=dep-1",   // not https
-		"https://control.example/cable/",                   // no deployment
-		"https://control.example/cable/x?deployment=dep-1", // not the guide path
-	} {
-		t.Run(webURL, func(t *testing.T) {
-			tokens := &guideTokens{}
-			launch, session, _ := startWebCandidate(t, webURL, tokens)
-			if launch.URL != webURL || launch.Remote == nil || len(tokens.deployments) != 0 {
-				t.Fatalf("launch = %#v minted = %v", launch, tokens.deployments)
-			}
-			select {
-			case <-session.batches:
-			case <-time.After(2 * time.Second):
-				t.Fatal("plain web page did not receive remote input")
-			}
-		})
+	webURL := "https://example.com/board#section"
+	tokens := &appTokens{}
+	launch, session, _ := startWebCandidate(t, Candidate{WebURL: webURL}, tokens)
+	if launch.URL != webURL || launch.Remote == nil || len(tokens.media) != 0 {
+		t.Fatalf("launch = %#v minted = %v", launch, tokens.media)
+	}
+	select {
+	case <-session.batches:
+	case <-time.After(2 * time.Second):
+		t.Fatal("plain web page did not receive remote input")
 	}
 }
 

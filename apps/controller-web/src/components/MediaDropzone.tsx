@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { type components } from "@cable/api-client";
 import { Button, ErrorState } from "@cable/controller-ui";
 import { api, readApiResult } from "../api";
-import { uploadSelectedFile } from "../cable";
+import { uploadSelectedFile } from "../upload";
 
 const acceptedMediaTypes: Record<string, true> = { "image/jpeg": true, "image/png": true, "image/webp": true, "video/mp4": true };
 const mediaAccept = "image/jpeg,image/png,image/webp,video/mp4";
@@ -22,6 +22,7 @@ async function uploadMedia(file: File): Promise<Media> {
     params: { header: { "Idempotency-Key": crypto.randomUUID() } },
     body: {
       kind: "file",
+      appAccess: false,
       assetId: asset.id,
       title: asset.name,
       tags: [],

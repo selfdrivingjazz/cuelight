@@ -389,7 +389,7 @@ func (r *Reconciler) materialize(ctx context.Context, envelope release.EnvelopeV
 		if !ok || mode != DeliveryStream {
 			return candidate, nil, fmt.Errorf("%w: web requires stream delivery", ErrIncompatibleRelease)
 		}
-		candidate.WebURL = web.URL
+		candidate.WebURL, candidate.AppAccess, candidate.MediaID = web.URL, web.AppAccess, web.MediaID
 		return candidate, nil, nil
 	}
 	if kind == release.PresentationMedia {

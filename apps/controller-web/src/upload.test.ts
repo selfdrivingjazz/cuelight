@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { setApiToken } from "./api";
-import { uploadSelectedFile } from "./cable";
+import { uploadSelectedFile } from "./upload";
 
 afterEach(() => {
   vi.unstubAllGlobals();

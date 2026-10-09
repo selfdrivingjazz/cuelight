@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"mime"
-	"net/url"
 	"strings"
 	"time"
 
@@ -18,8 +17,6 @@ var (
 	ErrUnauthorized        = errors.New("operator authentication required")
 	ErrForbidden           = errors.New("operator scope is insufficient")
 	ErrPrecondition        = errors.New("If-Match precondition failed")
-	// ErrManaged rejects operator edits of Cable items, which follow their deployment.
-	ErrManaged = errors.New("cable items are managed by their deployment")
 	// ErrWrongKind rejects operations that only apply to the other media kind.
 	ErrWrongKind = errors.New("operation does not apply to this media kind")
 	// ErrCaptureDisabled reports that no server-side web capture is configured.
@@ -44,13 +41,15 @@ type Playback struct {
 }
 
 // Media is one library item. File media wrap an uploaded asset; web media
-// show a live page by URL, or for Cable items the deployment's hosted guide.
+// show a live page by URL. Web media with AppAccess are Cuelight apps: nodes
+// showing them mint an app token that lets the page read the library and the
+// screen's remote events.
 type Media struct {
 	ID             string   `json:"id"`
 	Kind           string   `json:"kind"`
 	AssetID        string   `json:"assetId,omitempty"`
 	URL            string   `json:"url,omitempty"`
-	DeploymentID   string   `json:"deploymentId,omitempty"`
+	AppAccess      bool     `json:"appAccess"`
 	FaviconURL     string   `json:"faviconUrl,omitempty"`
 	Title          string   `json:"title"`
 	Description    string   `json:"description,omitempty"`
@@ -71,11 +70,12 @@ type Media struct {
 }
 
 // MediaInput creates file media (Kind "" or "file", AssetID) or web media
-// (Kind "web", URL; Title defaults to the URL).
+// (Kind "web", URL, optional AppAccess; Title defaults to the URL).
 type MediaInput struct {
 	Kind           string   `json:"kind,omitempty"`
 	AssetID        string   `json:"assetId,omitempty"`
 	URL            string   `json:"url,omitempty"`
+	AppAccess      bool     `json:"appAccess,omitempty"`
 	Title          string   `json:"title"`
 	Description    string   `json:"description,omitempty"`
 	Artist         string   `json:"artist,omitempty"`
@@ -91,6 +91,8 @@ type MediaPatch struct {
 	Tags           *[]string `json:"tags,omitempty"`
 	ArtworkAssetID *string   `json:"artworkAssetId,omitempty"`
 	Playback       *Playback `json:"playback,omitempty"`
+	// AppAccess applies to web media only.
+	AppAccess *bool `json:"appAccess,omitempty"`
 }
 
 type MediaListFilter struct {
@@ -146,21 +148,6 @@ type ContentHandle interface {
 type AuthoredService struct {
 	Repository MediaRepository
 	NewID      IDGenerator
-	// CableOrigin is the public control-plane origin used to resolve Cable
-	// item URLs; empty leaves them unresolved.
-	CableOrigin string
-}
-
-// CableURL is the hosted guide address of a deployment's Cable item.
-func CableURL(origin, deploymentID string) string {
-	return strings.TrimRight(origin, "/") + "/cable/?deployment=" + url.QueryEscape(deploymentID)
-}
-
-func (s *AuthoredService) resolve(value Media) Media {
-	if value.DeploymentID != "" && s.CableOrigin != "" {
-		value.URL = CableURL(s.CableOrigin, value.DeploymentID)
-	}
-	return value
 }
 
 func NewAuthoredService(repository MediaRepository, newID IDGenerator) (*AuthoredService, error) {
@@ -177,6 +164,9 @@ func (s *AuthoredService) Create(ctx context.Context, mutation Mutation, input M
 	if input.Kind != "" && input.Kind != KindFile {
 		return Media{}, &ValidationError{Field: "kind", Reason: "must be file; web media are created with CreateWeb"}
 	}
+	if input.AppAccess {
+		return Media{}, &ValidationError{Field: "appAccess", Reason: "applies to web media only"}
+	}
 	if err := validateMediaInput(input); err != nil {
 		return Media{}, err
 	}
@@ -188,7 +178,7 @@ func (s *AuthoredService) Create(ctx context.Context, mutation Mutation, input M
 }
 
 // CreateWeb adds a web page to the library. Adding a URL that is already in
-// the library returns the existing item with created=false.
+// the library returns the existing item, unchanged, with created=false.
 func (s *AuthoredService) CreateWeb(ctx context.Context, mutation Mutation, input MediaInput) (Media, bool, error) {
 	if err := validateMutation(mutation, false); err != nil {
 		return Media{}, false, err
@@ -217,18 +207,15 @@ func (s *AuthoredService) CreateWeb(ctx context.Context, mutation Mutation, inpu
 	if id == "" {
 		return Media{}, false, errors.New("media ID generator returned an empty ID")
 	}
-	return s.Repository.CreateWebMedia(ctx, mutation, Media{ID: id, Kind: KindWeb, URL: url, Title: title, Description: strings.TrimSpace(input.Description), Tags: normalizedTags(input.Tags), Version: 1, CreatedBy: mutation.ActorID, UpdatedBy: mutation.ActorID})
+	return s.Repository.CreateWebMedia(ctx, mutation, Media{ID: id, Kind: KindWeb, URL: url, AppAccess: input.AppAccess, Title: title, Description: strings.TrimSpace(input.Description), Tags: normalizedTags(input.Tags), Version: 1, CreatedBy: mutation.ActorID, UpdatedBy: mutation.ActorID})
 }
 
-// DeleteWeb removes an operator-added web item; file media and Cable items
-// cannot be deleted here.
+// DeleteWeb removes an operator-added web item; file media cannot be deleted
+// here.
 func (s *AuthoredService) DeleteWeb(ctx context.Context, id string) error {
 	current, err := s.Get(ctx, id)
 	if err != nil {
 		return err
-	}
-	if current.DeploymentID != "" {
-		return ErrManaged
 	}
 	if current.Kind != KindWeb {
 		return ErrWrongKind
@@ -248,19 +235,14 @@ func truncateText(value string, limit int) string {
 }
 
 func (s *AuthoredService) List(ctx context.Context, request page.PageRequest, filter MediaListFilter) (page.Response[Media], error) {
-	result, err := s.Repository.ListMedia(ctx, request, filter)
-	for index := range result.Items {
-		result.Items[index] = s.resolve(result.Items[index])
-	}
-	return result, err
+	return s.Repository.ListMedia(ctx, request, filter)
 }
 
 func (s *AuthoredService) Get(ctx context.Context, id string) (Media, error) {
 	if strings.TrimSpace(id) == "" {
 		return Media{}, &ValidationError{Field: "mediaId", Reason: "is required"}
 	}
-	value, err := s.Repository.GetMedia(ctx, strings.TrimSpace(id))
-	return s.resolve(value), err
+	return s.Repository.GetMedia(ctx, strings.TrimSpace(id))
 }
 
 func (s *AuthoredService) Update(ctx context.Context, mutation Mutation, id string, expectedVersion int64, patch MediaPatch) (Media, error) {

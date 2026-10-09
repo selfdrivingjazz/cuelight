@@ -88,9 +88,13 @@ type MediaSchedulePresentation struct {
 type MediaSchedule = MediaSchedulePresentation
 
 // WebPresentation is a live website shown by a Chromium renderer and operated
-// through the remote input stream. It carries no artifacts.
+// through the remote input stream. It carries no artifacts. AppAccess pages
+// (MediaID names their web media item) are opened with an app token instead
+// and consume the remote input stream themselves.
 type WebPresentation struct {
-	URL string `json:"url"`
+	URL       string `json:"url"`
+	AppAccess bool   `json:"appAccess,omitempty"`
+	MediaID   string `json:"mediaId,omitempty"`
 }
 
 // Presentation is the signed release discriminator. Exactly one variant must
@@ -404,6 +408,9 @@ func validate(payload PayloadV1) error {
 		}
 		if err := ValidateWebURL(presentation.Web.URL); err != nil {
 			return err
+		}
+		if presentation.Web.AppAccess != (presentation.Web.MediaID != "") {
+			return errors.New("web appAccess and mediaId must be set together")
 		}
 		if len(payload.Artifacts) != 0 {
 			return errors.New("web releases must not contain artifacts")

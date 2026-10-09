@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,16 +14,15 @@ func TestMigrationsHaveOrderedReversibleDirections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := []string{"0001_initial.sql", "0002_control_store.sql", "0003_cable.sql", "0004_programming.sql", "0005_cable_blocks.sql", "0006_remote_input.sql", "0007_media.sql", "0008_screenshot_jobs.sql", "0009_browser_nodes.sql", "0010_media_thumbnails.sql", "0011_web_items.sql", "0012_unified_media.sql", "0013_hosted_cable.sql", "0014_profiles.sql"}
-	if len(migrations) != len(expected) {
-		t.Fatalf("got %d migrations, want %d", len(migrations), len(expected))
+	if len(migrations) < 15 {
+		t.Fatalf("got %d migrations, want at least 15", len(migrations))
 	}
-	for index, name := range expected {
-		if migrations[index].Name != name {
-			t.Fatalf("migration %d is %q, want %q", index, migrations[index].Name, name)
+	for index, migration := range migrations {
+		if prefix := fmt.Sprintf("%04d_", index+1); !strings.HasPrefix(migration.Name, prefix) || !strings.HasSuffix(migration.Name, ".sql") {
+			t.Fatalf("migration %d is %q, want %s*.sql", index, migration.Name, prefix)
 		}
-		if migrations[index].Up == "" || migrations[index].Down == "" {
-			t.Fatalf("migration %s has an empty direction", name)
+		if migration.Up == "" || migration.Down == "" {
+			t.Fatalf("migration %s has an empty direction", migration.Name)
 		}
 	}
 	for _, required := range []string{

@@ -231,8 +231,8 @@ func (s *Store) RevokeCredential(ctx context.Context, nodeID, serial string, at 
 }
 
 func (s *Store) RevokeNodeCredentials(ctx context.Context, nodeID string, at time.Time) ([]pki.Credential, error) {
-	if _, err := s.q(ctx).ExecContext(ctx, `DELETE FROM cable_guide_tokens WHERE node_id = $1`, nodeID); err != nil {
-		return nil, wrap("revoke cable guide tokens", err)
+	if _, err := s.q(ctx).ExecContext(ctx, `DELETE FROM app_tokens WHERE node_id = $1`, nodeID); err != nil {
+		return nil, wrap("revoke app tokens", err)
 	}
 	rows, err := s.q(ctx).QueryContext(ctx, `
 		UPDATE node_credentials SET revoked_at = $2

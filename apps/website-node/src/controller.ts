@@ -1,5 +1,5 @@
 import { ApiError, BrowserNodeApi } from "./api";
-import { hostedGuideDeployment, toPresentation, withGuideToken } from "./presentation";
+import { toPresentation, withAppToken } from "./presentation";
 import type { Presentation } from "./presentation";
 import type { CredentialStorage } from "./storage";
 import type { Assignment, BrowserCredential, ClaimStarted, ContentState, RemoteEvent, RemoteSession } from "./types";
@@ -25,8 +25,6 @@ export type ControllerOptions = {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   now?: () => number;
   assignmentWaitSeconds?: number;
-  /** Origin of the control plane; pages it hosts at /cable/ are Cable guides. Defaults to this page's origin. */
-  controlOrigin?: string;
 };
 
 const RENDERER_VERSION = "website-node/0.2.0";
@@ -43,13 +41,11 @@ export class BrowserNodeController {
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly now: () => number;
   private readonly waitSeconds: number;
-  private readonly controlOrigin: string;
 
   constructor(private readonly api: BrowserNodeApi, private readonly storage: CredentialStorage, private readonly options: ControllerOptions = {}) {
     this.sleep = options.sleep || abortableSleep;
     this.now = options.now || Date.now;
     this.waitSeconds = options.assignmentWaitSeconds === undefined ? 25 : options.assignmentWaitSeconds;
-    this.controlOrigin = options.controlOrigin ?? (typeof location === "undefined" ? "" : location.origin);
     // Millisecond clock seeds a sequence that stays monotonic across reloads.
     this.reportSequence = this.now();
   }
@@ -198,16 +194,19 @@ export class BrowserNodeController {
         if ("notModified" in poll) continue;
         const release = await this.api.release(token, poll.assignment.releaseId);
         let presentation = toPresentation(release, (digest) => this.api.artifactUrl(token, digest));
-        if (presentation.kind === "web") {
-          const deploymentId = hostedGuideDeployment(presentation.url, this.controlOrigin);
-          if (deploymentId) {
-            const guide = await this.api.cableGuideToken(token, deploymentId);
-            presentation = { ...presentation, url: withGuideToken(presentation.url, guide.token), guide: true };
+        if (presentation.kind === "web" && presentation.appAccess && presentation.mediaId) {
+          try {
+            const app = await this.api.appToken(token, presentation.mediaId);
+            presentation = { ...presentation, url: withAppToken(presentation.url, app.token, app.apiUrl) };
+          } catch (error) {
+            // Network failures and a rejected credential go through the poll loop's handling; a refused grant fails the presentation.
+            if (!(error instanceof ApiError) || isUnauthorized(error)) throw error;
+            presentation = { kind: "unsupported", releaseDigest: presentation.releaseDigest, presentationKind: "web", reason: `App token unavailable: ${error.message}` };
           }
         }
         etag = poll.etag;
         this.update({ view: { phase: "presenting", nodeId: credential.nodeId, assignment: poll.assignment, presentation } });
-        this.syncRemote(poll.assignment, presentation.kind === "web" && presentation.guide);
+        this.syncRemote(poll.assignment, presentation.kind === "web" && presentation.appAccess);
         if (presentation.kind === "unsupported") void this.reportRender({ state: "off_air", error: presentation.reason });
       } catch (error) {
         if (signal.aborted) return;
@@ -233,8 +232,8 @@ export class BrowserNodeController {
     this.credential = renewed;
   }
 
-  /** Opens the remote session; a hosted guide reads its events itself, so the node only keeps it alive. */
-  private syncRemote(assignment: Assignment, guide: boolean): void {
+  /** Opens the remote session; an app access page reads its events itself, so the node only keeps it alive. */
+  private syncRemote(assignment: Assignment, appAccess: boolean): void {
     this.stopRemote();
     if (!assignment.remoteInput || !this.credential) {
       if (this.snapshotValue.remote) this.update({ remote: null });
@@ -242,7 +241,7 @@ export class BrowserNodeController {
     }
     const abort = new AbortController();
     this.remoteAbort = abort;
-    void this.remoteLoop(assignment.desiredGeneration, guide, abort.signal);
+    void this.remoteLoop(assignment.desiredGeneration, appAccess, abort.signal);
   }
 
   private stopRemote(): void {
@@ -250,7 +249,7 @@ export class BrowserNodeController {
     this.remoteAbort = null;
   }
 
-  private async remoteLoop(generation: number, guide: boolean, signal: AbortSignal): Promise<void> {
+  private async remoteLoop(generation: number, appAccess: boolean, signal: AbortSignal): Promise<void> {
     let after = 0;
     let failures = 0;
     let session: RemoteSession | null = null;
@@ -261,7 +260,7 @@ export class BrowserNodeController {
           if (signal.aborted) return;
           this.update({ remote: session });
         }
-        if (guide) {
+        if (appAccess) {
           await this.sleep(Math.max(1000, Date.parse(session.expiresAt) - this.now()), signal).catch(() => undefined);
           continue;
         }

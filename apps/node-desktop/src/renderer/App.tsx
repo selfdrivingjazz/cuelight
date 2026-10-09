@@ -40,7 +40,7 @@ export function App() {
     <section className="hero">
       <p className="eyebrow">DESKTOP CAPABILITY HOST</p>
       <h1>{status.node?.nodeName || "Make this computer a Cable node"}</h1>
-      <p>Enroll over your tailnet, then use the controller on desktop to assign signed media and Cable releases. Electron's bundled Chromium is the output renderer.</p>
+      <p>Enroll over your tailnet, then use the controller on desktop to assign signed media and web releases. Electron's bundled Chromium is the output renderer.</p>
     </section>
 
     {error && <section className="error" role="alert"><strong>Node operation failed</strong><span>{error}</span></section>}

@@ -1,7 +1,7 @@
 import type {
   Assignment,
   BrowserCredential,
-  CableGuideToken,
+  AppToken,
   CapabilityReport,
   ClaimStarted,
   ClaimStatus,
@@ -71,9 +71,9 @@ export class BrowserNodeApi {
     return this.json<RemoteEventPage>("GET", `/player/remote-sessions/${encodeURIComponent(sessionId)}/events?after=${after}&waitSeconds=${waitSeconds}`, token, undefined, signal);
   }
 
-  /** Mints a token for the control-hosted Cable guide this node is assigned. */
-  cableGuideToken(token: string, deploymentId: string): Promise<CableGuideToken> {
-    return this.json<CableGuideToken>("POST", "/player/cable-guide-tokens", token, { deploymentId });
+  /** Mints an app token for the appAccess web media item this node is assigned. */
+  appToken(token: string, mediaId: string): Promise<AppToken> {
+    return this.json<AppToken>("POST", "/player/app-tokens", token, { mediaId });
   }
 
   /** Media elements cannot send headers, so artifact URLs carry the token. */

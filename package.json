@@ -1,5 +1,5 @@
 {
-  "name": "cable-web-workspace",
+  "name": "cable-workspace",
   "private": true,
   "packageManager": "pnpm@10.14.0",
   "engines": {
@@ -12,7 +12,7 @@
     "check": "pnpm generate && pnpm -r typecheck && pnpm --filter @cable/api-client check-generated",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "e2e": "pnpm --filter @cable/controller-web e2e && pnpm --filter @cable/cable-web e2e"
+    "e2e": "pnpm --filter @cable/controller-web e2e"
   },
   "devDependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",

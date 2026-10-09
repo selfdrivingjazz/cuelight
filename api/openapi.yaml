@@ -18,10 +18,30 @@ tags:
       recover, credential rotation, and screenshots) is also served at
       /browser-node/player/* with browserNodeToken; artifact content additionally
       accepts the token as the access_token query parameter for media elements.
-  - name: cable-guide
+  - name: playlists
+    description: Ordered lists of file and web media with per-item durations, assignable to nodes as media-schedule releases.
+  - name: app
     description: >-
-      The hosted Cable guide (cable-web at /cable/?deployment=<id>#token=<guideToken>)
-      authenticates with a per-node, per-deployment guide token (cableGuideToken).
+      Web media with appAccess enabled ("Cuelight app") are presented with an app token so the
+      page can read the media library and playlists and consume the screen's remote input.
+      When a node presents a web release whose presentation carries appAccess true, it mints a
+      token for web.mediaId (POST /player/app-tokens, or /browser-node/player/app-tokens for
+      browser nodes) and opens the page URL with fragment parameters
+      `cuelight-token=<token>&cuelight-api=<apiUrl>`, both values encoded with
+      encodeURIComponent. Any existing fragment is kept: existing cuelight-token and
+      cuelight-api parameters are dropped from it and ours are appended joined with `&`
+      (https://app.example/x#view=grid becomes
+      https://app.example/x#view=grid&cuelight-token=T&cuelight-api=https%3A%2F%2Fcontrol.example%2Fapi%2Fv1;
+      a URL without a fragment gets #cuelight-token=T&cuelight-api=...). If minting fails the
+      node fails the presentation instead of showing the page without a token. Tokens last 24h,
+      are valid only while the node's current assignment targets that media item, and stop
+      working when the node is reassigned, revoked, or unregistered; POST /app/token:renew
+      returns a successor. Pages authenticate /app/* with `Authorization: Bearer <token>`
+      (media content and thumbnails also accept the access_token query parameter). /app/*
+      responses carry `Access-Control-Allow-Origin: *`, allow OPTIONS preflight, use no
+      cookies, and are read-only except token renewal. Nodes do not inject native remote input
+      into app pages and do not show their own remote QR overlay for them; the page polls
+      /app/remote/events and renders the phone-remote QR itself from the remote field.
 paths:
   /health:
     get:
@@ -35,6 +55,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+  /openapi.yaml:
+    get:
+      tags: [system]
+      operationId: getOpenApiSpec
+      description: "This OpenAPI document. Served with Access-Control-Allow-Origin: *."
+      security: []
+      responses:
+        "200":
+          description: The embedded API contract.
+          content:
+            application/yaml:
+              schema: {type: string}
   /operator/me:
     get:
       tags: [operator]
@@ -462,7 +494,7 @@ paths:
             items: {$ref: "#/components/schemas/Id"}
         - name: kind
           in: query
-          description: File media (uploaded assets) or web media (pages and Cable items).
+          description: File media (uploaded assets) or web media (pages).
           schema: {type: string, enum: [file, web]}
         - name: mediaType
           in: query
@@ -538,7 +570,7 @@ paths:
             schema: {$ref: "#/components/schemas/MediaPatch"}
       responses:
         "200":
-          description: Authored media updated. Web media accept title, description, and tags; Cable items cannot be edited (409).
+          description: Authored media updated. Web media accept title, description, tags, and appAccess; appAccess on file media is rejected (400).
           headers: {ETag: {$ref: "#/components/headers/ETag"}}
           content:
             application/json:
@@ -547,7 +579,7 @@ paths:
     delete:
       tags: [operator]
       operationId: deleteMedia
-      description: Removes an operator-added web page. File media and Cable items cannot be deleted (409); web media used by a playlist return 409.
+      description: Removes an operator-added web page. File media cannot be deleted (409); web media used by a playlist return 409.
       security: [{operatorToken: []}]
       x-required-scopes: [media_write]
       responses:
@@ -562,7 +594,7 @@ paths:
     post:
       tags: [operator]
       operationId: refreshMedia
-      description: Recaptures a web media viewport now (1920x1080). 409 for file media and Cable items; 503 when the controller has no headless browser.
+      description: Recaptures a web media viewport now (1920x1080). 409 for file media; 503 when the controller has no headless browser.
       security: [{operatorToken: []}]
       x-required-scopes: [media_write]
       responses:
@@ -694,12 +726,12 @@ paths:
       tags: [operator]
       operationId: getResourceUsage
       security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
+      x-required-scopes: [media_read]
       parameters:
         - name: kind
           in: path
           required: true
-          schema: {type: string, enum: [media, playlist, block, channel, profile, revision, release, assignment]}
+          schema: {type: string, enum: [media, playlist, release, assignment]}
         - name: id
           in: path
           required: true
@@ -890,395 +922,82 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ReleaseEnvelope"}
         default: {$ref: "#/components/responses/Problem"}
-  /cable/deployments:
+  /playlists:
     get:
-      tags: [operator]
-      operationId: listCableDeployments
+      tags: [playlists]
+      operationId: listPlaylists
       security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
+      x-required-scopes: [media_read]
       parameters:
         - $ref: "#/components/parameters/PageCursor"
         - $ref: "#/components/parameters/PageLimit"
       responses:
         "200":
-          description: Cable deployments in deterministic keyset order.
+          description: Playlists in deterministic keyset order.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CableDeploymentPage"}
+              schema: {$ref: "#/components/schemas/PlaylistPage"}
         default: {$ref: "#/components/responses/Problem"}
     post:
-      tags: [operator]
-      operationId: createCableDeployment
+      tags: [playlists]
+      operationId: createPlaylist
       security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
+      x-required-scopes: [media_write]
       parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/CableDeploymentInput"}
+            schema: {$ref: "#/components/schemas/PlaylistInput"}
       responses:
         "201":
-          description: Cable deployment created.
+          description: Playlist created.
           headers: {ETag: {$ref: "#/components/headers/ETag"}}
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CableDeployment"}
+              schema: {$ref: "#/components/schemas/Playlist"}
         default: {$ref: "#/components/responses/Problem"}
-  /cable/deployments/{deploymentId}:
-    parameters: [{$ref: "#/components/parameters/CableDeploymentId"}]
+  /playlists/{playlistId}:
+    parameters: [{$ref: "#/components/parameters/PlaylistId"}]
     get:
-      tags: [operator]
-      operationId: getCableDeployment
+      tags: [playlists]
+      operationId: getPlaylist
       security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
+      x-required-scopes: [media_read]
       responses:
         "200":
-          description: Cable deployment.
+          description: Playlist.
           headers: {ETag: {$ref: "#/components/headers/ETag"}}
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CableDeployment"}
+              schema: {$ref: "#/components/schemas/Playlist"}
         default: {$ref: "#/components/responses/Problem"}
     patch:
-      tags: [operator]
-      operationId: updateCableDeployment
+      tags: [playlists]
+      operationId: updatePlaylist
+      description: Replaces the playlist's name, description, and items.
       security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
+      x-required-scopes: [media_write]
       parameters: [{$ref: "#/components/parameters/IfMatch"}]
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/CableDeploymentInput"}
+            schema: {$ref: "#/components/schemas/PlaylistInput"}
       responses:
         "200":
-          description: Cable deployment updated.
+          description: Playlist updated.
           headers: {ETag: {$ref: "#/components/headers/ETag"}}
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CableDeployment"}
-        default: {$ref: "#/components/responses/Problem"}
-    delete:
-      tags: [operator]
-      operationId: deleteCableDeployment
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IfMatch"}]
-      responses:
-        "204": {description: Cable deployment deleted.}
-        default: {$ref: "#/components/responses/Problem"}
-  /cable/deployments/{deploymentId}/channels:
-    parameters: [{$ref: "#/components/parameters/CableDeploymentId"}]
-    get:
-      tags: [operator]
-      operationId: listCableChannels
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
-      parameters:
-        - $ref: "#/components/parameters/PageCursor"
-        - $ref: "#/components/parameters/PageLimit"
-      responses:
-        "200":
-          description: Channels belonging to the deployment.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableChannelPage"}
-        default: {$ref: "#/components/responses/Problem"}
-    post:
-      tags: [operator]
-      operationId: createCableChannel
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CableChannelInput"}
-      responses:
-        "201":
-          description: Cable channel created.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableChannel"}
-        default: {$ref: "#/components/responses/Problem"}
-  /cable/channels/{channelId}:
-    parameters: [{$ref: "#/components/parameters/CableChannelId"}]
-    get:
-      tags: [operator]
-      operationId: getCableChannel
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
-      responses:
-        "200":
-          description: Cable channel.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableChannel"}
-        default: {$ref: "#/components/responses/Problem"}
-    patch:
-      tags: [operator]
-      operationId: updateCableChannel
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IfMatch"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CableChannelInput"}
-      responses:
-        "200":
-          description: Cable channel updated.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableChannel"}
-        default: {$ref: "#/components/responses/Problem"}
-    delete:
-      tags: [operator]
-      operationId: deleteCableChannel
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IfMatch"}]
-      responses:
-        "204": {description: Cable channel deleted.}
-        default: {$ref: "#/components/responses/Problem"}
-  /cable/channels/{channelId}/programs:
-    parameters: [{$ref: "#/components/parameters/CableChannelId"}]
-    get:
-      tags: [operator]
-      operationId: listCablePrograms
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
-      parameters:
-        - $ref: "#/components/parameters/PageCursor"
-        - $ref: "#/components/parameters/PageLimit"
-      responses:
-        "200":
-          description: Program entries belonging to the channel.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableProgramPage"}
-        default: {$ref: "#/components/responses/Problem"}
-    post:
-      tags: [operator]
-      operationId: createCableProgram
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CableProgramInput"}
-      responses:
-        "201":
-          description: Cable program entry created.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableProgram"}
-        default: {$ref: "#/components/responses/Problem"}
-  /cable/programs/{programId}:
-    parameters: [{$ref: "#/components/parameters/CableProgramId"}]
-    get:
-      tags: [operator]
-      operationId: getCableProgram
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
-      responses:
-        "200":
-          description: Cable program entry.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableProgram"}
-        default: {$ref: "#/components/responses/Problem"}
-    patch:
-      tags: [operator]
-      operationId: updateCableProgram
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IfMatch"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CableProgramInput"}
-      responses:
-        "200":
-          description: Cable program entry updated.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableProgram"}
-        default: {$ref: "#/components/responses/Problem"}
-    delete:
-      tags: [operator]
-      operationId: deleteCableProgram
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IfMatch"}]
-      responses:
-        "204": {description: Cable program entry deleted.}
-        default: {$ref: "#/components/responses/Problem"}
-  /cable/playlists:
-    get:
-      tags: [operator]
-      operationId: listCablePlaylists
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
-      parameters:
-        - $ref: "#/components/parameters/PageCursor"
-        - $ref: "#/components/parameters/PageLimit"
-      responses:
-        "200":
-          description: Reusable Cable media playlists.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CablePlaylistPage"}
-        default: {$ref: "#/components/responses/Problem"}
-    post:
-      tags: [operator]
-      operationId: createCablePlaylist
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CablePlaylistInput"}
-      responses:
-        "201":
-          description: Cable playlist created.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CablePlaylist"}
-        default: {$ref: "#/components/responses/Problem"}
-  /cable/playlists/{playlistId}:
-    parameters:
-      - name: playlistId
-        in: path
-        required: true
-        schema: {$ref: "#/components/schemas/Id"}
-    get:
-      tags: [operator]
-      operationId: getCablePlaylist
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
-      responses:
-        "200":
-          description: Cable playlist.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CablePlaylist"}
-        default: {$ref: "#/components/responses/Problem"}
-    patch:
-      tags: [operator]
-      operationId: updateCablePlaylist
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IfMatch"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CablePlaylistInput"}
-      responses:
-        "200":
-          description: Cable playlist updated.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CablePlaylist"}
-        default: {$ref: "#/components/responses/Problem"}
-  /cable/channels/{channelId}/blocks:
-    parameters: [{$ref: "#/components/parameters/CableChannelId"}]
-    get:
-      tags: [operator]
-      operationId: listCableBlocks
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
-      parameters:
-        - $ref: "#/components/parameters/PageCursor"
-        - $ref: "#/components/parameters/PageLimit"
-      responses:
-        "200":
-          description: Scheduled playlist blocks for the channel.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableBlockPage"}
-        default: {$ref: "#/components/responses/Problem"}
-    post:
-      tags: [operator]
-      operationId: createCableBlock
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CableBlockInput"}
-      responses:
-        "201":
-          description: Cable block created and materialized into the channel schedule.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableBlock"}
-        default: {$ref: "#/components/responses/Problem"}
-  /cable/blocks/{blockId}:
-    parameters:
-      - name: blockId
-        in: path
-        required: true
-        schema: {$ref: "#/components/schemas/Id"}
-    get:
-      tags: [operator]
-      operationId: getCableBlock
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
-      responses:
-        "200":
-          description: Scheduled Cable block.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableBlock"}
-        default: {$ref: "#/components/responses/Problem"}
-    patch:
-      tags: [operator]
-      operationId: updateCableBlock
-      security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
-      parameters: [{$ref: "#/components/parameters/IfMatch"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CableBlockInput"}
-      responses:
-        "200":
-          description: Scheduled Cable block updated.
-          headers: {ETag: {$ref: "#/components/headers/ETag"}}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CableBlock"}
+              schema: {$ref: "#/components/schemas/Playlist"}
         default: {$ref: "#/components/responses/Problem"}
   /screenshots:
     post:
       tags: [operator]
       operationId: createScreenshot
       security: [{operatorToken: []}]
-      x-required-scopes: [cable_write]
+      x-required-scopes: [node_write]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1302,7 +1021,7 @@ paths:
       tags: [operator]
       operationId: getScreenshot
       security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
+      x-required-scopes: [node_read]
       responses:
         "200": {description: Screenshot job status, content: {application/json: {schema: {$ref: "#/components/schemas/ScreenshotJob"}}}}
         default: {$ref: "#/components/responses/Problem"}
@@ -1312,7 +1031,7 @@ paths:
       tags: [operator]
       operationId: getScreenshotContent
       security: [{operatorToken: []}]
-      x-required-scopes: [cable_read]
+      x-required-scopes: [node_read]
       responses:
         "200":
           description: Exact captured PNG bytes.
@@ -1610,95 +1329,229 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/RemoteEventPage"}
         default: {$ref: "#/components/responses/Problem"}
-  /player/cable-guide-tokens:
+  /player/app-tokens:
     post:
-      tags: [player, cable-guide]
-      operationId: createCableGuideToken
+      tags: [player, app]
+      operationId: createAppToken
       description: >-
-        Mints a 24h guide token for the hosted Cable guide of one deployment. Also served at
-        /browser-node/player/cable-guide-tokens with browserNodeToken. Refused with 403 unless
-        the node's current assignment targets that deployment's Cable media item.
+        Mints a 24h app token for a web media item with appAccess. Refused with 403 unless the
+        node's current assignment targets that media item.
       security: [{nodeMTLS: []}]
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/CableGuideTokenRequest"}
+            schema: {$ref: "#/components/schemas/AppTokenRequest"}
       responses:
         "201":
-          description: Guide token for the node and deployment.
+          description: App token for the node and media item.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CableGuideToken"}
+              schema: {$ref: "#/components/schemas/AppToken"}
+        "403": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
-  /cable-guide/presentation:
+  /app/context:
     get:
-      tags: [cable-guide]
-      operationId: getCableGuidePresentation
-      security: [{cableGuideToken: []}]
+      tags: [app]
+      operationId: getAppContext
+      security: [{appToken: []}]
       responses:
         "200":
-          description: Live presentation of the token's deployment, with the node's active remote session.
+          description: The node and media item the token was minted for.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CableGuidePresentation"}
+              schema: {$ref: "#/components/schemas/AppContext"}
+        "401": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
-  /cable-guide/media/{assetId}:
+  /app/media:
+    get:
+      tags: [app]
+      operationId: listAppMedia
+      security: [{appToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageSearch"
+        - name: sort
+          in: query
+          description: Sort key. Defaults to createdAt.
+          schema: {type: string, enum: [createdAt, title, size, type], default: createdAt}
+        - $ref: "#/components/parameters/PageOrder"
+        - name: kind
+          in: query
+          description: File media (uploaded assets) or web media (pages).
+          schema: {type: string, enum: [file, web]}
+        - name: mediaType
+          in: query
+          description: Narrows to file media whose artifact is an image, video, or audio type.
+          schema: {type: string, enum: [image, video, audio]}
+      responses:
+        "200":
+          description: Library media, as GET /media.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MediaPage"}
+        "401": {$ref: "#/components/responses/Problem"}
+        default: {$ref: "#/components/responses/Problem"}
+  /app/media/{mediaId}:
     parameters:
-      - name: assetId
+      - name: mediaId
         in: path
         required: true
         schema: {$ref: "#/components/schemas/Id"}
-      - name: access_token
-        in: query
-        description: Guide token for media elements that cannot send headers.
-        schema: {type: string}
     get:
-      tags: [cable-guide]
-      operationId: getCableGuideMedia
-      security: [{cableGuideToken: []}, {}]
+      tags: [app]
+      operationId: getAppMedia
+      security: [{appToken: []}]
       responses:
         "200":
-          description: Asset content; only assets scheduled by the token's deployment.
+          description: Authored media.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
           content:
-            application/octet-stream:
-              schema: {type: string, contentMediaType: application/octet-stream}
-        "206":
-          description: Requested byte range.
-          content:
-            application/octet-stream:
-              schema: {type: string, contentMediaType: application/octet-stream}
+            application/json:
+              schema: {$ref: "#/components/schemas/Media"}
+        "401": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
-  /cable-guide/remote/events:
+  /app/media/{mediaId}/content:
+    parameters:
+      - name: mediaId
+        in: path
+        required: true
+        schema: {$ref: "#/components/schemas/Id"}
+      - $ref: "#/components/parameters/AppAccessToken"
+    head:
+      tags: [app]
+      operationId: headAppMediaContent
+      security: [{appToken: []}, {}]
+      responses:
+        "200":
+          description: Authored-media preview metadata.
+          headers:
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+            Content-Length: {schema: {type: integer, format: int64, minimum: 0}}
+            ETag: {$ref: "#/components/headers/ETag"}
+        default: {$ref: "#/components/responses/Problem"}
     get:
-      tags: [cable-guide]
-      operationId: pollCableGuideRemoteEvents
-      security: [{cableGuideToken: []}]
+      tags: [app]
+      operationId: getAppMediaContent
+      security: [{appToken: []}, {}]
+      parameters:
+        - name: Range
+          in: header
+          schema: {type: string}
+        - name: If-Range
+          in: header
+          schema: {type: string}
+      responses:
+        "200":
+          description: Complete authored-media preview bytes.
+          headers:
+            Accept-Ranges: {schema: {type: string, const: bytes}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "206":
+          description: Partial authored-media preview bytes.
+          headers:
+            Content-Range: {schema: {type: string}}
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        default: {$ref: "#/components/responses/Problem"}
+  /app/media/{mediaId}/thumbnail:
+    parameters:
+      - name: mediaId
+        in: path
+        required: true
+        schema: {$ref: "#/components/schemas/Id"}
+      - $ref: "#/components/parameters/AppAccessToken"
+    get:
+      tags: [app]
+      operationId: getAppMediaThumbnail
+      description: Same as GET /media/{mediaId}/thumbnail. Pass `v={thumbnail.digest}` so the immutable response can be cached for a year.
+      security: [{appToken: []}, {}]
+      parameters:
+        - name: v
+          in: query
+          schema: {type: string, pattern: "^[a-f0-9]{64}$"}
+      responses:
+        "200":
+          description: Thumbnail bytes.
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+            Cache-Control: {schema: {type: string}}
+          content:
+            image/jpeg:
+              schema: {type: string, format: binary}
+            image/png:
+              schema: {type: string, format: binary}
+        "304": {description: Not modified.}
+        default: {$ref: "#/components/responses/Problem"}
+  /app/playlists:
+    get:
+      tags: [app]
+      operationId: listAppPlaylists
+      security: [{appToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Playlists, as GET /playlists.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PlaylistPage"}
+        "401": {$ref: "#/components/responses/Problem"}
+        default: {$ref: "#/components/responses/Problem"}
+  /app/playlists/{playlistId}:
+    parameters: [{$ref: "#/components/parameters/PlaylistId"}]
+    get:
+      tags: [app]
+      operationId: getAppPlaylist
+      security: [{appToken: []}]
+      responses:
+        "200":
+          description: Playlist.
+          headers: {ETag: {$ref: "#/components/headers/ETag"}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Playlist"}
+        "401": {$ref: "#/components/responses/Problem"}
+        default: {$ref: "#/components/responses/Problem"}
+  /app/remote/events:
+    get:
+      tags: [app]
+      operationId: pollAppRemoteEvents
+      security: [{appToken: []}]
       parameters:
         - name: after
           in: query
           schema: {type: integer, format: int64, minimum: 0, default: 0}
-        - name: wait
+        - name: waitSeconds
           in: query
-          schema: {type: integer, minimum: 0, maximum: 30, default: 0}
+          schema: {type: integer, minimum: 0, maximum: 25, default: 0}
       responses:
         "200":
-          description: Remote events of the node's active remote session newer than after; long-polls up to wait seconds.
+          description: Remote events of the node's active phone-remote session newer than after; long-polls up to waitSeconds.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CableGuideRemoteEvents"}
+              schema: {$ref: "#/components/schemas/AppRemoteEventPage"}
+        "401": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
-  /cable-guide/token:renew:
+  /app/token:renew:
     post:
-      tags: [cable-guide]
-      operationId: renewCableGuideToken
-      security: [{cableGuideToken: []}]
+      tags: [app]
+      operationId: renewAppToken
+      security: [{appToken: []}]
       responses:
         "200":
-          description: Successor guide token; refused once the node is no longer assigned the deployment.
+          description: Successor app token; refused with 401 once the node is no longer assigned the media item.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CableGuideToken"}
+              schema: {$ref: "#/components/schemas/AppToken"}
+        "401": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
   /browser-nodes:
     get:
@@ -1807,6 +1660,26 @@ paths:
               schema: {$ref: "#/components/schemas/BrowserCredential"}
         "401": {$ref: "#/components/responses/Problem"}
         default: {$ref: "#/components/responses/Problem"}
+  /browser-node/player/app-tokens:
+    post:
+      tags: [browser-node, app]
+      operationId: createBrowserNodeAppToken
+      description: Browser-node equivalent of POST /player/app-tokens.
+      security: [{browserNodeToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AppTokenRequest"}
+      responses:
+        "201":
+          description: App token for the node and media item.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AppToken"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        default: {$ref: "#/components/responses/Problem"}
 components:
   securitySchemes:
     operatorToken:
@@ -1819,10 +1692,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: CableBrowserNodeToken
-    cableGuideToken:
+    appToken:
       type: http
       scheme: bearer
-      bearerFormat: CableGuideToken
+      bearerFormat: CableAppToken
     browserClaimToken:
       type: http
       scheme: bearer
@@ -1843,9 +1716,12 @@ components:
     UploadId: {name: uploadId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
     AssetId: {name: assetId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
     ReleaseId: {name: releaseId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
-    CableDeploymentId: {name: deploymentId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
-    CableChannelId: {name: channelId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
-    CableProgramId: {name: programId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    PlaylistId: {name: playlistId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
+    AppAccessToken:
+      name: access_token
+      in: query
+      description: App token for media elements that cannot send an Authorization header.
+      schema: {type: string}
     ProfileId: {name: profileId, in: path, required: true, schema: {$ref: "#/components/schemas/Id"}}
     PageCursor:
       name: cursor
@@ -1887,9 +1763,6 @@ components:
       properties:
         expected: {type: boolean}
         releaseDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
-        revisionDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
-        channelId: {type: string}
-        blockId: {type: string}
         itemId: {type: string}
         effectiveAt: {type: string, format: date-time}
     ScreenshotCompletion:
@@ -2028,133 +1901,19 @@ components:
         nextCursor: {type: [string, "null"]}
         previousCursor: {type: [string, "null"]}
         hasMore: {type: boolean}
-    CableDeploymentInput:
+    PlaylistItemInput:
       type: object
       additionalProperties: false
-      required: [name, timezone, theme]
-      properties:
-        name: {type: string, minLength: 1}
-        timezone: {type: string, minLength: 1}
-        theme: {type: string, enum: [nebula, gallery, noir]}
-        guideHorizonSeconds: {type: integer, format: int64, minimum: 3600, maximum: 2678400, default: 86400}
-        guideDensity: {type: string, enum: [quarter-hour, half-hour, hour], default: half-hour}
-        placardDefaults:
-          type: object
-          additionalProperties: {type: string}
-        fallbackMetadata:
-          type: object
-          additionalProperties: {type: string}
-    CableDeployment:
-      type: object
-      additionalProperties: false
-      required: [id, name, timezone, theme, guideHorizonSeconds, guideDensity, version, createdBy, updatedBy, createdAt, updatedAt]
-      properties:
-        id: {$ref: "#/components/schemas/Id"}
-        name: {type: string}
-        timezone: {type: string}
-        theme: {type: string, enum: [nebula, gallery, noir]}
-        guideHorizonSeconds: {type: integer, format: int64, minimum: 3600, maximum: 2678400}
-        guideDensity: {type: string, enum: [quarter-hour, half-hour, hour]}
-        placardDefaults:
-          type: object
-          additionalProperties: {type: string}
-        fallbackMetadata:
-          type: object
-          additionalProperties: {type: string}
-        version: {type: integer, format: int64, minimum: 1}
-        createdBy: {$ref: "#/components/schemas/Id"}
-        updatedBy: {$ref: "#/components/schemas/Id"}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-    CableChannelInput:
-      type: object
-      additionalProperties: false
-      required: [number, name]
-      properties:
-        number: {type: integer, minimum: 1}
-        name: {type: string}
-        callsign: {type: string}
-        description: {type: string}
-        accent: {type: string}
-        artworkAssetId: {$ref: "#/components/schemas/Id"}
-        enabled: {type: boolean}
-        standby: {type: boolean}
-    CableChannel:
-      type: object
-      additionalProperties: false
-      required: [id, deploymentId, number, name, callsign, description, accent, enabled, standby, version, createdAt, updatedAt]
-      properties:
-        id: {$ref: "#/components/schemas/Id"}
-        deploymentId: {$ref: "#/components/schemas/Id"}
-        number: {type: integer, minimum: 1}
-        name: {type: string}
-        callsign: {type: string}
-        description: {type: string}
-        accent: {type: string}
-        artworkAssetId: {$ref: "#/components/schemas/Id"}
-        enabled: {type: boolean}
-        standby: {type: boolean}
-        version: {type: integer, format: int64, minimum: 1}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-    CableProgramInput:
-      type: object
-      additionalProperties: false
-      required: [assetId, startsAt, endsAt]
-      properties:
-        assetId: {$ref: "#/components/schemas/Id"}
-        startsAt: {type: string, format: date-time}
-        endsAt: {type: string, format: date-time}
-        title: {type: string}
-        subtitle: {type: string}
-        tag: {type: string}
-        artist: {type: string}
-        description: {type: string}
-        artworkAssetId: {$ref: "#/components/schemas/Id"}
-        placardPolicy: {type: string}
-        fit: {type: string}
-        availabilityPolicy: {type: string}
-        loop: {type: boolean}
-        mute: {type: boolean}
-        volume: {type: number, format: double, minimum: 0, maximum: 1}
-    CableProgram:
-      type: object
-      additionalProperties: false
-      required: [id, channelId, assetId, startsAt, endsAt, title, subtitle, tag, artist, description, placardPolicy, fit, availabilityPolicy, loop, mute, volume, version, createdAt, updatedAt]
-      properties:
-        id: {$ref: "#/components/schemas/Id"}
-        channelId: {$ref: "#/components/schemas/Id"}
-        assetId: {$ref: "#/components/schemas/Id"}
-        startsAt: {type: string, format: date-time}
-        endsAt: {type: string, format: date-time}
-        title: {type: string}
-        subtitle: {type: string}
-        tag: {type: string}
-        artist: {type: string}
-        description: {type: string}
-        artworkAssetId: {$ref: "#/components/schemas/Id"}
-        placardPolicy: {type: string}
-        fit: {type: string}
-        availabilityPolicy: {type: string}
-        loop: {type: boolean}
-        mute: {type: boolean}
-        volume: {type: number, format: double, minimum: 0, maximum: 1}
-        version: {type: integer, format: int64, minimum: 1}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-    CablePlaylistItemInput:
-      type: object
-      additionalProperties: false
-      description: Exactly one of assetId (file) or mediaId (web media) is required.
+      description: Exactly one of mediaId (any file or web media item) or assetId (file asset) is required.
       required: [position, durationSeconds]
       properties:
-        assetId: {$ref: "#/components/schemas/Id"}
         mediaId: {$ref: "#/components/schemas/Id"}
+        assetId: {$ref: "#/components/schemas/Id"}
         position: {type: integer, minimum: 1}
         durationSeconds: {type: integer, minimum: 1}
         title: {type: string}
         subtitle: {type: string}
-    CablePlaylistInput:
+    PlaylistInput:
       type: object
       additionalProperties: false
       required: [name, items]
@@ -2164,21 +1923,25 @@ components:
         items:
           type: array
           minItems: 1
-          items: {$ref: "#/components/schemas/CablePlaylistItemInput"}
-    CablePlaylistItem:
+          items: {$ref: "#/components/schemas/PlaylistItemInput"}
+    PlaylistItem:
       type: object
       additionalProperties: false
+      description: >-
+        mediaId is set whenever the item's media row exists (file items resolve to their file
+        media row); assetId is set only for file items. Clients re-submitting items send exactly
+        one source: mediaId when present, otherwise assetId.
       required: [id, playlistId, position, durationSeconds, title, subtitle]
       properties:
         id: {$ref: "#/components/schemas/Id"}
         playlistId: {$ref: "#/components/schemas/Id"}
+        mediaId: {$ref: "#/components/schemas/Id"}
         assetId: {$ref: "#/components/schemas/Id"}
-        mediaId: {description: Web media shown for durationSeconds when the item is not a file asset., $ref: "#/components/schemas/Id"}
         position: {type: integer, minimum: 1}
         durationSeconds: {type: integer, minimum: 1}
         title: {type: string}
         subtitle: {type: string}
-    CablePlaylist:
+    Playlist:
       type: object
       additionalProperties: false
       required: [id, name, description, items, version, createdBy, createdAt, updatedAt]
@@ -2186,188 +1949,59 @@ components:
         id: {$ref: "#/components/schemas/Id"}
         name: {type: string}
         description: {type: string}
-        items: {type: array, items: {$ref: "#/components/schemas/CablePlaylistItem"}}
+        items: {type: array, items: {$ref: "#/components/schemas/PlaylistItem"}}
         version: {type: integer, format: int64, minimum: 1}
         createdBy: {$ref: "#/components/schemas/Id"}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
-    CableBlockInput:
+    PlaylistPage:
       type: object
       additionalProperties: false
-      required: [startsAt, endsAt]
-      oneOf:
-        - required: [playlistId]
-        - required: [assetId]
+      required: [items, page]
       properties:
-        playlistId: {$ref: "#/components/schemas/Id"}
-        assetId: {$ref: "#/components/schemas/Id"}
-        startsAt: {type: string, format: date-time}
-        endsAt: {type: string, format: date-time}
-        title: {type: string}
-    CableBlock:
+        items: {type: array, items: {$ref: "#/components/schemas/Playlist"}}
+        page: {$ref: "#/components/schemas/PageInfo"}
+    AppTokenRequest:
       type: object
       additionalProperties: false
-      required: [id, channelId, title, startsAt, endsAt, version, createdBy, createdAt]
-      oneOf:
-        - required: [playlistId]
-        - required: [assetId]
+      required: [mediaId]
       properties:
-        id: {$ref: "#/components/schemas/Id"}
-        channelId: {$ref: "#/components/schemas/Id"}
-        playlistId: {$ref: "#/components/schemas/Id"}
-        assetId: {$ref: "#/components/schemas/Id"}
-        title: {type: string}
-        startsAt: {type: string, format: date-time}
-        endsAt: {type: string, format: date-time}
-        version: {type: integer, format: int64, minimum: 1}
-        createdBy: {$ref: "#/components/schemas/Id"}
-        createdAt: {type: string, format: date-time}
-    CableGuideTokenRequest:
+        mediaId: {description: Web media item with appAccess that the node's current assignment targets., $ref: "#/components/schemas/Id"}
+    AppToken:
       type: object
       additionalProperties: false
-      required: [deploymentId]
-      properties:
-        deploymentId: {$ref: "#/components/schemas/Id"}
-    CableGuideToken:
-      type: object
-      additionalProperties: false
-      required: [token, expiresAt]
+      required: [token, expiresAt, apiUrl]
       properties:
         token: {type: string, minLength: 1}
         expiresAt: {type: string, format: date-time}
-    CableGuideRemote:
+        apiUrl: {type: string, format: uri, description: "Public API base of the control plane, e.g. https://control.example/api/v1."}
+    AppContext:
       type: object
       additionalProperties: false
+      required: [nodeId, nodeName, mediaId]
+      properties:
+        nodeId: {$ref: "#/components/schemas/Id"}
+        nodeName: {type: string}
+        mediaId: {$ref: "#/components/schemas/Id"}
+    AppRemote:
+      type: object
+      additionalProperties: false
+      description: The node's active phone-remote session; the page renders the QR for url when showQr is set.
       required: [url, showQr, expiresAt]
       properties:
         url: {type: string, format: uri}
         showQr: {type: boolean}
         expiresAt: {type: string, format: date-time}
-    CableGuideChannel:
+    AppRemoteEventPage:
       type: object
       additionalProperties: false
-      required: [id, number, name, callsign, accent, enabled]
-      properties:
-        id: {$ref: "#/components/schemas/Id"}
-        number: {type: integer, minimum: 1}
-        name: {type: string}
-        callsign: {type: string}
-        accent: {type: string}
-        enabled: {type: boolean}
-        standbyMessage: {type: string}
-    CableGuideBlock:
-      type: object
-      additionalProperties: false
-      required: [id, channelId, startsAt, endsAt, title, source]
-      properties:
-        id: {$ref: "#/components/schemas/Id"}
-        channelId: {$ref: "#/components/schemas/Id"}
-        startsAt: {type: string, format: date-time}
-        endsAt: {type: string, format: date-time}
-        title: {type: string}
-        source: {type: string, enum: [playlist, asset]}
-    CableGuideOccurrence:
-      type: object
-      additionalProperties: false
-      required: [id, channelId, startsAt, endsAt, title, media, placard, fit, loop, muted, volume]
-      properties:
-        id: {type: string}
-        blockId: {$ref: "#/components/schemas/Id"}
-        itemId: {$ref: "#/components/schemas/Id"}
-        itemPosition: {type: integer, minimum: 1}
-        occurrence: {type: integer, minimum: 1}
-        channelId: {$ref: "#/components/schemas/Id"}
-        startsAt: {type: string, format: date-time}
-        endsAt: {type: string, format: date-time}
-        title: {type: string}
-        subtitle: {type: string}
-        media:
-          type: object
-          additionalProperties: false
-          required: [kind, reference, mime]
-          properties:
-            kind: {type: string, enum: [video, image]}
-            reference: {type: string, description: "Guide media URL, /api/v1/cable-guide/media/{assetId}."}
-            mime: {type: string, enum: [video/mp4, image/jpeg, image/png, image/webp]}
-        placard: {type: string, enum: [always, start, never]}
-        fit: {type: string, enum: [fit, fill]}
-        loop: {type: boolean}
-        muted: {type: boolean}
-        volume: {type: number, minimum: 0, maximum: 100}
-    CableGuidePresentation:
-      type: object
-      additionalProperties: false
-      description: Live guide document computed from the deployment's channels, blocks and playlists for now-1h through the guide horizon.
-      required: [revision, channels, blocks, occurrences, bridge, theme]
-      properties:
-        revision:
-          type: object
-          additionalProperties: false
-          required: [id, digest, generatedAt, timezone, stale, guideDensity]
-          properties:
-            id: {type: string, description: Content digest of the authored schedule; changes only when the schedule changes.}
-            digest: {type: string}
-            generatedAt: {type: string, format: date-time}
-            timezone: {type: string}
-            stale: {type: boolean}
-            guideDensity: {type: string, enum: [quarter-hour, half-hour, hour]}
-        channels: {type: array, items: {$ref: "#/components/schemas/CableGuideChannel"}}
-        blocks: {type: array, items: {$ref: "#/components/schemas/CableGuideBlock"}}
-        occurrences: {type: array, items: {$ref: "#/components/schemas/CableGuideOccurrence"}}
-        bridge:
-          type: object
-          additionalProperties: false
-          required: [protocolVersion, state]
-          properties:
-            protocolVersion: {type: string}
-            state: {type: string, enum: [online]}
-        theme: {type: string, enum: [nebula, gallery, noir]}
-        remote: {$ref: "#/components/schemas/CableGuideRemote"}
-    CableGuideRemoteEvents:
-      type: object
-      additionalProperties: false
-      required: [events, next]
+      required: [events, nextSequence]
       properties:
         events:
           type: array
           items: {$ref: "#/components/schemas/RemoteEvent"}
-        next: {type: integer, format: int64, minimum: 0}
-        remote: {$ref: "#/components/schemas/CableGuideRemote"}
-    CableDeploymentPage:
-      type: object
-      additionalProperties: false
-      required: [items, page]
-      properties:
-        items: {type: array, items: {$ref: "#/components/schemas/CableDeployment"}}
-        page: {$ref: "#/components/schemas/PageInfo"}
-    CableChannelPage:
-      type: object
-      additionalProperties: false
-      required: [items, page]
-      properties:
-        items: {type: array, items: {$ref: "#/components/schemas/CableChannel"}}
-        page: {$ref: "#/components/schemas/PageInfo"}
-    CableProgramPage:
-      type: object
-      additionalProperties: false
-      required: [items, page]
-      properties:
-        items: {type: array, items: {$ref: "#/components/schemas/CableProgram"}}
-        page: {$ref: "#/components/schemas/PageInfo"}
-    CablePlaylistPage:
-      type: object
-      additionalProperties: false
-      required: [items, page]
-      properties:
-        items: {type: array, items: {$ref: "#/components/schemas/CablePlaylist"}}
-        page: {$ref: "#/components/schemas/PageInfo"}
-    CableBlockPage:
-      type: object
-      additionalProperties: false
-      required: [items, page]
-      properties:
-        items: {type: array, items: {$ref: "#/components/schemas/CableBlock"}}
-        page: {$ref: "#/components/schemas/PageInfo"}
+        nextSequence: {type: integer, format: int64, minimum: 0}
+        remote: {$ref: "#/components/schemas/AppRemote"}
     NodePage:
       type: object
       required: [items, page]
@@ -2534,6 +2168,7 @@ components:
         tags: {type: array, maxItems: 64, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
         artworkAssetId: {$ref: "#/components/schemas/Id"}
         playback: {$ref: "#/components/schemas/MediaPlayback"}
+        appAccess: {type: boolean, default: false, description: "Web media only: present the page as a Cuelight app with an app token (see the app tag)."}
     MediaPatch:
       type: object
       additionalProperties: false
@@ -2545,16 +2180,17 @@ components:
         tags: {type: array, maxItems: 64, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128}}
         artworkAssetId: {$ref: "#/components/schemas/Id"}
         playback: {$ref: "#/components/schemas/MediaPlayback"}
+        appAccess: {type: boolean, description: Web media only; 400 for file media.}
     Media:
       type: object
       additionalProperties: false
-      required: [id, kind, title, tags, version, createdBy, updatedBy, createdAt, updatedAt]
+      required: [id, kind, title, tags, appAccess, version, createdBy, updatedBy, createdAt, updatedAt]
       properties:
         id: {$ref: "#/components/schemas/Id"}
         kind: {type: string, enum: [file, web]}
         assetId: {description: File media only., $ref: "#/components/schemas/Id"}
-        url: {type: string, format: uri, description: "Web media: the page URL; for Cable items the resolved hosted guide URL."}
-        deploymentId: {description: Read-only; set on the Cable item maintained for a deployment. Operators cannot edit or delete these., $ref: "#/components/schemas/Id"}
+        url: {type: string, format: uri, description: "Web media: the page URL."}
+        appAccess: {type: boolean, description: "Web media presented as a Cuelight app with access to the screen's remote and the media library. Always false for file media."}
         faviconUrl: {type: string, format: uri}
         thumbnailError: {type: string, description: Last web capture failure.}
         thumbnailAttemptedAt: {type: string, format: date-time}
@@ -2602,7 +2238,7 @@ components:
       additionalProperties: false
       required: [kind, id, name, href]
       properties:
-        kind: {type: string, enum: [media, playlist, block, channel, profile, revision, release, assignment]}
+        kind: {type: string, enum: [media, playlist, release, assignment]}
         id: {$ref: "#/components/schemas/Id"}
         name: {type: string}
         href: {type: string, pattern: "^/"}
@@ -2687,32 +2323,20 @@ components:
           minItems: 1
           uniqueItems: true
           items: {type: string, enum: [stream, cache_then_play]}
-    CablePresentation:
-      type: object
-      required: [shellBuildDigest, revisionArtifactDigest, entrypoint, bridgeProtocol, artifactClosure]
-      properties:
-        shellBuildDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
-        revisionArtifactDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
-        entrypoint: {type: string, minLength: 1}
-        bridgeProtocol: {type: string, minLength: 1}
-        artifactClosure:
-          type: array
-          minItems: 2
-          uniqueItems: true
-          items: {type: string, pattern: "^[a-f0-9]{64}$"}
     WebPresentation:
       type: object
       required: [url]
       properties:
         url: {type: string, format: uri, description: Absolute http or https URL without userinfo.}
+        appAccess: {type: boolean, description: "The page is a Cuelight app: the node mints an app token for mediaId and passes it in the URL fragment (see the app tag)."}
+        mediaId: {description: Web media item the release presents; set when appAccess is true., $ref: "#/components/schemas/Id"}
     ReleasePresentation:
       type: object
       required: [kind]
       properties:
-        kind: {type: string, enum: [media, media-schedule, cable, web]}
+        kind: {type: string, enum: [media, media-schedule, web]}
         media: {$ref: "#/components/schemas/MediaPresentation"}
         mediaSchedule: {$ref: "#/components/schemas/MediaSchedulePresentation"}
-        cable: {$ref: "#/components/schemas/CablePresentation"}
         web: {$ref: "#/components/schemas/WebPresentation"}
       discriminator: {propertyName: kind}
       oneOf:
@@ -2726,11 +2350,6 @@ components:
           properties:
             kind: {type: string, const: media-schedule}
             mediaSchedule: {$ref: "#/components/schemas/MediaSchedulePresentation"}
-        - type: object
-          required: [kind, cable]
-          properties:
-            kind: {type: string, const: cable}
-            cable: {$ref: "#/components/schemas/CablePresentation"}
         - type: object
           required: [kind, web]
           properties:
@@ -2766,7 +2385,7 @@ components:
     AssignmentInput:
       type: object
       additionalProperties: false
-      description: Targets exactly one of mediaId or playlistId. The server publishes or reuses the signed release that presents it (file media → media, web media and Cable items → web, playlists → media-schedule).
+      description: Targets exactly one of mediaId or playlistId. The server publishes or reuses the signed release that presents it (file media → media, web media → web, playlists → media-schedule).
       required: [expectedGeneration]
       properties:
         mediaId: {$ref: "#/components/schemas/Id"}
@@ -2868,10 +2487,8 @@ components:
       required: [releaseDigest, presentationKind, state, transitionedAt]
       properties:
         releaseDigest: {type: string, pattern: "^[a-f0-9]{64}$"}
-        presentationKind: {type: string, enum: [media, media-schedule, cable, web]}
+        presentationKind: {type: string, enum: [media, media-schedule, web]}
         state: {type: string, enum: [playing, paused, off_air, stale]}
-        channelId: {$ref: "#/components/schemas/Id"}
-        blockId: {$ref: "#/components/schemas/Id"}
         itemId: {$ref: "#/components/schemas/Id"}
         mediaId: {$ref: "#/components/schemas/Id"}
         assetId: {$ref: "#/components/schemas/Id"}
@@ -2888,7 +2505,7 @@ components:
         sequence: {type: integer, format: int64, minimum: 1}
         desiredGenerationSeen: {type: integer, format: int64, minimum: 0}
         observedGeneration: {type: integer, format: int64, minimum: 0}
-        presentationKind: {type: [string, "null"], enum: [media, media-schedule, cable, web, null]}
+        presentationKind: {type: [string, "null"], enum: [media, media-schedule, web, null]}
         renderingReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         candidateReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}
         healthyReleaseDigest: {type: [string, "null"], pattern: "^[a-f0-9]{64}$"}

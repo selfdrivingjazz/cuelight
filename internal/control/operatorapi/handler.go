@@ -13,10 +13,10 @@ import (
 
 	"github.com/jmill/cable/internal/control/assignment"
 	"github.com/jmill/cable/internal/control/auth"
-	"github.com/jmill/cable/internal/control/cable"
 	"github.com/jmill/cable/internal/control/media"
 	"github.com/jmill/cable/internal/control/page"
 	"github.com/jmill/cable/internal/control/pki"
+	"github.com/jmill/cable/internal/control/playlist"
 	"github.com/jmill/cable/internal/control/profile"
 	"github.com/jmill/cable/internal/control/release"
 	"github.com/jmill/cable/internal/control/remote"
@@ -43,16 +43,8 @@ var OperationScopes = map[string]string{
 	"getProfile": ScopeAssignmentRead, "updateProfile": ScopeAssignmentWrite,
 	"deleteProfile": ScopeAssignmentWrite, "activateProfile": ScopeAssignmentWrite,
 	"getActiveProfile": ScopeAssignmentRead,
-	"listCableDeployments": ScopeCableRead, "createCableDeployment": ScopeCableWrite,
-	"getCableDeployment": ScopeCableRead, "updateCableDeployment": ScopeCableWrite,
-	"deleteCableDeployment": ScopeCableWrite, "listCableChannels": ScopeCableRead,
-	"createCableChannel": ScopeCableWrite, "getCableChannel": ScopeCableRead,
-	"updateCableChannel": ScopeCableWrite, "deleteCableChannel": ScopeCableWrite,
-	"listCablePrograms": ScopeCableRead, "createCableProgram": ScopeCableWrite,
-	"getCableProgram": ScopeCableRead, "updateCableProgram": ScopeCableWrite,
-	"deleteCableProgram": ScopeCableWrite,
-	"getCableBlock":      ScopeCableRead, "updateCablePlaylist": ScopeCableWrite,
-	"updateCableBlock": ScopeCableWrite,
+	"listPlaylists": ScopeMediaRead, "createPlaylist": ScopeMediaWrite,
+	"getPlaylist": ScopeMediaRead, "updatePlaylist": ScopeMediaWrite,
 }
 
 type Handler struct{ deps Dependencies }
@@ -97,29 +89,10 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.Handle("DELETE /profiles/{profileId}", h.authorized(ScopeAssignmentWrite, h.deleteProfile))
 	mux.Handle("POST /profiles/{profileId}/activate", h.authorized(ScopeAssignmentWrite, h.activateProfile))
 
-	mux.Handle("GET /cable/deployments", h.authorized(ScopeCableRead, h.listCableDeployments))
-	mux.Handle("POST /cable/deployments", h.authorized(ScopeCableWrite, h.createCableDeployment))
-	mux.Handle("GET /cable/deployments/{deploymentId}", h.authorized(ScopeCableRead, h.getCableDeployment))
-	mux.Handle("PATCH /cable/deployments/{deploymentId}", h.authorized(ScopeCableWrite, h.updateCableDeployment))
-	mux.Handle("DELETE /cable/deployments/{deploymentId}", h.authorized(ScopeCableWrite, h.deleteCableDeployment))
-	mux.Handle("GET /cable/deployments/{deploymentId}/channels", h.authorized(ScopeCableRead, h.listCableChannels))
-	mux.Handle("POST /cable/deployments/{deploymentId}/channels", h.authorized(ScopeCableWrite, h.createCableChannel))
-	mux.Handle("GET /cable/channels/{channelId}", h.authorized(ScopeCableRead, h.getCableChannel))
-	mux.Handle("PATCH /cable/channels/{channelId}", h.authorized(ScopeCableWrite, h.updateCableChannel))
-	mux.Handle("DELETE /cable/channels/{channelId}", h.authorized(ScopeCableWrite, h.deleteCableChannel))
-	mux.Handle("GET /cable/channels/{channelId}/programs", h.authorized(ScopeCableRead, h.listCablePrograms))
-	mux.Handle("POST /cable/channels/{channelId}/programs", h.authorized(ScopeCableWrite, h.createCableProgram))
-	mux.Handle("GET /cable/programs/{programId}", h.authorized(ScopeCableRead, h.getCableProgram))
-	mux.Handle("PATCH /cable/programs/{programId}", h.authorized(ScopeCableWrite, h.updateCableProgram))
-	mux.Handle("DELETE /cable/programs/{programId}", h.authorized(ScopeCableWrite, h.deleteCableProgram))
-	mux.Handle("GET /cable/playlists", h.authorized(ScopeCableRead, h.listCablePlaylists))
-	mux.Handle("POST /cable/playlists", h.authorized(ScopeCableWrite, h.createCablePlaylist))
-	mux.Handle("GET /cable/playlists/{playlistId}", h.authorized(ScopeCableRead, h.getCablePlaylist))
-	mux.Handle("PATCH /cable/playlists/{playlistId}", h.authorized(ScopeCableWrite, h.updateCablePlaylist))
-	mux.Handle("GET /cable/channels/{channelId}/blocks", h.authorized(ScopeCableRead, h.listCableBlocks))
-	mux.Handle("POST /cable/channels/{channelId}/blocks", h.authorized(ScopeCableWrite, h.createCableBlock))
-	mux.Handle("GET /cable/blocks/{blockId}", h.authorized(ScopeCableRead, h.getCableBlock))
-	mux.Handle("PATCH /cable/blocks/{blockId}", h.authorized(ScopeCableWrite, h.updateCableBlock))
+	mux.Handle("GET /playlists", h.authorized(ScopeMediaRead, h.listPlaylists))
+	mux.Handle("POST /playlists", h.authorized(ScopeMediaWrite, h.createPlaylist))
+	mux.Handle("GET /playlists/{playlistId}", h.authorized(ScopeMediaRead, h.getPlaylist))
+	mux.Handle("PATCH /playlists/{playlistId}", h.authorized(ScopeMediaWrite, h.updatePlaylist))
 	return mux
 }
 
@@ -161,8 +134,7 @@ func (h *Handler) authorized(scope string, fn http.HandlerFunc) http.Handler {
 				ScopeAssignmentRead: ScopeAssignmentRead, ScopeAssignmentWrite: ScopeAssignmentWrite,
 				ScopeMediaRead: ScopeMediaRead, ScopeMediaWrite: ScopeMediaWrite,
 				ScopeLocalMediaRead: ScopeLocalMediaRead, ScopeReleaseRead: ScopeReleaseRead,
-				ScopeReleaseWrite: ScopeReleaseWrite, ScopeCableRead: ScopeCableRead,
-				ScopeCableWrite: ScopeCableWrite, "operator_read": "",
+				ScopeReleaseWrite: ScopeReleaseWrite, "operator_read": "",
 			}}
 		}
 		if err := authorizer.Authorize(actor, action, resourceType(r), resourceID(r)); err != nil {
@@ -182,14 +154,8 @@ func resourceType(r *http.Request) string {
 		return "asset"
 	case r.PathValue("releaseId") != "" || strings.HasPrefix(r.URL.Path, "/releases"):
 		return "release"
-	case r.PathValue("deploymentId") != "":
-		return "deployment"
-	case r.PathValue("channelId") != "":
-		return "channel"
-	case r.PathValue("programId") != "":
-		return "program"
-	case strings.HasPrefix(r.URL.Path, "/cable"):
-		return "cable"
+	case r.PathValue("playlistId") != "" || strings.HasPrefix(r.URL.Path, "/playlists"):
+		return "playlist"
 	case strings.HasPrefix(r.URL.Path, "/assignments"):
 		return "assignment"
 	case strings.HasPrefix(r.URL.Path, "/profiles"):
@@ -910,33 +876,29 @@ func writeError(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(Problem{Type: "about:blank", Title: title, Status: status, Detail: err.Error()})
 }
 func statusFor(err error) int {
-	var validation *cable.ValidationError
-	if errors.As(err, &validation) {
-		return http.StatusBadRequest
-	}
 	switch {
 	case errors.Is(err, ErrUnauthorized), errors.Is(err, auth.ErrInvalidCredential), errors.Is(err, auth.ErrTokenRevoked):
 		return http.StatusUnauthorized
-	case errors.Is(err, ErrForbidden), errors.Is(err, auth.ErrInsufficientScope), errors.Is(err, cable.ErrForbidden):
+	case errors.Is(err, ErrForbidden), errors.Is(err, auth.ErrInsufficientScope):
 		return http.StatusForbidden
 	case errors.Is(err, ErrBodyTooLarge), errors.Is(err, ErrChunkTooLarge), errors.Is(err, media.ErrChunkTooLarge):
 		return http.StatusRequestEntityTooLarge
-	case errors.Is(err, ErrPrecondition), errors.Is(err, assignment.ErrGenerationConflict), errors.Is(err, cable.ErrConflict), errors.Is(err, profile.ErrVersionConflict):
+	case errors.Is(err, ErrPrecondition), errors.Is(err, assignment.ErrGenerationConflict), errors.Is(err, playlist.ErrConflict), errors.Is(err, profile.ErrVersionConflict):
 		return http.StatusPreconditionFailed
 	case errors.Is(err, media.ErrOffsetMismatch), errors.Is(err, ErrOffsetMismatch),
-		errors.Is(err, cable.ErrImmutable), errors.Is(err, cable.ErrArtifactUnavailable),
+		errors.Is(err, playlist.ErrNameConflict),
 		errors.Is(err, release.ErrArtifactMissing), errors.Is(err, release.ErrArtifactQuarantined),
 		errors.Is(err, release.ErrArtifactIncompatible),
 		errors.Is(err, remote.ErrDisabled):
 		return http.StatusConflict
-	case errors.Is(err, auth.ErrNotFound), errors.Is(err, pki.ErrNodeNotFound), errors.Is(err, pki.ErrTokenNotFound), errors.Is(err, media.ErrNotFound), errors.Is(err, assignment.ErrTargetNotFound), errors.Is(err, cable.ErrNotFound), errors.Is(err, profile.ErrNotFound),
+	case errors.Is(err, auth.ErrNotFound), errors.Is(err, pki.ErrNodeNotFound), errors.Is(err, pki.ErrTokenNotFound), errors.Is(err, media.ErrNotFound), errors.Is(err, assignment.ErrTargetNotFound), errors.Is(err, playlist.ErrNotFound), errors.Is(err, profile.ErrNotFound),
 		errors.Is(err, remote.ErrSessionMissing):
 		return http.StatusNotFound
 	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrCursorInvalid), errors.Is(err, ErrWaitInvalid), errors.Is(err, profile.ErrInvalid),
 		errors.Is(err, page.ErrCursorInvalid), errors.Is(err, page.ErrCursorTampered), errors.Is(err, page.ErrLimitInvalid),
 		errors.Is(err, page.ErrSortInvalid), errors.Is(err, page.ErrOrderInvalid),
 		errors.Is(err, media.ErrInvalidArgument), errors.Is(err, assignment.ErrInvalidAssignment), errors.Is(err, release.ErrInvalidMutation),
-		errors.Is(err, cable.ErrInvalidArgument), errors.Is(err, cable.ErrOverlap), errors.Is(err, remote.ErrInvalid):
+		errors.Is(err, playlist.ErrInvalidArgument), errors.Is(err, remote.ErrInvalid):
 		return http.StatusBadRequest
 	case errors.Is(err, assignment.ErrIdempotencyConflict), errors.Is(err, release.ErrIdempotencyConflict), errors.Is(err, pki.ErrIdempotencyConflict), errors.Is(err, profile.ErrNameConflict):
 		return http.StatusConflict

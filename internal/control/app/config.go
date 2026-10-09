@@ -47,8 +47,6 @@ type Config struct {
 	PublicURL               string
 	// WebNodeDir is the built website-node app served at /node/; empty disables it.
 	WebNodeDir string
-	// CableWebDir is the built cable-web guide served at /cable/; empty disables it.
-	CableWebDir string
 	// WebCaptureBrowser is a headless Chromium binary used to capture web
 	// library thumbnails; empty auto-detects one on PATH.
 	WebCaptureBrowser      string
@@ -95,7 +93,6 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		PlaybackProfile:         envOrDefault(lookup, "CABLE_CONTROL_PLAYBACK_PROFILE", "default"),
 		PublicURL:               env(lookup, "CABLE_CONTROL_PUBLIC_URL"),
 		WebNodeDir:              env(lookup, "CABLE_CONTROL_WEB_NODE_DIR"),
-		CableWebDir:             env(lookup, "CABLE_CONTROL_CABLE_WEB_DIR"),
 		WebCaptureBrowser:       env(lookup, "CABLE_CONTROL_WEB_CAPTURE_BROWSER"),
 		DatabaseTimeout:         defaultDatabaseTimeout,
 		DatabaseMaxConnections:  defaultDatabaseConnections,

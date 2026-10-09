@@ -30,12 +30,12 @@ const (
 
 // TargetMedia is the library view of an assignable media item.
 type TargetMedia struct {
-	ID           string
-	Kind         string
-	AssetID      string
-	URL          string
-	DeploymentID string
-	Playback     media.Playback
+	ID        string
+	Kind      string
+	AssetID   string
+	URL       string
+	AppAccess bool
+	Playback  media.Playback
 }
 
 // PlaylistEntry is one playlist item: a file asset with its original
@@ -56,18 +56,16 @@ type TargetCatalog interface {
 }
 
 // TargetPublisher turns an assignment target into a signed release: file
-// media become media presentations, web media (including Cable items) web
-// presentations, and playlists media schedules. Identical payloads reuse the
-// existing release by digest.
+// media become media presentations, web media web presentations (carrying the
+// media ID when the item has app access), and playlists media schedules.
+// Identical payloads reuse the existing release by digest.
 type TargetPublisher struct {
 	Media                  Service
 	Catalog                TargetCatalog
 	Releases               Repository
 	Signer                 Signer
 	MinimumProtocolVersion string
-	// PublicOrigin resolves Cable item URLs (<origin>/cable/?deployment=<id>).
-	PublicOrigin string
-	Now          func() time.Time
+	Now                    func() time.Time
 }
 
 func (p TargetPublisher) PublishTarget(ctx context.Context, actorID, idempotencyKey, mediaID, playlistID string) (canonical.EnvelopeV1, error) {
@@ -93,12 +91,14 @@ func (p TargetPublisher) PublishTarget(ctx context.Context, actorID, idempotency
 		return canonical.EnvelopeV1{}, err
 	}
 	if target.Kind == media.KindWeb {
-		url, err := p.webURL(target)
-		if err != nil {
-			return canonical.EnvelopeV1{}, err
+		web := canonical.WebPresentation{URL: target.URL}
+		request := "web:" + target.URL
+		if target.AppAccess {
+			web.AppAccess, web.MediaID = true, target.ID
+			request += "#app:" + target.ID
 		}
-		result, err := p.publish(ctx, mutation, "web:"+url, func() (PreparedPublication, error) {
-			return p.prepareWeb(url)
+		result, err := p.publish(ctx, mutation, request, func() (PreparedPublication, error) {
+			return p.prepareWeb(web)
 		})
 		return result.Envelope, err
 	}
@@ -108,16 +108,6 @@ func (p TargetPublisher) PublishTarget(ctx context.Context, actorID, idempotency
 		AllowedDeliveryMode: []string{DeliveryCacheThenPlay, DeliveryStream},
 	}})
 	return result.Envelope, err
-}
-
-func (p TargetPublisher) webURL(target TargetMedia) (string, error) {
-	if target.DeploymentID == "" {
-		return target.URL, nil
-	}
-	if p.PublicOrigin == "" {
-		return "", errors.New("cable items require a configured public origin")
-	}
-	return media.CableURL(p.PublicOrigin, target.DeploymentID), nil
 }
 
 func (p TargetPublisher) publish(ctx context.Context, mutation Mutation, request string, prepare func() (PreparedPublication, error)) (PublishResult, error) {
@@ -151,14 +141,14 @@ func signAndPublish(ctx context.Context, releases Repository, signer Signer, pub
 	return result, nil
 }
 
-func (p TargetPublisher) prepareWeb(url string) (PreparedPublication, error) {
-	if err := canonical.ValidateWebURL(url); err != nil {
+func (p TargetPublisher) prepareWeb(web canonical.WebPresentation) (PreparedPublication, error) {
+	if err := canonical.ValidateWebURL(web.URL); err != nil {
 		return PreparedPublication{}, fmt.Errorf("%w: %v", media.ErrInvalidArgument, err)
 	}
 	return digestPayload(canonical.PayloadV1{
 		SchemaVersion:          canonical.SchemaVersion,
 		MinimumProtocolVersion: p.MinimumProtocolVersion,
-		Presentation:           canonical.Presentation{Kind: canonical.PresentationWeb, Web: &canonical.WebPresentation{URL: url}},
+		Presentation:           canonical.Presentation{Kind: canonical.PresentationWeb, Web: &web},
 		RequiredFeatures:       []string{"chromium"},
 	})
 }
@@ -197,11 +187,7 @@ func (p TargetPublisher) prepareSchedule(entries []PlaylistEntry) (PreparedPubli
 		end := at.Add(time.Duration(entry.DurationSeconds) * time.Second)
 		item := canonical.MediaScheduleItem{ID: entry.ID + "#" + strconv.Itoa(occurrence/len(entries)), StartsAt: at.Format(time.RFC3339), EndsAt: end.Format(time.RFC3339)}
 		if entry.Web != nil {
-			url, err := p.webURL(*entry.Web)
-			if err != nil {
-				return PreparedPublication{}, err
-			}
-			item.Web = &canonical.MediaScheduleWebItem{URL: url}
+			item.Web = &canonical.MediaScheduleWebItem{URL: entry.Web.URL}
 		} else {
 			item.ArtifactDigest, item.MediaType = entry.Artifact.Digest, entry.Artifact.MediaType
 			item.Fit, item.Loop, item.Volume = "fit", true, 100

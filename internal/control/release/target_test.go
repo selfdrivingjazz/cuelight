@@ -38,26 +38,29 @@ func targetFixture(t *testing.T, catalog catalogFixture) TargetPublisher {
 	service := publishFixture(t, repository, &artifactFixture{artifacts: []Artifact{readyArtifact()}}, compatibleProfile())
 	return TargetPublisher{
 		Media: service, Catalog: catalog, Releases: repository, Signer: service.Signer,
-		MinimumProtocolVersion: canonical.ProtocolV1, PublicOrigin: "https://control.example/",
-		Now: func() time.Time { return time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC) },
+		MinimumProtocolVersion: canonical.ProtocolV1,
+		Now:                    func() time.Time { return time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC) },
 	}
 }
 
-func TestTargetPublisherResolvesCableItemsToHostedGuide(t *testing.T) {
+func TestTargetPublisherMarksAppAccessWebMedia(t *testing.T) {
 	publisher := targetFixture(t, catalogFixture{media: map[string]TargetMedia{
-		"cable": {ID: "cable", Kind: media.KindWeb, DeploymentID: "dep-1"},
+		"page": {ID: "page", Kind: media.KindWeb, URL: "https://example.com/board"},
+		"app":  {ID: "app", Kind: media.KindWeb, URL: "https://apps.example/guide", AppAccess: true},
 	}})
-	envelope, err := publisher.PublishTarget(context.Background(), "actor", "key-1", "cable", "")
+	plain, err := publisher.PublishTarget(context.Background(), "actor", "key-1", "page", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	web, ok := envelope.Payload.WebPresentation()
-	if !ok || web.URL != "https://control.example/cable/?deployment=dep-1" {
-		t.Fatalf("cable item release = %#v", envelope.Payload.Presentation)
+	if web, ok := plain.Payload.WebPresentation(); !ok || web.URL != "https://example.com/board" || web.AppAccess || web.MediaID != "" {
+		t.Fatalf("plain web release = %#v", plain.Payload.Presentation)
 	}
-	publisher.PublicOrigin = ""
-	if _, err := publisher.PublishTarget(context.Background(), "actor", "key-2", "cable", ""); err == nil {
-		t.Fatal("cable item published without a public origin")
+	app, err := publisher.PublishTarget(context.Background(), "actor", "key-2", "app", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if web, ok := app.Payload.WebPresentation(); !ok || web.URL != "https://apps.example/guide" || !web.AppAccess || web.MediaID != "app" {
+		t.Fatalf("app web release = %#v", app.Payload.Presentation)
 	}
 }
 

@@ -30,10 +30,10 @@ type RemoteSessionCreator interface {
 	CreateRemoteSession(context.Context, int64) (playerclient.RemoteSession, error)
 }
 
-// GuideTokenSource mints tokens for the control-hosted Cable guide
-// (https pages at /cable/?deployment=<id>; see HostedGuideDeployment).
-type GuideTokenSource interface {
-	CreateCableGuideToken(context.Context, string) (playerclient.CableGuideToken, error)
+// AppTokenSource mints app tokens for web presentations whose media item has
+// app access.
+type AppTokenSource interface {
+	CreateAppToken(context.Context, string) (playerclient.AppToken, error)
 }
 
 type ChromiumConfig struct {
@@ -45,12 +45,12 @@ type ChromiumConfig struct {
 	Output       io.Writer
 	Launcher     BrowserLauncher
 	Remote       RemoteEventSource
-	GuideTokens  GuideTokenSource
+	AppTokens    AppTokenSource
 }
 
 // Chromium owns the local media bridge server and the browser process. It
 // never forwards control-plane credentials to Chromium; bridge pages see only
-// the loopback URL and hosted guide pages see only their scoped guide token.
+// the loopback URL and app-access pages see only their scoped app token.
 type Chromium struct {
 	RuntimeRoot  string
 	LoopbackAddr string
@@ -58,7 +58,7 @@ type Chromium struct {
 	Output       io.Writer
 	launcher     BrowserLauncher
 	Remote       RemoteEventSource
-	GuideTokens  GuideTokenSource
+	AppTokens    AppTokenSource
 
 	mu       sync.Mutex
 	server   *http.Server
@@ -110,7 +110,7 @@ func NewChromium(config ChromiumConfig) (*Chromium, error) {
 	if host, _, err := net.SplitHostPort(config.LoopbackAddr); err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 		return nil, errors.New("Chromium bridge must bind a loopback IP address")
 	}
-	return &Chromium{RuntimeRoot: config.RuntimeRoot, LoopbackAddr: config.LoopbackAddr, Timeout: config.Timeout, Output: config.Output, Remote: config.Remote, GuideTokens: config.GuideTokens, launcher: config.Launcher}, nil
+	return &Chromium{RuntimeRoot: config.RuntimeRoot, LoopbackAddr: config.LoopbackAddr, Timeout: config.Timeout, Output: config.Output, Remote: config.Remote, AppTokens: config.AppTokens, launcher: config.Launcher}, nil
 }
 
 func (c *Chromium) Prepare(_ context.Context, candidate Candidate) error {
@@ -495,23 +495,24 @@ func (c *Chromium) showScheduleItem(ctx context.Context, state *chromiumState, b
 
 // startWeb opens the website directly in the desktop renderer. Readiness is a
 // successful launch of a live window. Plain sites receive remote input as
-// injected native events; the control-hosted Cable guide is loaded with a
-// scoped guide token and consumes the remote session itself.
+// injected native events; app-access pages are loaded with a scoped app token
+// in their URL fragment and consume the remote session themselves.
 func (c *Chromium) startWeb(ctx context.Context, state *chromiumState) error {
 	launcher, ok := c.launcher.(WebBrowserLauncher)
 	if !ok {
 		return errors.New("web presentations require the desktop renderer")
 	}
 	launch := WebLaunch{URL: state.candidate.WebURL, Remote: state.candidate.Remote}
-	guide := false
-	if c.GuideTokens != nil {
-		if deploymentID, ok := HostedGuideDeployment(launch.URL); ok {
-			token, err := c.GuideTokens.CreateCableGuideToken(ctx, deploymentID)
-			if err != nil {
-				return fmt.Errorf("mint Cable guide token: %w", err)
-			}
-			launch.URL, launch.Remote, guide = WithGuideToken(launch.URL, token.Token), nil, true
+	app := state.candidate.AppAccess
+	if app {
+		if c.AppTokens == nil {
+			return errors.New("app-access web presentations require an app token source")
 		}
+		token, err := c.AppTokens.CreateAppToken(ctx, state.candidate.MediaID)
+		if err != nil {
+			return fmt.Errorf("mint app token: %w", err)
+		}
+		launch.URL, launch.Remote = WithAppToken(launch.URL, token.Token, token.APIURL), nil
 	}
 	session, err := launcher.LaunchWeb(ctx, launch)
 	if err != nil {
@@ -528,10 +529,10 @@ func (c *Chromium) startWeb(ctx context.Context, state *chromiumState) error {
 	var stopWorker context.CancelFunc
 	if state.remote != nil && c.Remote != nil {
 		var workerCtx context.Context
-		if input, ok := session.(BrowserInputSession); ok && !guide {
+		if input, ok := session.(BrowserInputSession); ok && !app {
 			workerCtx, stopWorker = context.WithCancel(context.Background())
 			go c.forwardRemoteInput(workerCtx, state, input)
-		} else if guide {
+		} else if app {
 			workerCtx, stopWorker = context.WithCancel(context.Background())
 			go c.keepRemoteSession(workerCtx, state)
 		}
@@ -543,8 +544,9 @@ func (c *Chromium) startWeb(ctx context.Context, state *chromiumState) error {
 	return nil
 }
 
-// keepRemoteSession replaces the remote session when it expires so the hosted
-// guide, which polls the node's active session itself, keeps a live remote.
+// keepRemoteSession replaces the remote session when it expires so an
+// app-access page, which polls the node's active session itself, keeps a live
+// remote.
 func (c *Chromium) keepRemoteSession(ctx context.Context, state *chromiumState) {
 	for {
 		current := state.currentRemote()
@@ -560,7 +562,7 @@ func (c *Chromium) keepRemoteSession(ctx context.Context, state *chromiumState) 
 			if ctx.Err() != nil {
 				return
 			}
-			c.logf("guide remote session renewal failed: %v\n", err)
+			c.logf("app remote session renewal failed: %v\n", err)
 			select {
 			case <-ctx.Done():
 				return
@@ -570,26 +572,21 @@ func (c *Chromium) keepRemoteSession(ctx context.Context, state *chromiumState) 
 	}
 }
 
-// HostedGuideDeployment reports the deployment of a control-hosted Cable
-// guide URL: an https page at path /cable/ with a deployment param. The origin
-// is not compared with the player's control URL because players often reach
-// control through a different address (tunnel, LAN name) than the public
-// origin baked into the signed release. Minting the guide token is the
-// authorization step: control only issues one when this node's assignment
-// targets that deployment's Cable media item.
-func HostedGuideDeployment(pageURL string) (string, bool) {
-	page, err := url.Parse(pageURL)
-	if err != nil || !strings.EqualFold(page.Scheme, "https") || page.Path != "/cable/" {
-		return "", false
+// WithAppToken appends the app token and API base to pageURL's fragment as
+// cuelight-token and cuelight-api, keeping other fragment parameters and
+// replacing stale cuelight ones.
+func WithAppToken(pageURL, token, apiURL string) string {
+	base, fragment, _ := strings.Cut(pageURL, "#")
+	parts := []string{}
+	for _, part := range strings.Split(fragment, "&") {
+		name, _, _ := strings.Cut(part, "=")
+		if part == "" || name == "cuelight-token" || name == "cuelight-api" {
+			continue
+		}
+		parts = append(parts, part)
 	}
-	deploymentID := page.Query().Get("deployment")
-	return deploymentID, deploymentID != ""
-}
-
-// WithGuideToken replaces any fragment of pageURL with #token=<token>.
-func WithGuideToken(pageURL, token string) string {
-	base, _, _ := strings.Cut(pageURL, "#")
-	return base + "#token=" + url.QueryEscape(token)
+	parts = append(parts, "cuelight-token="+url.QueryEscape(token), "cuelight-api="+url.QueryEscape(apiURL))
+	return base + "#" + strings.Join(parts, "&")
 }
 
 const remoteInputPollWait = 25 * time.Second

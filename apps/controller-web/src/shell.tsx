@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, FolderArchive, Image, LayoutDashboard, Layers, ListVideo, MonitorPlay, PackageCheck, RadioTower, Search, Settings } from "lucide-react";
+import { Activity, FolderArchive, Image, LayoutDashboard, Layers, ListVideo, MonitorPlay, PackageCheck, Search, Settings } from "lucide-react";
 import { Breadcrumbs, CommandPalette, MobileNav, MobileSidebar, Sidebar, type CommandItem, type Crumb, type NavigationItem } from "@cable/controller-ui";
 import "@cable/controller-ui/styles.css";
 import { api, readApiResult } from "./api";
@@ -16,7 +16,6 @@ export const navigation: readonly NavigationItem[] = [
   { label: "Media", href: "/library/media", section: "Library", icon: Image },
   { label: "Playlists", href: "/library/playlists", section: "Library", icon: ListVideo },
   { label: "Files", href: "/library/assets", section: "Library", icon: FolderArchive, match: ["/library/uploads"] },
-  { label: "Deployments", href: "/programming/deployments", section: "Programming", icon: RadioTower, match: ["/programming/channels", "/programming/blocks", "/programming/programs"] },
   { label: "Releases", href: "/releases", section: "Delivery", icon: PackageCheck },
 ];
 
@@ -34,47 +33,25 @@ const crumbLabels: Record<string, { label: string; href?: string }> = {
   "/library/playlists": { label: "Playlists", href: "/library/playlists" },
   "/library/assets": { label: "Files", href: "/library/assets" },
   "/library/uploads": { label: "Uploads", href: "/library/uploads" },
-  "/programming": { label: "Programming" },
-  "/programming/deployments": { label: "Deployments", href: "/programming/deployments" },
-  "/programming/deployments/:id/channels": { label: "Channels" },
   "/profiles": { label: "Profiles", href: "/profiles" },
-  "/programming/channels": { label: "Channel" },
-  "/programming/channels/:id/programs": { label: "Programs" },
-  "/programming/channels/:id/blocks": { label: "Blocks" },
-  "/programming/blocks": { label: "Block" },
-  "/programming/programs": { label: "Program" },
   "/releases": { label: "Releases", href: "/releases" },
   "/activity": { label: "Activity" },
   "/settings": { label: "Settings" },
 };
 
-type EntityKind = "screens" | "media" | "playlists" | "assets" | "deployments" | "channels" | "blocks" | "programs" | "profiles" | "releases";
-const entityCollections: Record<string, EntityKind> = { screens: "screens", media: "media", playlists: "playlists", assets: "assets", deployments: "deployments", channels: "channels", blocks: "blocks", programs: "programs", profiles: "profiles", releases: "releases" };
+type EntityKind = "screens" | "media" | "playlists" | "assets" | "profiles" | "releases";
+const entityCollections: Record<string, EntityKind> = { screens: "screens", media: "media", playlists: "playlists", assets: "assets", profiles: "profiles", releases: "releases" };
 
-/** Entity label plus its parents for entities whose URL is not nested under the parent (channels, blocks, programs). */
+/** Entity label plus any parent crumbs that its URL does not already contain. */
 interface EntityTrail { name: string; parents: Crumb[] }
 
-async function deploymentTrail(deploymentId: string): Promise<Crumb[]> {
-  const deployment = readApiResult(await api.GET("/cable/deployments/{deploymentId}", { params: { path: { deploymentId } } }));
-  return [{ label: "Deployments", href: "/programming/deployments" }, { label: deployment.name, href: `/programming/deployments/${deployment.id}` }];
-}
-
-async function channelTrail(channelId: string): Promise<Crumb[]> {
-  const channel = readApiResult(await api.GET("/cable/channels/{channelId}", { params: { path: { channelId } } }));
-  return [...await deploymentTrail(channel.deploymentId), { label: `${channel.number} · ${channel.name}`, href: `/programming/channels/${channel.id}` }];
-}
-
 async function entityTrail(kind: EntityKind, id: string): Promise<EntityTrail> {
-  const path = { params: { path: { nodeId: id, mediaId: id, playlistId: id, assetId: id, deploymentId: id, channelId: id, blockId: id, programId: id, profileId: id, releaseId: id } } };
+  const path = { params: { path: { nodeId: id, mediaId: id, playlistId: id, assetId: id, profileId: id, releaseId: id } } };
   switch (kind) {
     case "screens": return { name: readApiResult(await api.GET("/nodes/{nodeId}", path)).name, parents: [] };
     case "media": return { name: readApiResult(await api.GET("/media/{mediaId}", path)).title, parents: [] };
-    case "playlists": return { name: readApiResult(await api.GET("/cable/playlists/{playlistId}", path)).name, parents: [] };
+    case "playlists": return { name: readApiResult(await api.GET("/playlists/{playlistId}", path)).name, parents: [] };
     case "assets": return { name: readApiResult(await api.GET("/assets/{assetId}", path)).name, parents: [] };
-    case "deployments": return { name: readApiResult(await api.GET("/cable/deployments/{deploymentId}", path)).name, parents: [] };
-    case "channels": { const channel = readApiResult(await api.GET("/cable/channels/{channelId}", path)); return { name: `${channel.number} · ${channel.name}`, parents: await deploymentTrail(channel.deploymentId) }; }
-    case "blocks": { const block = readApiResult(await api.GET("/cable/blocks/{blockId}", path)); return { name: block.title, parents: [...await channelTrail(block.channelId), { label: "Blocks", href: `/programming/channels/${block.channelId}/blocks` }] }; }
-    case "programs": { const program = readApiResult(await api.GET("/cable/programs/{programId}", path)); return { name: program.title || "Untitled program", parents: [...await channelTrail(program.channelId), { label: "Programs", href: `/programming/channels/${program.channelId}/programs` }] }; }
     case "profiles": return { name: readApiResult(await api.GET("/profiles/{profileId}", path)).name, parents: [] };
     case "releases": return { name: shortId(id), parents: [] };
   }
@@ -133,18 +110,16 @@ function usePaletteItems(open: boolean): { items: CommandItem[]; loading: boolea
     enabled: open,
     staleTime: 30_000,
     queryFn: async () => {
-      const [nodes, media, deployments, playlists, profiles] = await Promise.allSettled([
+      const [nodes, media, playlists, profiles] = await Promise.allSettled([
         api.GET("/nodes", { params: { query: { limit: 100 } } }).then(readApiResult),
         api.GET("/media", { params: { query: { limit: 100 } } }).then(readApiResult),
-        api.GET("/cable/deployments", { params: { query: { limit: 100 } } }).then(readApiResult),
-        api.GET("/cable/playlists", { params: { query: { limit: 100 } } }).then(readApiResult),
+        api.GET("/playlists", { params: { query: { limit: 100 } } }).then(readApiResult),
         api.GET("/profiles").then(readApiResult),
       ]);
       const items: CommandItem[] = [];
       if (nodes.status === "fulfilled") items.push(...nodes.value.items.map((node) => ({ id: `screen-${node.id}`, label: node.name, group: "Screens", href: `/screens/${node.id}`, hint: node.nodeClass === "browser" ? "browser" : "desktop" })));
-      if (media.status === "fulfilled") items.push(...media.value.items.map((item) => ({ id: `media-${item.id}`, label: item.title, group: "Media", href: `/library/media/${item.id}`, hint: item.kind === "web" ? (item.deploymentId ? "Cable guide" : "Web page") : item.artifact?.mediaType })));
+      if (media.status === "fulfilled") items.push(...media.value.items.map((item) => ({ id: `media-${item.id}`, label: item.title, group: "Media", href: `/library/media/${item.id}`, hint: item.kind === "web" ? (item.appAccess ? "Cuelight app" : "Web page") : item.artifact?.mediaType })));
       if (playlists.status === "fulfilled") items.push(...playlists.value.items.map((item) => ({ id: `playlist-${item.id}`, label: item.name, group: "Playlists", href: `/library/playlists/${item.id}` })));
-      if (deployments.status === "fulfilled") items.push(...deployments.value.items.map((item) => ({ id: `deployment-${item.id}`, label: item.name, group: "Deployments", href: `/programming/deployments/${item.id}`, hint: item.timezone })));
       if (profiles.status === "fulfilled") items.push(...profiles.value.items.map((item) => ({ id: `profile-${item.id}`, label: item.name, group: "Profiles", href: `/profiles/${item.id}`, hint: item.active ? "active" : undefined })));
       return items;
     },

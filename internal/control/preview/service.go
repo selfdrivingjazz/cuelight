@@ -1,4 +1,4 @@
-// Package preview contains controller-side expected Cable preview derivation and
+// Package preview contains controller-side expected preview derivation and
 // the durable screenshot-job state machine.
 package preview
 
@@ -32,22 +32,14 @@ var (
 )
 
 // ExpectedPreview is a deterministic, explicitly expected (not observed)
-// rendering target derived from the node's healthy release and an authoritative
-// immutable Cable revision at EffectiveAt.
+// rendering target derived from the node's healthy release at EffectiveAt.
 type ExpectedPreview struct {
-	Expected           bool      `json:"expected"`
-	ReleaseDigest      string    `json:"releaseDigest"`
-	RevisionDigest     string    `json:"revisionDigest"`
-	ChannelID          string    `json:"channelId,omitempty"`
-	BlockID            string    `json:"blockId,omitempty"`
-	ItemID             string    `json:"itemId,omitempty"`
-	EffectiveAt        time.Time `json:"effectiveAt"`
-	ChannelWindowStart time.Time `json:"channelWindowStart,omitempty"`
-	ChannelWindowEnd   time.Time `json:"channelWindowEnd,omitempty"`
-	BlockWindowStart   time.Time `json:"blockWindowStart,omitempty"`
-	BlockWindowEnd     time.Time `json:"blockWindowEnd,omitempty"`
-	ItemWindowStart    time.Time `json:"itemWindowStart,omitempty"`
-	ItemWindowEnd      time.Time `json:"itemWindowEnd,omitempty"`
+	Expected        bool      `json:"expected"`
+	ReleaseDigest   string    `json:"releaseDigest"`
+	ItemID          string    `json:"itemId,omitempty"`
+	EffectiveAt     time.Time `json:"effectiveAt"`
+	ItemWindowStart time.Time `json:"itemWindowStart,omitempty"`
+	ItemWindowEnd   time.Time `json:"itemWindowEnd,omitempty"`
 }
 
 type Status string
@@ -233,10 +225,10 @@ func (s Service) Create(ctx context.Context, m Mutation, input CreateInput) (Cre
 		return CreateResult{}, fmt.Errorf("%w: nodeId is required", ErrInvalidArgument)
 	}
 	if input.Expected.Expected {
-		if !validDigest(input.Expected.ReleaseDigest) || !validDigest(input.Expected.RevisionDigest) || input.Expected.EffectiveAt.IsZero() {
-			return CreateResult{}, fmt.Errorf("%w: expected provenance requires valid release/revision digests and effective time", ErrInvalidArgument)
+		if !validDigest(input.Expected.ReleaseDigest) || input.Expected.EffectiveAt.IsZero() {
+			return CreateResult{}, fmt.Errorf("%w: expected provenance requires a valid release digest and effective time", ErrInvalidArgument)
 		}
-	} else if input.Expected.ReleaseDigest != "" || input.Expected.RevisionDigest != "" || !input.Expected.EffectiveAt.IsZero() {
+	} else if input.Expected.ReleaseDigest != "" || !input.Expected.EffectiveAt.IsZero() {
 		return CreateResult{}, fmt.Errorf("%w: expected provenance must set expected=true", ErrInvalidArgument)
 	}
 	if strings.TrimSpace(m.IdempotencyKey) == "" {

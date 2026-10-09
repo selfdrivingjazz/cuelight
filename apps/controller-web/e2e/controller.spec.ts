@@ -3,7 +3,6 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const pageInfo = { nextCursor: null, previousCursor: null, hasMore: false };
 const node = { id: "11111111-1111-1111-1111-111111111111", name: "Lobby display", credentialState: "active", desiredGeneration: 4, observedGeneration: 4 };
-const deployment = { id: "22222222-2222-2222-2222-222222222222", name: "Atrium Cable", timezone: "America/New_York", theme: "gallery", guideHorizonSeconds: 86_400, guideDensity: "hour", version: 3, createdBy: "33333333-3333-3333-3333-333333333333", updatedBy: "33333333-3333-3333-3333-333333333333", createdAt: "2026-08-27T10:00:00Z", updatedAt: "2026-08-27T12:00:00Z" };
 const uploadedAsset = { id: "55555555-5555-5555-5555-555555555555", name: "poster.webp", artifact: { digest: "a".repeat(64), size: 68, mediaType: "image/png", state: "ready" } };
 const videoAsset = { id: "66666666-6666-6666-6666-666666666666", name: "lobby-loop.mp4", artifact: { digest: "b".repeat(64), size: 697_200, mediaType: "video/mp4", state: "ready" } };
 const createdMedia = {
@@ -39,6 +38,7 @@ const webMedia = {
   id: "abababab-abab-abab-abab-abababababab",
   kind: "web",
   url: "https://status.example.com/board",
+  appAccess: false,
   title: "Status board",
   tags: [],
   version: 1,
@@ -48,7 +48,7 @@ const webMedia = {
   updatedAt: "2026-09-03T10:00:00Z",
   thumbnail: { digest: "f".repeat(64), mediaType: "image/png", width: 1920, height: 1080, capturedAt: "2026-09-03T10:01:00Z", source: "server" },
 };
-const cableMedia = { ...webMedia, id: "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd", title: "Cable · Atrium Cable", url: "http://127.0.0.1:4173/cable/?deployment=22222222-2222-2222-2222-222222222222", deploymentId: deployment.id, thumbnail: undefined };
+const appMedia = { ...webMedia, id: "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd", title: "Remote app", url: "https://apps.example.com/remote", appAccess: true, thumbnail: undefined };
 const profile = { id: "efefefef-efef-efef-efef-efefefefefef", name: "Morning", description: "Weekday opening", version: 1, screens: [] as Record<string, unknown>[], createdBy: "operator-one", updatedBy: "operator-one", createdAt: "2026-09-04T08:00:00Z", updatedAt: "2026-09-04T08:00:00Z", active: false, lastActivatedAt: undefined as string | undefined };
 const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const videoBytes = readFileSync(new URL("../../../.dev-seed/Seed Violet Relay.mp4", import.meta.url));
@@ -78,7 +78,7 @@ async function installControllerApi(page: Page, requireToken = false): Promise<A
     const reply = (json: unknown, status = 200, headers: Record<string, string> = {}) => route.fulfill({ status, headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(json) });
     if (path === "/operator/me") {
       if (requireToken && request.headers().authorization !== "Bearer operator-token") return reply({ title: "Unauthorized", status: 401 }, 401);
-      return reply({ id: "operator-one", scopes: ["node_read", "node_enroll", "media_read", "media_write", "cable_read", "cable_write", "assignment_read", "assignment_write"], capabilities: { node_read: true, node_enroll: true, media_read: true, media_write: true, cable_read: true, cable_write: true, assignment_read: true, assignment_write: true } });
+      return reply({ id: "operator-one", scopes: ["node_read", "node_enroll", "media_read", "media_write", "assignment_read", "assignment_write"], capabilities: { node_read: true, node_enroll: true, media_read: true, media_write: true, assignment_read: true, assignment_write: true } });
     }
     if (path === "/health") return reply({ status: "ok", version: "browser-test" });
     if (path === "/nodes") return reply({ items: [node], page: pageInfo });
@@ -116,7 +116,7 @@ async function installControllerApi(page: Page, requireToken = false): Promise<A
     if (path === "/uploads/upload-one/complete" && request.method() === "POST") return reply(uploadedAsset);
     if (path === "/media" && request.method() === "GET") {
       const kind = new URL(request.url()).searchParams.get("kind");
-      const all = [currentImage(), videoMedia, webMedia, cableMedia];
+      const all = [currentImage(), videoMedia, webMedia, appMedia];
       return reply({ items: kind ? all.filter((item) => item.kind === kind) : all, page: pageInfo });
     }
     if (path === "/media" && request.method() === "POST") {
@@ -147,10 +147,8 @@ async function installControllerApi(page: Page, requireToken = false): Promise<A
     if (path === `/media/${createdMedia.id}` && request.method() === "GET") return reply(currentImage(), 200, { ETag: `"media:${createdMedia.id}:1"` });
     if (path === `/media/${videoMedia.id}` && request.method() === "GET") return reply(videoMedia, 200, { ETag: `"media:${videoMedia.id}:1"` });
     if (path === `/media/${webMedia.id}` && request.method() === "GET") return reply(webMedia, 200, { ETag: `"media:${webMedia.id}:1"` });
-    if (path === `/media/${cableMedia.id}` && request.method() === "GET") return reply(cableMedia, 200, { ETag: `"media:${cableMedia.id}:1"` });
+    if (path === `/media/${appMedia.id}` && request.method() === "GET") return reply(appMedia, 200, { ETag: `"media:${appMedia.id}:1"` });
     if (path === `/assets/${uploadedAsset.id}` && request.method() === "GET") return reply(uploadedAsset);
-    if (path === "/cable/deployments") return reply({ items: [deployment], page: pageInfo });
-    if (path === `/cable/deployments/${deployment.id}`) return reply(deployment, 200, { ETag: '"v3"' });
     return reply({ items: [], page: pageInfo });
   });
   return capture;
@@ -192,14 +190,14 @@ test("playlist editor adds media via the picker, drag-reorders, and persists the
   await installControllerApi(page);
   const playlistId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
   const stamp = { createdBy: "operator-one", createdAt: "2026-09-01T08:00:00Z", updatedAt: "2026-09-01T09:00:00Z" };
-  let playlist = { id: playlistId, name: "Lobby loop", description: "", version: 1, ...stamp, items: [{ id: "item-1", playlistId, assetId: createdMedia.assetId, position: 1, durationSeconds: 30, title: createdMedia.title }] };
-  const patches: Array<{ items: Array<{ assetId: string; position: number; durationSeconds: number }> }> = [];
-  await page.route(`**/api/v1/cable/playlists/${playlistId}`, async (route) => {
+  let playlist = { id: playlistId, name: "Lobby loop", description: "", version: 1, ...stamp, items: [{ id: "item-1", playlistId, mediaId: createdMedia.id, assetId: createdMedia.assetId, position: 1, durationSeconds: 30, title: createdMedia.title }] };
+  const patches: Array<{ items: Array<{ mediaId?: string; assetId?: string; position: number; durationSeconds: number }> }> = [];
+  await page.route(`**/api/v1/playlists/${playlistId}`, async (route) => {
     const request = route.request();
     if (request.method() === "PATCH") {
       const body = request.postDataJSON() as (typeof patches)[number];
       patches.push(body);
-      playlist = { ...playlist, version: playlist.version + 1, items: body.items.map((item, index) => ({ ...item, id: playlist.items.find((existing) => existing.assetId === item.assetId)?.id ?? `item-${index + 10}`, playlistId, title: item.assetId === videoMedia.assetId ? videoMedia.title : createdMedia.title })) };
+      playlist = { ...playlist, version: playlist.version + 1, items: body.items.map((item, index) => ({ ...item, id: playlist.items.find((existing) => existing.mediaId === item.mediaId)?.id ?? `item-${index + 10}`, playlistId, mediaId: item.mediaId!, assetId: item.mediaId === videoMedia.id ? videoMedia.assetId : createdMedia.assetId, title: item.mediaId === videoMedia.id ? videoMedia.title : createdMedia.title })) };
     }
     await route.fulfill({ status: 200, headers: { "Content-Type": "application/json", ETag: `"v${playlist.version}"` }, body: JSON.stringify(playlist) });
   });
@@ -215,7 +213,8 @@ test("playlist editor adds media via the picker, drag-reorders, and persists the
   await picker.getByRole("button", { name: "Add 1 item" }).click();
   await expect(picker).toBeHidden();
   await expect(page.getByText("Media added to playlist.")).toBeVisible();
-  expect(patches[0]!.items.map((item) => [item.assetId, item.durationSeconds])).toEqual([[createdMedia.assetId, 30], [videoMedia.assetId, 45]]);
+  // Every item is re-sent with exactly one source: its media id.
+  expect(patches[0]!.items.map((item) => [item.mediaId, item.assetId, item.durationSeconds])).toEqual([[createdMedia.id, undefined, 30], [videoMedia.id, undefined, 45]]);
 
   const handle = page.getByRole("button", { name: "Reorder Lobby Loop, position 2 of 2" });
   const target = page.getByRole("button", { name: `Reorder ${createdMedia.title}, position 1 of 2` });
@@ -227,7 +226,7 @@ test("playlist editor adds media via the picker, drag-reorders, and persists the
   await expect(page.getByTestId("drop-indicator")).toBeVisible();
   await page.mouse.up();
   await expect(page.getByRole("region", { name: "Notifications" }).getByRole("status").filter({ hasText: "Playlist order saved." })).toBeVisible();
-  expect(patches[1]!.items.map((item) => item.assetId)).toEqual([videoMedia.assetId, createdMedia.assetId]);
+  expect(patches[1]!.items.map((item) => item.mediaId)).toEqual([videoMedia.id, createdMedia.id]);
 
   // Keyboard reorder: lift the second row, move it up, drop.
   await page.getByRole("button", { name: `Reorder ${createdMedia.title}, position 2 of 2` }).focus();
@@ -235,20 +234,20 @@ test("playlist editor adds media via the picker, drag-reorders, and persists the
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("Space");
   await expect.poll(() => patches.length).toBe(3);
-  expect(patches[2]!.items.map((item) => item.assetId)).toEqual([createdMedia.assetId, videoMedia.assetId]);
+  expect(patches[2]!.items.map((item) => item.mediaId)).toEqual([createdMedia.id, videoMedia.id]);
 
   await page.reload();
   const rows = page.getByRole("list", { name: "Playlist order" }).getByRole("heading", { level: 3 });
   await expect(rows).toHaveText([createdMedia.title, "Lobby Loop"]);
 });
 
-test("playlist editor adds a web page by media id but never a Cable guide", async ({ page }) => {
+test("playlist editor adds a web page by media id", async ({ page }) => {
   await installControllerApi(page);
   const playlistId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
   const stamp = { createdBy: "operator-one", createdAt: "2026-09-01T08:00:00Z", updatedAt: "2026-09-01T09:00:00Z" };
-  let playlist = { id: playlistId, name: "Wall loop", description: "", version: 1, ...stamp, items: [{ id: "item-1", playlistId, assetId: createdMedia.assetId, position: 1, durationSeconds: 30, title: createdMedia.title }] as Record<string, unknown>[] };
+  let playlist = { id: playlistId, name: "Wall loop", description: "", version: 1, ...stamp, items: [{ id: "item-1", playlistId, mediaId: createdMedia.id, assetId: createdMedia.assetId, position: 1, durationSeconds: 30, title: createdMedia.title }] as Record<string, unknown>[] };
   const patches: Array<{ items: Record<string, unknown>[] }> = [];
-  await page.route(`**/api/v1/cable/playlists/${playlistId}`, async (route) => {
+  await page.route(`**/api/v1/playlists/${playlistId}`, async (route) => {
     const request = route.request();
     if (request.method() === "PATCH") {
       const body = request.postDataJSON() as (typeof patches)[number];
@@ -265,14 +264,13 @@ test("playlist editor adds a web page by media id but never a Cable guide", asyn
   const picker = page.getByRole("dialog", { name: "Add media to playlist" });
   await picker.getByRole("radio", { name: "Web" }).click();
   await expect(picker.getByRole("button", { name: "Status board, Web page" })).toBeVisible();
-  await expect(picker.getByRole("button", { name: /Cable guide/ })).toHaveCount(0);
   await picker.getByRole("button", { name: "Status board, Web page" }).click();
   await picker.getByLabel("Duration for added media (seconds)").fill("20");
   await picker.getByRole("button", { name: "Add 1 item" }).click();
   await expect(picker).toBeHidden();
   await expect.poll(() => patches.length).toBe(1);
   expect(patches[0]!.items).toEqual([
-    { assetId: createdMedia.assetId, position: 1, durationSeconds: 30, title: createdMedia.title },
+    { mediaId: createdMedia.id, position: 1, durationSeconds: 30, title: createdMedia.title },
     { mediaId: webMedia.id, position: 2, durationSeconds: 20, title: webMedia.title },
   ]);
   await expect(page.getByRole("note")).toContainText("Appliance players cannot show a playlist that contains them");
@@ -318,6 +316,7 @@ test("operator upload creates authored media before opening its detail", async (
   await expect(page.getByRole("heading", { name: "poster.webp", exact: true })).toBeVisible();
   expect(capture.createdMediaBody).toEqual({
     kind: "file",
+    appAccess: false,
     assetId: uploadedAsset.id,
     title: "poster.webp",
     tags: [],
@@ -381,32 +380,19 @@ test("media library sort is reflected in the URL and sent to the API", async ({ 
   await expect(page).toHaveURL(/sort=title&order=asc|order=asc.*sort=title/);
 });
 
-test("operator browses Cable deployment hierarchy", async ({ page }) => {
-  await installControllerApi(page);
-  await page.goto("/");
-  await expect(page.getByRole("textbox", { name: "Operator token" })).toHaveCount(0);
-  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Deployments" }).click();
-  await expect(page.getByRole("heading", { name: "Cable deployments" })).toBeVisible();
-  await page.getByRole("link", { name: "Atrium Cable" }).click();
-  await expect(page.getByRole("heading", { name: "Atrium Cable" })).toBeVisible();
-  await expect(page.getByLabel("Deployment sections").getByRole("link", { name: "Channels" })).toBeVisible();
-  // Programming keeps authoring only: no compile, revision, or publish steps remain.
-  await expect(page.getByLabel("Deployment sections").getByRole("link")).toHaveText(["Overview", "Channels"]);
-  await expect(page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Shell builds" })).toHaveCount(0);
-});
-
 test("operator adds a web page as media and assigns it to a screen by media id", async ({ page }) => {
   const capture = await installControllerApi(page, true);
   await authenticate(page);
   await page.getByRole("link", { name: "Media", exact: true }).click();
-  // Web pages and the deployment's Cable guide live in the same grid as files.
+  // Web pages and Cuelight apps live in the same grid as files.
   await expect(page.getByRole("link", { name: "Status board" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Cable · Atrium Cable" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Remote app" })).toBeVisible();
   await page.getByRole("button", { name: "Add web page" }).click();
   await page.getByLabel("Page URL").fill("https://status.example.com/board");
+  await page.getByRole("checkbox", { name: /Cuelight app/ }).check();
   await page.getByRole("button", { name: "Add web page" }).last().click();
   await expect(page).toHaveURL(`/library/media/${webMedia.id}`);
-  expect(capture.createdMediaBody).toEqual({ kind: "web", url: "https://status.example.com/board" });
+  expect(capture.createdMediaBody).toEqual({ kind: "web", url: "https://status.example.com/board", appAccess: true });
   await expect(page.getByRole("heading", { name: "Status board", exact: true })).toBeVisible();
   await page.getByLabel("Screen").selectOption({ label: "Lobby display" });
   await page.getByRole("button", { name: "Assign to screen" }).click();
@@ -422,12 +408,12 @@ test("assignment composer picks any media kind from one picker", async ({ page }
   await page.getByRole("button", { name: "Choose content" }).click();
   const picker = page.getByRole("dialog", { name: "Choose content" });
   await picker.getByRole("radio", { name: "Web" }).click();
-  await picker.getByRole("button", { name: "Cable · Atrium Cable, Cable guide" }).click();
+  await picker.getByRole("button", { name: "Remote app, Cuelight app" }).click();
   // Web content always streams, so the delivery choice disappears.
   await expect(page.getByLabel("Delivery")).toHaveCount(0);
   await page.getByRole("button", { name: "Assign to screen" }).click();
   await expect.poll(() => capture.assignmentBodies.length).toBe(1);
-  expect(capture.assignmentBodies[0]).toMatchObject({ mediaId: cableMedia.id });
+  expect(capture.assignmentBodies[0]).toMatchObject({ mediaId: appMedia.id });
   expect(capture.assignmentBodies[0]).not.toHaveProperty("releaseId");
 });
 

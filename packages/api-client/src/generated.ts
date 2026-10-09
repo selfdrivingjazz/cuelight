@@ -20,6 +20,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/openapi.yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description This OpenAPI document. Served with Access-Control-Allow-Origin: *. */
+        get: operations["getOpenApiSpec"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/operator/me": {
         parameters: {
             query?: never;
@@ -338,7 +355,7 @@ export interface paths {
         get: operations["getMedia"];
         put?: never;
         post?: never;
-        /** @description Removes an operator-added web page. File media and Cable items cannot be deleted (409); web media used by a playlist return 409. */
+        /** @description Removes an operator-added web page. File media cannot be deleted (409); web media used by a playlist return 409. */
         delete: operations["deleteMedia"];
         options?: never;
         head?: never;
@@ -356,7 +373,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Recaptures a web media viewport now (1920x1080). 409 for file media and Cable items; 503 when the controller has no headless browser. */
+        /** @description Recaptures a web media viewport now (1920x1080). 409 for file media; 503 when the controller has no headless browser. */
         post: operations["refreshMedia"];
         delete?: never;
         options?: never;
@@ -565,180 +582,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/cable/deployments": {
+    "/playlists": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["listCableDeployments"];
+        get: operations["listPlaylists"];
         put?: never;
-        post: operations["createCableDeployment"];
+        post: operations["createPlaylist"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/cable/deployments/{deploymentId}": {
+    "/playlists/{playlistId}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
+                playlistId: components["parameters"]["PlaylistId"];
             };
             cookie?: never;
         };
-        get: operations["getCableDeployment"];
-        put?: never;
-        post?: never;
-        delete: operations["deleteCableDeployment"];
-        options?: never;
-        head?: never;
-        patch: operations["updateCableDeployment"];
-        trace?: never;
-    };
-    "/cable/deployments/{deploymentId}/channels": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        get: operations["listCableChannels"];
-        put?: never;
-        post: operations["createCableChannel"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/channels/{channelId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        get: operations["getCableChannel"];
-        put?: never;
-        post?: never;
-        delete: operations["deleteCableChannel"];
-        options?: never;
-        head?: never;
-        patch: operations["updateCableChannel"];
-        trace?: never;
-    };
-    "/cable/channels/{channelId}/programs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        get: operations["listCablePrograms"];
-        put?: never;
-        post: operations["createCableProgram"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/programs/{programId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                programId: components["parameters"]["CableProgramId"];
-            };
-            cookie?: never;
-        };
-        get: operations["getCableProgram"];
-        put?: never;
-        post?: never;
-        delete: operations["deleteCableProgram"];
-        options?: never;
-        head?: never;
-        patch: operations["updateCableProgram"];
-        trace?: never;
-    };
-    "/cable/playlists": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["listCablePlaylists"];
-        put?: never;
-        post: operations["createCablePlaylist"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/playlists/{playlistId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                playlistId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        get: operations["getCablePlaylist"];
+        get: operations["getPlaylist"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch: operations["updateCablePlaylist"];
-        trace?: never;
-    };
-    "/cable/channels/{channelId}/blocks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        get: operations["listCableBlocks"];
-        put?: never;
-        post: operations["createCableBlock"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cable/blocks/{blockId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                blockId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        get: operations["getCableBlock"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["updateCableBlock"];
+        /** @description Replaces the playlist's name, description, and items. */
+        patch: operations["updatePlaylist"];
         trace?: never;
     };
     "/screenshots": {
@@ -1043,7 +919,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/player/cable-guide-tokens": {
+    "/player/app-tokens": {
         parameters: {
             query?: never;
             header?: never;
@@ -1052,22 +928,22 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Mints a 24h guide token for the hosted Cable guide of one deployment. Also served at /browser-node/player/cable-guide-tokens with browserNodeToken. Refused with 403 unless the node's current assignment targets that deployment's Cable media item. */
-        post: operations["createCableGuideToken"];
+        /** @description Mints a 24h app token for a web media item with appAccess. Refused with 403 unless the node's current assignment targets that media item. */
+        post: operations["createAppToken"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/cable-guide/presentation": {
+    "/app/context": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["getCableGuidePresentation"];
+        get: operations["getAppContext"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1076,19 +952,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/cable-guide/media/{assetId}": {
+    "/app/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAppMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/app/media/{mediaId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAppMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/app/media/{mediaId}/content": {
         parameters: {
             query?: {
-                /** @description Guide token for media elements that cannot send headers. */
-                access_token?: string;
+                /** @description App token for media elements that cannot send an Authorization header. */
+                access_token?: components["parameters"]["AppAccessToken"];
             };
             header?: never;
             path: {
-                assetId: components["schemas"]["Id"];
+                mediaId: components["schemas"]["Id"];
             };
             cookie?: never;
         };
-        get: operations["getCableGuideMedia"];
+        get: operations["getAppMediaContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head: operations["headAppMediaContent"];
+        patch?: never;
+        trace?: never;
+    };
+    "/app/media/{mediaId}/thumbnail": {
+        parameters: {
+            query?: {
+                /** @description App token for media elements that cannot send an Authorization header. */
+                access_token?: components["parameters"]["AppAccessToken"];
+            };
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        /** @description Same as GET /media/{mediaId}/thumbnail. Pass `v={thumbnail.digest}` so the immutable response can be cached for a year. */
+        get: operations["getAppMediaThumbnail"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1097,14 +1029,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/cable-guide/remote/events": {
+    "/app/playlists": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["pollCableGuideRemoteEvents"];
+        get: operations["listAppPlaylists"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1113,7 +1045,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/cable-guide/token:renew": {
+    "/app/playlists/{playlistId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlistId: components["parameters"]["PlaylistId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAppPlaylist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/app/remote/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["pollAppRemoteEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/app/token:renew": {
         parameters: {
             query?: never;
             header?: never;
@@ -1122,7 +1088,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["renewCableGuideToken"];
+        post: operations["renewAppToken"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1227,6 +1193,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/browser-node/player/app-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Browser-node equivalent of POST /player/app-tokens. */
+        post: operations["createBrowserNodeAppToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1234,9 +1217,6 @@ export interface components {
         ScreenshotExpected: {
             expected?: boolean;
             releaseDigest?: string;
-            revisionDigest?: string;
-            channelId?: string;
-            blockId?: string;
             itemId?: string;
             /** Format: date-time */
             effectiveAt?: string;
@@ -1370,159 +1350,36 @@ export interface components {
             previousCursor: string | null;
             hasMore: boolean;
         };
-        CableDeploymentInput: {
-            name: string;
-            timezone: string;
-            /** @enum {string} */
-            theme: "nebula" | "gallery" | "noir";
-            /**
-             * Format: int64
-             * @default 86400
-             */
-            guideHorizonSeconds: number;
-            /**
-             * @default half-hour
-             * @enum {string}
-             */
-            guideDensity: "quarter-hour" | "half-hour" | "hour";
-            placardDefaults?: {
-                [key: string]: string;
-            };
-            fallbackMetadata?: {
-                [key: string]: string;
-            };
-        };
-        CableDeployment: {
-            id: components["schemas"]["Id"];
-            name: string;
-            timezone: string;
-            /** @enum {string} */
-            theme: "nebula" | "gallery" | "noir";
-            /** Format: int64 */
-            guideHorizonSeconds: number;
-            /** @enum {string} */
-            guideDensity: "quarter-hour" | "half-hour" | "hour";
-            placardDefaults?: {
-                [key: string]: string;
-            };
-            fallbackMetadata?: {
-                [key: string]: string;
-            };
-            /** Format: int64 */
-            version: number;
-            createdBy: components["schemas"]["Id"];
-            updatedBy: components["schemas"]["Id"];
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        CableChannelInput: {
-            number: number;
-            name: string;
-            callsign?: string;
-            description?: string;
-            accent?: string;
-            artworkAssetId?: components["schemas"]["Id"];
-            enabled?: boolean;
-            standby?: boolean;
-        };
-        CableChannel: {
-            id: components["schemas"]["Id"];
-            deploymentId: components["schemas"]["Id"];
-            number: number;
-            name: string;
-            callsign: string;
-            description: string;
-            accent: string;
-            artworkAssetId?: components["schemas"]["Id"];
-            enabled: boolean;
-            standby: boolean;
-            /** Format: int64 */
-            version: number;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        CableProgramInput: {
-            assetId: components["schemas"]["Id"];
-            /** Format: date-time */
-            startsAt: string;
-            /** Format: date-time */
-            endsAt: string;
-            title?: string;
-            subtitle?: string;
-            tag?: string;
-            artist?: string;
-            description?: string;
-            artworkAssetId?: components["schemas"]["Id"];
-            placardPolicy?: string;
-            fit?: string;
-            availabilityPolicy?: string;
-            loop?: boolean;
-            mute?: boolean;
-            /** Format: double */
-            volume?: number;
-        };
-        CableProgram: {
-            id: components["schemas"]["Id"];
-            channelId: components["schemas"]["Id"];
-            assetId: components["schemas"]["Id"];
-            /** Format: date-time */
-            startsAt: string;
-            /** Format: date-time */
-            endsAt: string;
-            title: string;
-            subtitle: string;
-            tag: string;
-            artist: string;
-            description: string;
-            artworkAssetId?: components["schemas"]["Id"];
-            placardPolicy: string;
-            fit: string;
-            availabilityPolicy: string;
-            loop: boolean;
-            mute: boolean;
-            /** Format: double */
-            volume: number;
-            /** Format: int64 */
-            version: number;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        /** @description Exactly one of assetId (file) or mediaId (web media) is required. */
-        CablePlaylistItemInput: {
-            assetId?: components["schemas"]["Id"];
+        /** @description Exactly one of mediaId (any file or web media item) or assetId (file asset) is required. */
+        PlaylistItemInput: {
             mediaId?: components["schemas"]["Id"];
+            assetId?: components["schemas"]["Id"];
             position: number;
             durationSeconds: number;
             title?: string;
             subtitle?: string;
         };
-        CablePlaylistInput: {
+        PlaylistInput: {
             name: string;
             description?: string;
-            items: components["schemas"]["CablePlaylistItemInput"][];
+            items: components["schemas"]["PlaylistItemInput"][];
         };
-        CablePlaylistItem: {
+        /** @description mediaId is set whenever the item's media row exists (file items resolve to their file media row); assetId is set only for file items. Clients re-submitting items send exactly one source: mediaId when present, otherwise assetId. */
+        PlaylistItem: {
             id: components["schemas"]["Id"];
             playlistId: components["schemas"]["Id"];
-            assetId?: components["schemas"]["Id"];
-            /** @description Web media shown for durationSeconds when the item is not a file asset. */
             mediaId?: components["schemas"]["Id"];
+            assetId?: components["schemas"]["Id"];
             position: number;
             durationSeconds: number;
             title: string;
             subtitle: string;
         };
-        CablePlaylist: {
+        Playlist: {
             id: components["schemas"]["Id"];
             name: string;
             description: string;
-            items: components["schemas"]["CablePlaylistItem"][];
+            items: components["schemas"]["PlaylistItem"][];
             /** Format: int64 */
             version: number;
             createdBy: components["schemas"]["Id"];
@@ -1531,145 +1388,42 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        CableBlockInput: {
-            playlistId?: components["schemas"]["Id"];
-            assetId?: components["schemas"]["Id"];
-            /** Format: date-time */
-            startsAt: string;
-            /** Format: date-time */
-            endsAt: string;
-            title?: string;
-        } & (unknown | unknown);
-        CableBlock: {
-            id: components["schemas"]["Id"];
-            channelId: components["schemas"]["Id"];
-            playlistId?: components["schemas"]["Id"];
-            assetId?: components["schemas"]["Id"];
-            title: string;
-            /** Format: date-time */
-            startsAt: string;
-            /** Format: date-time */
-            endsAt: string;
-            /** Format: int64 */
-            version: number;
-            createdBy: components["schemas"]["Id"];
-            /** Format: date-time */
-            createdAt: string;
-        } & (unknown | unknown);
-        CableGuideTokenRequest: {
-            deploymentId: components["schemas"]["Id"];
+        PlaylistPage: {
+            items: components["schemas"]["Playlist"][];
+            page: components["schemas"]["PageInfo"];
         };
-        CableGuideToken: {
+        AppTokenRequest: {
+            /** @description Web media item with appAccess that the node's current assignment targets. */
+            mediaId: components["schemas"]["Id"];
+        };
+        AppToken: {
             token: string;
             /** Format: date-time */
             expiresAt: string;
+            /**
+             * Format: uri
+             * @description Public API base of the control plane, e.g. https://control.example/api/v1.
+             */
+            apiUrl: string;
         };
-        CableGuideRemote: {
+        AppContext: {
+            nodeId: components["schemas"]["Id"];
+            nodeName: string;
+            mediaId: components["schemas"]["Id"];
+        };
+        /** @description The node's active phone-remote session; the page renders the QR for url when showQr is set. */
+        AppRemote: {
             /** Format: uri */
             url: string;
             showQr: boolean;
             /** Format: date-time */
             expiresAt: string;
         };
-        CableGuideChannel: {
-            id: components["schemas"]["Id"];
-            number: number;
-            name: string;
-            callsign: string;
-            accent: string;
-            enabled: boolean;
-            standbyMessage?: string;
-        };
-        CableGuideBlock: {
-            id: components["schemas"]["Id"];
-            channelId: components["schemas"]["Id"];
-            /** Format: date-time */
-            startsAt: string;
-            /** Format: date-time */
-            endsAt: string;
-            title: string;
-            /** @enum {string} */
-            source: "playlist" | "asset";
-        };
-        CableGuideOccurrence: {
-            id: string;
-            blockId?: components["schemas"]["Id"];
-            itemId?: components["schemas"]["Id"];
-            itemPosition?: number;
-            occurrence?: number;
-            channelId: components["schemas"]["Id"];
-            /** Format: date-time */
-            startsAt: string;
-            /** Format: date-time */
-            endsAt: string;
-            title: string;
-            subtitle?: string;
-            media: {
-                /** @enum {string} */
-                kind: "video" | "image";
-                /** @description Guide media URL, /api/v1/cable-guide/media/{assetId}. */
-                reference: string;
-                /** @enum {string} */
-                mime: "video/mp4" | "image/jpeg" | "image/png" | "image/webp";
-            };
-            /** @enum {string} */
-            placard: "always" | "start" | "never";
-            /** @enum {string} */
-            fit: "fit" | "fill";
-            loop: boolean;
-            muted: boolean;
-            volume: number;
-        };
-        /** @description Live guide document computed from the deployment's channels, blocks and playlists for now-1h through the guide horizon. */
-        CableGuidePresentation: {
-            revision: {
-                /** @description Content digest of the authored schedule; changes only when the schedule changes. */
-                id: string;
-                digest: string;
-                /** Format: date-time */
-                generatedAt: string;
-                timezone: string;
-                stale: boolean;
-                /** @enum {string} */
-                guideDensity: "quarter-hour" | "half-hour" | "hour";
-            };
-            channels: components["schemas"]["CableGuideChannel"][];
-            blocks: components["schemas"]["CableGuideBlock"][];
-            occurrences: components["schemas"]["CableGuideOccurrence"][];
-            bridge: {
-                protocolVersion: string;
-                /** @enum {string} */
-                state: "online";
-            };
-            /** @enum {string} */
-            theme: "nebula" | "gallery" | "noir";
-            remote?: components["schemas"]["CableGuideRemote"];
-        };
-        CableGuideRemoteEvents: {
+        AppRemoteEventPage: {
             events: components["schemas"]["RemoteEvent"][];
             /** Format: int64 */
-            next: number;
-            remote?: components["schemas"]["CableGuideRemote"];
-        };
-        CableDeploymentPage: {
-            items: components["schemas"]["CableDeployment"][];
-            page: components["schemas"]["PageInfo"];
-        };
-        CableChannelPage: {
-            items: components["schemas"]["CableChannel"][];
-            page: components["schemas"]["PageInfo"];
-        };
-        CableProgramPage: {
-            items: components["schemas"]["CableProgram"][];
-            page: components["schemas"]["PageInfo"];
-        };
-        CablePlaylistPage: {
-            items: components["schemas"]["CablePlaylist"][];
-            page: components["schemas"]["PageInfo"];
-        };
-        CableBlockPage: {
-            items: components["schemas"]["CableBlock"][];
-            page: components["schemas"]["PageInfo"];
+            nextSequence: number;
+            remote?: components["schemas"]["AppRemote"];
         };
         NodePage: {
             items: components["schemas"]["Node"][];
@@ -1833,6 +1587,11 @@ export interface components {
             tags?: string[];
             artworkAssetId?: components["schemas"]["Id"];
             playback?: components["schemas"]["MediaPlayback"];
+            /**
+             * @description Web media only: present the page as a Cuelight app with an app token (see the app tag).
+             * @default false
+             */
+            appAccess: boolean;
         };
         MediaPatch: {
             title?: string;
@@ -1841,6 +1600,8 @@ export interface components {
             tags?: string[];
             artworkAssetId?: components["schemas"]["Id"];
             playback?: components["schemas"]["MediaPlayback"];
+            /** @description Web media only; 400 for file media. */
+            appAccess?: boolean;
         };
         Media: {
             id: components["schemas"]["Id"];
@@ -1850,11 +1611,11 @@ export interface components {
             assetId?: components["schemas"]["Id"];
             /**
              * Format: uri
-             * @description Web media: the page URL; for Cable items the resolved hosted guide URL.
+             * @description Web media: the page URL.
              */
             url?: string;
-            /** @description Read-only; set on the Cable item maintained for a deployment. Operators cannot edit or delete these. */
-            deploymentId?: components["schemas"]["Id"];
+            /** @description Web media presented as a Cuelight app with access to the screen's remote and the media library. Always false for file media. */
+            appAccess: boolean;
             /** Format: uri */
             faviconUrl?: string;
             /** @description Last web capture failure. */
@@ -1907,7 +1668,7 @@ export interface components {
         };
         UsageReference: {
             /** @enum {string} */
-            kind: "media" | "playlist" | "block" | "channel" | "profile" | "revision" | "release" | "assignment";
+            kind: "media" | "playlist" | "release" | "assignment";
             id: components["schemas"]["Id"];
             name: string;
             href: string;
@@ -1968,26 +1729,22 @@ export interface components {
             artifactClosure: string[];
             allowedDeliveryModes: ("stream" | "cache_then_play")[];
         };
-        CablePresentation: {
-            shellBuildDigest: string;
-            revisionArtifactDigest: string;
-            entrypoint: string;
-            bridgeProtocol: string;
-            artifactClosure: string[];
-        };
         WebPresentation: {
             /**
              * Format: uri
              * @description Absolute http or https URL without userinfo.
              */
             url: string;
+            /** @description The page is a Cuelight app: the node mints an app token for mediaId and passes it in the URL fragment (see the app tag). */
+            appAccess?: boolean;
+            /** @description Web media item the release presents; set when appAccess is true. */
+            mediaId?: components["schemas"]["Id"];
         };
         ReleasePresentation: {
             /** @enum {string} */
-            kind: "media" | "media-schedule" | "cable" | "web";
+            kind: "media" | "media-schedule" | "web";
             media?: components["schemas"]["MediaPresentation"];
             mediaSchedule?: components["schemas"]["MediaSchedulePresentation"];
-            cable?: components["schemas"]["CablePresentation"];
             web?: components["schemas"]["WebPresentation"];
         } & ({
             /** @constant */
@@ -1997,10 +1754,6 @@ export interface components {
             /** @constant */
             kind: "media-schedule";
             mediaSchedule: components["schemas"]["MediaSchedulePresentation"];
-        } | {
-            /** @constant */
-            kind: "cable";
-            cable: components["schemas"]["CablePresentation"];
         } | {
             /** @constant */
             kind: "web";
@@ -2025,7 +1778,7 @@ export interface components {
             signature: string;
             payload: components["schemas"]["ReleasePayload"];
         };
-        /** @description Targets exactly one of mediaId or playlistId. The server publishes or reuses the signed release that presents it (file media → media, web media and Cable items → web, playlists → media-schedule). */
+        /** @description Targets exactly one of mediaId or playlistId. The server publishes or reuses the signed release that presents it (file media → media, web media → web, playlists → media-schedule). */
         AssignmentInput: {
             mediaId?: components["schemas"]["Id"];
             playlistId?: components["schemas"]["Id"];
@@ -2124,11 +1877,9 @@ export interface components {
         CurrentContent: {
             releaseDigest: string;
             /** @enum {string} */
-            presentationKind: "media" | "media-schedule" | "cable" | "web";
+            presentationKind: "media" | "media-schedule" | "web";
             /** @enum {string} */
             state: "playing" | "paused" | "off_air" | "stale";
-            channelId?: components["schemas"]["Id"];
-            blockId?: components["schemas"]["Id"];
             itemId?: components["schemas"]["Id"];
             mediaId?: components["schemas"]["Id"];
             assetId?: components["schemas"]["Id"];
@@ -2153,7 +1904,7 @@ export interface components {
             /** Format: int64 */
             observedGeneration: number;
             /** @enum {string|null} */
-            presentationKind: "media" | "media-schedule" | "cable" | "web" | null;
+            presentationKind: "media" | "media-schedule" | "web" | null;
             renderingReleaseDigest?: string | null;
             candidateReleaseDigest?: string | null;
             healthyReleaseDigest?: string | null;
@@ -2205,9 +1956,9 @@ export interface components {
         UploadId: components["schemas"]["Id"];
         AssetId: components["schemas"]["Id"];
         ReleaseId: components["schemas"]["Id"];
-        CableDeploymentId: components["schemas"]["Id"];
-        CableChannelId: components["schemas"]["Id"];
-        CableProgramId: components["schemas"]["Id"];
+        PlaylistId: components["schemas"]["Id"];
+        /** @description App token for media elements that cannot send an Authorization header. */
+        AppAccessToken: string;
         ProfileId: components["schemas"]["Id"];
         /** @description Opaque, server-issued keyset cursor. */
         PageCursor: string;
@@ -2241,6 +1992,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    getOpenApiSpec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The embedded API contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/yaml": string;
                 };
             };
         };
@@ -2861,7 +2632,7 @@ export interface operations {
                 order?: components["parameters"]["PageOrder"];
                 playable?: boolean;
                 assetId?: components["schemas"]["Id"][];
-                /** @description File media (uploaded assets) or web media (pages and Cable items). */
+                /** @description File media (uploaded assets) or web media (pages). */
                 kind?: "file" | "web";
                 /** @description Narrows to file media whose artifact is an image, video, or audio type. */
                 mediaType?: "image" | "video" | "audio";
@@ -2985,7 +2756,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Authored media updated. Web media accept title, description, and tags; Cable items cannot be edited (409). */
+            /** @description Authored media updated. Web media accept title, description, tags, and appAccess; appAccess on file media is rejected (400). */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
@@ -3180,7 +2951,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                kind: "media" | "playlist" | "block" | "channel" | "profile" | "revision" | "release" | "assignment";
+                kind: "media" | "playlist" | "release" | "assignment";
                 id: components["schemas"]["Id"];
             };
             cookie?: never;
@@ -3471,7 +3242,7 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
-    listCableDeployments: {
+    listPlaylists: {
         parameters: {
             query?: {
                 /** @description Opaque, server-issued keyset cursor. */
@@ -3484,19 +3255,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Cable deployments in deterministic keyset order. */
+            /** @description Playlists in deterministic keyset order. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CableDeploymentPage"];
+                    "application/json": components["schemas"]["PlaylistPage"];
                 };
             };
             default: components["responses"]["Problem"];
         };
     };
-    createCableDeployment: {
+    createPlaylist: {
         parameters: {
             query?: never;
             header: {
@@ -3507,581 +3278,72 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CableDeploymentInput"];
+                "application/json": components["schemas"]["PlaylistInput"];
             };
         };
         responses: {
-            /** @description Cable deployment created. */
+            /** @description Playlist created. */
             201: {
                 headers: {
                     ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CableDeployment"];
+                    "application/json": components["schemas"]["Playlist"];
                 };
             };
             default: components["responses"]["Problem"];
         };
     };
-    getCableDeployment: {
+    getPlaylist: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
+                playlistId: components["parameters"]["PlaylistId"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Cable deployment. */
+            /** @description Playlist. */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CableDeployment"];
+                    "application/json": components["schemas"]["Playlist"];
                 };
             };
             default: components["responses"]["Problem"];
         };
     };
-    deleteCableDeployment: {
+    updatePlaylist: {
         parameters: {
             query?: never;
             header: {
                 "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Cable deployment deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    updateCableDeployment: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
+                playlistId: components["parameters"]["PlaylistId"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CableDeploymentInput"];
+                "application/json": components["schemas"]["PlaylistInput"];
             };
         };
         responses: {
-            /** @description Cable deployment updated. */
+            /** @description Playlist updated. */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CableDeployment"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    listCableChannels: {
-        parameters: {
-            query?: {
-                /** @description Opaque, server-issued keyset cursor. */
-                cursor?: components["parameters"]["PageCursor"];
-                limit?: components["parameters"]["PageLimit"];
-            };
-            header?: never;
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Channels belonging to the deployment. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableChannelPage"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    createCableChannel: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                deploymentId: components["parameters"]["CableDeploymentId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableChannelInput"];
-            };
-        };
-        responses: {
-            /** @description Cable channel created. */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableChannel"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    getCableChannel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Cable channel. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableChannel"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    deleteCableChannel: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Cable channel deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    updateCableChannel: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableChannelInput"];
-            };
-        };
-        responses: {
-            /** @description Cable channel updated. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableChannel"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    listCablePrograms: {
-        parameters: {
-            query?: {
-                /** @description Opaque, server-issued keyset cursor. */
-                cursor?: components["parameters"]["PageCursor"];
-                limit?: components["parameters"]["PageLimit"];
-            };
-            header?: never;
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Program entries belonging to the channel. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableProgramPage"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    createCableProgram: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableProgramInput"];
-            };
-        };
-        responses: {
-            /** @description Cable program entry created. */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableProgram"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    getCableProgram: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                programId: components["parameters"]["CableProgramId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Cable program entry. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableProgram"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    deleteCableProgram: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                programId: components["parameters"]["CableProgramId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Cable program entry deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    updateCableProgram: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                programId: components["parameters"]["CableProgramId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableProgramInput"];
-            };
-        };
-        responses: {
-            /** @description Cable program entry updated. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableProgram"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    listCablePlaylists: {
-        parameters: {
-            query?: {
-                /** @description Opaque, server-issued keyset cursor. */
-                cursor?: components["parameters"]["PageCursor"];
-                limit?: components["parameters"]["PageLimit"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Reusable Cable media playlists. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CablePlaylistPage"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    createCablePlaylist: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CablePlaylistInput"];
-            };
-        };
-        responses: {
-            /** @description Cable playlist created. */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CablePlaylist"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    getCablePlaylist: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                playlistId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Cable playlist. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CablePlaylist"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    updateCablePlaylist: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                playlistId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CablePlaylistInput"];
-            };
-        };
-        responses: {
-            /** @description Cable playlist updated. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CablePlaylist"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    listCableBlocks: {
-        parameters: {
-            query?: {
-                /** @description Opaque, server-issued keyset cursor. */
-                cursor?: components["parameters"]["PageCursor"];
-                limit?: components["parameters"]["PageLimit"];
-            };
-            header?: never;
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Scheduled playlist blocks for the channel. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableBlockPage"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    createCableBlock: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                channelId: components["parameters"]["CableChannelId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableBlockInput"];
-            };
-        };
-        responses: {
-            /** @description Cable block created and materialized into the channel schedule. */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableBlock"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    getCableBlock: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                blockId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Scheduled Cable block. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableBlock"];
-                };
-            };
-            default: components["responses"]["Problem"];
-        };
-    };
-    updateCableBlock: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                blockId: components["schemas"]["Id"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CableBlockInput"];
-            };
-        };
-        responses: {
-            /** @description Scheduled Cable block updated. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CableBlock"];
+                    "application/json": components["schemas"]["Playlist"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -4623,7 +3885,7 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
-    createCableGuideToken: {
+    createAppToken: {
         parameters: {
             query?: never;
             header?: never;
@@ -4632,23 +3894,24 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CableGuideTokenRequest"];
+                "application/json": components["schemas"]["AppTokenRequest"];
             };
         };
         responses: {
-            /** @description Guide token for the node and deployment. */
+            /** @description App token for the node and media item. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CableGuideToken"];
+                    "application/json": components["schemas"]["AppToken"];
                 };
             };
+            403: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };
-    getCableGuidePresentation: {
+    getAppContext: {
         parameters: {
             query?: never;
             header?: never;
@@ -4657,58 +3920,190 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Live presentation of the token's deployment, with the node's active remote session. */
+            /** @description The node and media item the token was minted for. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CableGuidePresentation"];
+                    "application/json": components["schemas"]["AppContext"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listAppMedia: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
+                search?: components["parameters"]["PageSearch"];
+                /** @description Sort key. Defaults to createdAt. */
+                sort?: "createdAt" | "title" | "size" | "type";
+                order?: components["parameters"]["PageOrder"];
+                /** @description File media (uploaded assets) or web media (pages). */
+                kind?: "file" | "web";
+                /** @description Narrows to file media whose artifact is an image, video, or audio type. */
+                mediaType?: "image" | "video" | "audio";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Library media, as GET /media. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaPage"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getAppMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authored media. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Media"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getAppMediaContent: {
+        parameters: {
+            query?: {
+                /** @description App token for media elements that cannot send an Authorization header. */
+                access_token?: components["parameters"]["AppAccessToken"];
+            };
+            header?: {
+                Range?: string;
+                "If-Range"?: string;
+            };
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete authored-media preview bytes. */
+            200: {
+                headers: {
+                    "Accept-Ranges"?: "bytes";
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Partial authored-media preview bytes. */
+            206: {
+                headers: {
+                    "Content-Range"?: string;
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
                 };
             };
             default: components["responses"]["Problem"];
         };
     };
-    getCableGuideMedia: {
+    headAppMediaContent: {
         parameters: {
             query?: {
-                /** @description Guide token for media elements that cannot send headers. */
-                access_token?: string;
+                /** @description App token for media elements that cannot send an Authorization header. */
+                access_token?: components["parameters"]["AppAccessToken"];
             };
             header?: never;
             path: {
-                assetId: components["schemas"]["Id"];
+                mediaId: components["schemas"]["Id"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Asset content; only assets scheduled by the token's deployment. */
+            /** @description Authored-media preview metadata. */
             200: {
                 headers: {
+                    "Accept-Ranges"?: "bytes";
+                    "Content-Length"?: number;
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/octet-stream": string;
-                };
-            };
-            /** @description Requested byte range. */
-            206: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": string;
-                };
+                content?: never;
             };
             default: components["responses"]["Problem"];
         };
     };
-    pollCableGuideRemoteEvents: {
+    getAppMediaThumbnail: {
         parameters: {
             query?: {
-                after?: number;
-                wait?: number;
+                /** @description App token for media elements that cannot send an Authorization header. */
+                access_token?: components["parameters"]["AppAccessToken"];
+                v?: string;
+            };
+            header?: never;
+            path: {
+                mediaId: components["schemas"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Thumbnail bytes. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            /** @description Not modified. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listAppPlaylists: {
+        parameters: {
+            query?: {
+                /** @description Opaque, server-issued keyset cursor. */
+                cursor?: components["parameters"]["PageCursor"];
+                limit?: components["parameters"]["PageLimit"];
             };
             header?: never;
             path?: never;
@@ -4716,19 +4111,70 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Remote events of the node's active remote session newer than after; long-polls up to wait seconds. */
+            /** @description Playlists, as GET /playlists. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CableGuideRemoteEvents"];
+                    "application/json": components["schemas"]["PlaylistPage"];
                 };
             };
+            401: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };
-    renewCableGuideToken: {
+    getAppPlaylist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlistId: components["parameters"]["PlaylistId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Playlist. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Playlist"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    pollAppRemoteEvents: {
+        parameters: {
+            query?: {
+                after?: number;
+                waitSeconds?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Remote events of the node's active phone-remote session newer than after; long-polls up to waitSeconds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppRemoteEventPage"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    renewAppToken: {
         parameters: {
             query?: never;
             header?: never;
@@ -4737,15 +4183,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successor guide token; refused once the node is no longer assigned the deployment. */
+            /** @description Successor app token; refused with 401 once the node is no longer assigned the media item. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CableGuideToken"];
+                    "application/json": components["schemas"]["AppToken"];
                 };
             };
+            401: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };
@@ -4896,6 +4343,33 @@ export interface operations {
                 };
             };
             401: components["responses"]["Problem"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createBrowserNodeAppToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description App token for the node and media item. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppToken"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
             default: components["responses"]["Problem"];
         };
     };

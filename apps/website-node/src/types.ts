@@ -64,13 +64,13 @@ export type ReleaseEnvelope = {
       kind: PresentationKind;
       media?: { playback: PlaybackPayload };
       mediaSchedule?: { timezone: string; items: MediaScheduleItem[] };
-      web?: { url: string };
+      web?: { url: string; appAccess?: boolean; mediaId?: string };
     };
     artifacts: ReleaseArtifact[];
   };
 };
 
-export type CableGuideToken = { token: string; expiresAt: string };
+export type AppToken = { token: string; expiresAt: string; apiUrl: string };
 
 export type RemoteSession = {
   sessionId: string;

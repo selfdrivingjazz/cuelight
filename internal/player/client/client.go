@@ -272,16 +272,16 @@ func (c *Client) CreateRemoteSession(ctx context.Context, desiredGeneration int6
 	return session, err
 }
 
-// CreateCableGuideToken mints a guide token for the hosted Cable guide of
-// deploymentID; control rejects it unless this node is assigned that guide.
-func (c *Client) CreateCableGuideToken(ctx context.Context, deploymentID string) (CableGuideToken, error) {
-	if strings.TrimSpace(deploymentID) == "" {
-		return CableGuideToken{}, errors.New("deployment ID is required")
+// CreateAppToken mints an app token for the app-access web media item
+// mediaID; control refuses it unless this node's assignment targets that item.
+func (c *Client) CreateAppToken(ctx context.Context, mediaID string) (AppToken, error) {
+	if strings.TrimSpace(mediaID) == "" {
+		return AppToken{}, errors.New("media ID is required")
 	}
-	var token CableGuideToken
-	err := c.jsonOperation(ctx, http.MethodPost, "/player/cable-guide-tokens", nil, map[string]string{"deploymentId": deploymentID}, "", []int{http.StatusOK, http.StatusCreated}, &token, 0)
-	if err == nil && token.Token == "" {
-		err = &ProtocolError{Method: http.MethodPost, Path: "/player/cable-guide-tokens", Reason: "missing guide token"}
+	var token AppToken
+	err := c.jsonOperation(ctx, http.MethodPost, "/player/app-tokens", nil, map[string]string{"mediaId": mediaID}, "", []int{http.StatusOK, http.StatusCreated}, &token, 0)
+	if err == nil && (token.Token == "" || token.APIURL == "") {
+		err = &ProtocolError{Method: http.MethodPost, Path: "/player/app-tokens", Reason: "missing app token or API URL"}
 	}
 	return token, err
 }

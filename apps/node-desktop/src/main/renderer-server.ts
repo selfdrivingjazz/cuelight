@@ -15,7 +15,7 @@ interface ManagedOutput {
   qr?: string;
 }
 
-const webPartition = "persist:cable-web";
+const webPartition = "persist:web-pages";
 const qrSize = 168;
 const qrMargin = 24;
 

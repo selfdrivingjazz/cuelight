@@ -118,7 +118,7 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 			listener.Close()
 			return fmt.Errorf("create desktop browser launcher: %w", err)
 		}
-		browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, Launcher: launcher, Output: os.Stderr, Remote: controller, GuideTokens: controller})
+		browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, Launcher: launcher, Output: os.Stderr, Remote: controller, AppTokens: controller})
 		if err != nil {
 			listener.Close()
 			return fmt.Errorf("create desktop renderer: %w", err)
@@ -129,7 +129,7 @@ func run(ctx context.Context, lookup func(string) (string, bool)) error {
 		if config.RendererMode == "mpv-only" {
 			webRenderer = nil
 		} else {
-			browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{BinaryPath: config.ChromiumBinaryPath, RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, ExtraArgs: config.ChromiumArgs, Output: os.Stderr, Remote: controller, GuideTokens: controller})
+			browserRenderer, err := renderer.NewChromium(renderer.ChromiumConfig{BinaryPath: config.ChromiumBinaryPath, RuntimeRoot: config.ChromiumRuntimeRoot, Timeout: config.ChromiumTimeout, ExtraArgs: config.ChromiumArgs, Output: os.Stderr, Remote: controller, AppTokens: controller})
 			if err != nil {
 				listener.Close()
 				return fmt.Errorf("create Chromium renderer: %w", err)

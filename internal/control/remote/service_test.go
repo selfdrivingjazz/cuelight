@@ -160,38 +160,38 @@ func TestLinkMintsAdditionalSessionTokens(t *testing.T) {
 	}
 }
 
-func TestGuideLinkIsStablePerSessionAndSurvivesLinkEviction(t *testing.T) {
+func TestAppSessionLinkIsStablePerSessionAndSurvivesLinkEviction(t *testing.T) {
 	now := time.Unix(1_000, 0).UTC()
 	service := &Service{Policies: policies{Policy{Enabled: true, ShowQR: true}}, PublicURL: "https://control.example", TTL: time.Hour, Now: func() time.Time { return now }}
 	ctx := context.Background()
-	if _, err := service.Guide("node"); !errors.Is(err, ErrSessionMissing) {
+	if _, err := service.AppSession("node"); !errors.Is(err, ErrSessionMissing) {
 		t.Fatalf("no session = %v", err)
 	}
 	created, err := service.Create(ctx, "node", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	guide, err := service.Guide("node")
-	if err != nil || guide.ID != created.ID || guide.Token == created.Token || !guide.ShowQR || !guide.ExpiresAt.Equal(created.ExpiresAt) {
-		t.Fatalf("guide = %#v, %v", guide, err)
+	app, err := service.AppSession("node")
+	if err != nil || app.ID != created.ID || app.Token == created.Token || !app.ShowQR || !app.ExpiresAt.Equal(created.ExpiresAt) {
+		t.Fatalf("app = %#v, %v", app, err)
 	}
-	if again, _ := service.Guide("node"); again.RemoteURL != guide.RemoteURL {
-		t.Fatalf("guide URL changed within a session: %s vs %s", again.RemoteURL, guide.RemoteURL)
+	if again, _ := service.AppSession("node"); again.RemoteURL != app.RemoteURL {
+		t.Fatalf("app URL changed within a session: %s vs %s", again.RemoteURL, app.RemoteURL)
 	}
 	for range maxSessionTokens + 1 {
 		if _, err := service.Link(ctx, "node"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := service.Post(ctx, created.ID, guide.Token, Event{Sequence: 1, Type: "key", Key: "Enter"}); err != nil {
-		t.Fatalf("guide token after link eviction: %v", err)
+	if err := service.Post(ctx, created.ID, app.Token, Event{Sequence: 1, Type: "key", Key: "Enter"}); err != nil {
+		t.Fatalf("app token after link eviction: %v", err)
 	}
 	renewed, err := service.Create(ctx, "node", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next, err := service.Guide("node"); err != nil || next.ID != renewed.ID || next.Token == guide.Token {
-		t.Fatalf("renewed guide = %#v, %v", next, err)
+	if next, err := service.AppSession("node"); err != nil || next.ID != renewed.ID || next.Token == app.Token {
+		t.Fatalf("renewed app = %#v, %v", next, err)
 	}
 }
 

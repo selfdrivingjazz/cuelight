@@ -488,7 +488,7 @@ func mediaStatus(err error) int {
 		return http.StatusPreconditionFailed
 	case errors.Is(err, ErrInvalidArgument), errors.Is(err, page.ErrCursorInvalid), errors.Is(err, page.ErrLimitInvalid), errors.Is(err, page.ErrSortInvalid), errors.Is(err, page.ErrOrderInvalid):
 		return http.StatusBadRequest
-	case errors.Is(err, ErrArtifactUnavailable), errors.Is(err, ErrManaged), errors.Is(err, ErrWrongKind), errors.Is(err, ErrInUse):
+	case errors.Is(err, ErrArtifactUnavailable), errors.Is(err, ErrWrongKind), errors.Is(err, ErrInUse):
 		return http.StatusConflict
 	case errors.Is(err, ErrCaptureDisabled):
 		return http.StatusServiceUnavailable

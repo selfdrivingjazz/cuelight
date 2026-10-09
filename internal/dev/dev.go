@@ -701,7 +701,7 @@ func (m *Manager) waitReady(ctx context.Context, endpoint string) error {
 }
 func (m *Manager) bootstrapAdmin(ctx context.Context, env []string) (string, error) {
 	var out strings.Builder
-	scopes := "security_admin,node_enroll,node_read,node_write,assignment_read,assignment_write,media_write,local_media_read,media_read,release_write,release_read,cable_read,cable_write"
+	scopes := "security_admin,node_enroll,node_read,node_write,assignment_read,assignment_write,media_write,local_media_read,media_read,release_write,release_read"
 	code, err := m.commands.Run(ctx, m.config.ControlBinary, []string{"admin", "token", "create", "--actor-name", "cable development", "--scopes", scopes}, env, &out, io.Discard)
 	if err != nil {
 		return "", fmt.Errorf("bootstrap admin token: %w", err)

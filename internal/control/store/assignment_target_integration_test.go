@@ -55,7 +55,7 @@ func targetTestPublisher(t *testing.T, repository *Store) controlrelease.TargetP
 	return controlrelease.TargetPublisher{
 		Media:   controlrelease.Service{Releases: repository, Artifacts: repository, Profiles: targetTestProfiles{}, Signer: signer},
 		Catalog: repository, Releases: repository, Signer: signer,
-		MinimumProtocolVersion: canonical.ProtocolV1, PublicOrigin: "https://control.example",
+		MinimumProtocolVersion: canonical.ProtocolV1,
 	}
 }
 

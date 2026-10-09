@@ -1,6 +1,5 @@
 import { createRootRoute, createRoute, createRouter, useParams } from "@tanstack/react-router";
-import { CableChannelProgramsPage, CableDeploymentDetail, CableDeploymentsPage, CableProgramDetailPage } from "./cable";
-import { BlockAuthoringDetailPage, BlockAuthoringListPage, ChannelAuthoringDetailPage, PlaylistAuthoringDetailPage, PlaylistAuthoringListPage, type AuthoringQuerySeam } from "./authoring-details";
+import { PlaylistAuthoringDetailPage, PlaylistAuthoringListPage, type AuthoringQuerySeam } from "./authoring-details";
 import { api, readApiResult } from "./api";
 import { MediaDetailPage, MediaLibraryPage, normalizeMediaSearch } from "./media-library";
 import { RemoteControlPage } from "./phone-remote";
@@ -54,15 +53,6 @@ const assetsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/libra
 const assetDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/library/assets/$assetId", component: () => <AssetDetailPage assetId={useParam("assetId")} /> });
 const uploadsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/library/uploads", validateSearch: normalizePageSearch, component: UploadsPage });
 
-const deploymentsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/programming/deployments", component: CableDeploymentsPage });
-const deploymentDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/programming/deployments/$deploymentId", component: () => <CableDeploymentDetail /> });
-const deploymentChannelsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/programming/deployments/$deploymentId/channels", component: () => <CableDeploymentDetail tab="channels" /> });
-const channelDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/programming/channels/$channelId", component: () => <ChannelAuthoringDetailPage channelId={useParam("channelId")} querySeam={authoringQuerySeam} /> });
-const channelProgramsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/programming/channels/$channelId/programs", component: CableChannelProgramsPage });
-const channelBlocksRoute = createRoute({ getParentRoute: () => rootRoute, path: "/programming/channels/$channelId/blocks", component: () => <BlockAuthoringListPage channelId={useParam("channelId")} /> });
-const blockDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/programming/blocks/$blockId", component: () => <BlockAuthoringDetailPage blockId={useParam("blockId")} querySeam={authoringQuerySeam} /> });
-const programDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/programming/programs/$programId", component: CableProgramDetailPage });
-
 const releasesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/releases", validateSearch: normalizePageSearch, component: ReleasesPage });
 const releaseDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/releases/$releaseId", component: () => <ReleaseDetailPage releaseId={useParam("releaseId")} /> });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
@@ -71,8 +61,6 @@ const routeTree = rootRoute.addChildren([
   indexRoute, remoteControlRoute,
   screensRoute, assignRoute, pairRoute, screenRoute, screenAssignmentRoute, screenRemoteRoute, screenEventsRoute, screenSystemRoute, activityRoute, profilesRoute, profileDetailRoute,
   mediaRoute, mediaDetailRoute, playlistsRoute, playlistDetailRoute, assetsRoute, assetDetailRoute, uploadsRoute,
-  deploymentsRoute, deploymentDetailRoute, deploymentChannelsRoute,
-  channelDetailRoute, channelProgramsRoute, channelBlocksRoute, blockDetailRoute, programDetailRoute,
   releasesRoute, releaseDetailRoute, settingsRoute,
 ]);
 export const router = createRouter({ routeTree, defaultPreload: "intent" });

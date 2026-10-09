@@ -66,7 +66,7 @@ export function WebsiteNodeApp({ controller: provided }: { controller?: BrowserN
         />
       )}
       {soundBlocked && view.phase === "presenting" && <div className="hint">Press OK or tap to turn on sound</div>}
-      {snapshot.remote && snapshot.remote.showQr && !(view.phase === "presenting" && view.presentation.kind === "web" && view.presentation.guide) && <RemoteBadge session={snapshot.remote} />}
+      {snapshot.remote && snapshot.remote.showQr && !(view.phase === "presenting" && view.presentation.kind === "web" && view.presentation.appAccess) && <RemoteBadge session={snapshot.remote} />}
       {snapshot.offline && <div className="offline" role="status">Reconnecting to Cable…</div>}
     </main>
   );
@@ -112,7 +112,7 @@ function PresentationView({ presentation, report, videoRef, onSoundBlocked }: {
 }) {
   if (presentation.kind === "media") return <MediaView item={presentation.item} report={report} videoRef={videoRef} onSoundBlocked={onSoundBlocked} />;
   if (presentation.kind === "media-schedule") return <ScheduleView items={presentation.items} report={report} videoRef={videoRef} onSoundBlocked={onSoundBlocked} />;
-  if (presentation.kind === "web") return <WebView url={presentation.url} title={presentation.guide ? "Cable guide" : "Assigned website"} focus={presentation.guide} report={report} />;
+  if (presentation.kind === "web") return <WebView url={presentation.url} title={presentation.appAccess ? "Assigned app" : "Assigned website"} focus={presentation.appAccess} report={report} />;
   return <Message title="This screen can't show the assigned content" detail={presentation.reason} small={`Presentation: ${presentation.presentationKind}`} />;
 }
 
@@ -174,7 +174,7 @@ function MediaView({ item, report, videoRef, onSoundBlocked }: { item: MediaItem
 function WebView({ url, title, focus = false, report }: { url: string; title: string; focus?: boolean; report: Report }) {
   // Sites that send X-Frame-Options/frame-ancestors refuse to load here; the
   // browser does not expose that failure, so "playing" means the frame loaded.
-  // The same-origin Cable guide takes focus so local remote keys reach it.
+  // App access pages take focus so local remote keys reach them.
   return <iframe className="web" src={url} title={title} allow="autoplay; fullscreen; encrypted-media" referrerPolicy="no-referrer" onLoad={(event) => { if (focus) event.currentTarget.contentWindow?.focus(); report({ state: "playing" }); }} />;
 }
 
@@ -182,8 +182,8 @@ function handleRemoteEvent(event: RemoteEvent, snapshot: NodeSnapshot, video: HT
   const view = snapshot.view;
   if (view.phase !== "presenting") return;
   if (view.presentation.kind === "web") {
-    // The hosted Cable guide polls the remote session itself.
-    if (view.presentation.guide) return;
+    // App access pages poll the remote session themselves.
+    if (view.presentation.appAccess) return;
     // Cross-origin frames cannot receive synthetic input from this page. The
     // Android shell exposes a native injector; plain browsers drop the event.
     const bridge = window.CableAndroid;

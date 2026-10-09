@@ -29,18 +29,18 @@ function hang(init: RequestInit): Promise<Response> {
 }
 
 function harness(routes: Record<string, Route>, now = () => Date.parse("2026-10-03T12:00:00Z"), sleep: (ms: number, signal: AbortSignal) => Promise<void> = async () => undefined) {
-  const calls: { key: string; auth: string; url: string }[] = [];
+  const calls: { key: string; auth: string; url: string; body?: unknown }[] = [];
   const fetcher = async (url: string, init: RequestInit = {}) => {
     const path = url.replace("/api/v1/browser-node", "").split("?")[0] || "";
     const key = `${init.method} ${path}`;
     const headers = (init.headers || {}) as Record<string, string>;
-    calls.push({ key, auth: headers.authorization || "", url });
+    calls.push({ key, auth: headers.authorization || "", url, body: init.body });
     const route = routes[key];
     if (!route) return json(500, { detail: `unexpected ${key}` });
     return route(init, url);
   };
   const storage = new MemoryCredentialStorage();
-  const controller = new BrowserNodeController(new BrowserNodeApi("", fetcher), storage, { now, sleep, assignmentWaitSeconds: 1, controlOrigin: "https://control.example" });
+  const controller = new BrowserNodeController(new BrowserNodeApi("", fetcher), storage, { now, sleep, assignmentWaitSeconds: 1 });
   return { controller, storage, calls };
 }
 
@@ -117,17 +117,17 @@ describe("BrowserNodeController", () => {
     expect(storage.load()!.token).toBe("tok-2");
   });
 
-  const webRelease = (url: string): ReleaseEnvelope => ({ ...release, payload: { presentation: { kind: "web", web: { url } }, artifacts: [] } });
-  /** Presents a web release with remote input on and stops once the remote loop parks (event poll or guide keep-alive sleep). */
-  const presentWeb = async (url: string) => {
+  const webRelease = (web: { url: string; appAccess?: boolean; mediaId?: string }): ReleaseEnvelope => ({ ...release, payload: { presentation: { kind: "web", web }, artifacts: [] } });
+  /** Presents a web release with remote input on and stops once the remote loop parks (event poll or app keep-alive sleep). */
+  const presentWeb = async (web: { url: string; appAccess?: boolean; mediaId?: string }) => {
     let assignmentCalls = 0;
     let parked = () => undefined as void;
     const remoteParked = new Promise<void>((resolve) => { parked = resolve; });
     const { controller, storage, calls } = harness({
       "PUT /player/capabilities": () => json(204),
       "GET /player/assignment": (init) => (++assignmentCalls === 1 ? json(200, { ...assignment, remoteInput: true }, { etag: "\"a\"" }) : hang(init)),
-      "GET /player/releases/release-1": () => json(200, webRelease(url)),
-      "POST /player/cable-guide-tokens": () => json(201, { token: "guide/1", expiresAt: "2026-10-04T12:00:00Z" }),
+      "GET /player/releases/release-1": () => json(200, webRelease(web)),
+      "POST /player/app-tokens": () => json(201, { token: "app/1", expiresAt: "2026-10-04T12:00:00Z", apiUrl: "https://control.example/api/v1" }),
       "POST /player/remote-sessions": () => json(201, { sessionId: "rs-1", remoteUrl: "https://control.example/remote/rs-1", showQr: true, expiresAt: "2026-10-03T12:10:00Z" }),
       "GET /player/remote-sessions/rs-1/events": (init) => { parked(); return hang(init); },
     }, undefined, (_ms, signal) => { parked(); return new Promise((resolve) => signal.addEventListener("abort", () => resolve())); });
@@ -140,28 +140,36 @@ describe("BrowserNodeController", () => {
     return { presentation: view.presentation, keys: calls.map((call) => call.key), calls };
   };
 
-  it("mints a guide token for the control-hosted Cable guide and leaves its remote events to the guide", async () => {
-    const { presentation, keys, calls } = await presentWeb("https://control.example/cable/?deployment=dep-1#stale");
-    expect(presentation).toMatchObject({ guide: true, url: "https://control.example/cable/?deployment=dep-1#token=guide%2F1" });
-    expect(calls.find((call) => call.key === "POST /player/cable-guide-tokens")!.auth).toBe("Bearer tok-1");
+  const fragment = "cuelight-token=app%2F1&cuelight-api=https%3A%2F%2Fcontrol.example%2Fapi%2Fv1";
+
+  it("mints an app token for an app access page and leaves its remote events to the page", async () => {
+    const { presentation, keys, calls } = await presentWeb({ url: "https://app.example/x", appAccess: true, mediaId: "media-7" });
+    expect(presentation).toMatchObject({ appAccess: true, url: `https://app.example/x#${fragment}` });
+    const mint = calls.find((call) => call.key === "POST /player/app-tokens")!;
+    expect(mint.auth).toBe("Bearer tok-1");
+    expect(JSON.parse(String(mint.body))).toEqual({ mediaId: "media-7" });
     expect(keys).toContain("POST /player/remote-sessions");
     expect(keys).not.toContain("GET /player/remote-sessions/rs-1/events");
   });
 
-  it("shows other web pages unchanged and forwards their remote events", async () => {
-    for (const url of ["https://other.example/cable/?deployment=dep-1", "https://control.example/cable/", "https://control.example/cable/x?deployment=dep-1"]) {
-      const { presentation, keys } = await presentWeb(url);
-      expect(presentation).toMatchObject({ guide: false, url });
-      expect(keys).not.toContain("POST /player/cable-guide-tokens");
-      expect(keys).toContain("GET /player/remote-sessions/rs-1/events");
-    }
+  it("keeps existing fragment params and replaces stale app token params", async () => {
+    const { presentation } = await presentWeb({ url: "https://app.example/x?q=1#view=grid&cuelight-token=old&cuelight-api=old", appAccess: true, mediaId: "media-7" });
+    expect(presentation.url).toBe(`https://app.example/x?q=1#view=grid&${fragment}`);
+  });
+
+  it("shows other web pages unchanged without minting and forwards their remote events", async () => {
+    const url = "https://other.example/page#view=grid";
+    const { presentation, keys } = await presentWeb({ url });
+    expect(presentation).toMatchObject({ appAccess: false, url });
+    expect(keys).not.toContain("POST /player/app-tokens");
+    expect(keys).toContain("GET /player/remote-sessions/rs-1/events");
   });
 });
 
 describe("presentation mapping", () => {
   it("keeps web URLs and maps schedule web items alongside media items", () => {
     const web = toPresentation({ ...release, payload: { ...release.payload, presentation: { kind: "web", web: { url: "https://example.com/" } } } }, (digest) => digest);
-    expect(web).toMatchObject({ kind: "web", url: "https://example.com/", guide: false });
+    expect(web).toMatchObject({ kind: "web", url: "https://example.com/", appAccess: false });
     const playback = { fit: "fit" as const, loop: false, muted: true, volume: 0, orientation: 0 };
     const schedule = toPresentation({ ...release, payload: { ...release.payload, presentation: { kind: "media-schedule", mediaSchedule: { timezone: "UTC", items: [
       { ...playback, id: "page", startsAt: "2026-10-03T12:01:00Z", endsAt: "2026-10-03T12:02:00Z", web: { url: "https://example.com/page" } },

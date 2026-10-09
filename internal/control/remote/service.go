@@ -64,8 +64,8 @@ type session struct {
 	id, nodeID    string
 	generation    int64
 	tokenHashes   [][32]byte
-	guideToken    string
-	guideHash     [32]byte
+	appToken      string
+	appHash       [32]byte
 	showQR        bool
 	expiresAt     time.Time
 	lastSequence  int64
@@ -209,10 +209,11 @@ func (s *Service) activeSession(nodeID string) *session {
 	return nil
 }
 
-// Guide returns the node's active session with a phone URL for an in-page
-// guide (hosted Cable) to display. The guide token is minted once per session
-// and kept apart from operator links so link eviction never invalidates it.
-func (s *Service) Guide(nodeID string) (SessionCreated, error) {
+// AppSession returns the node's active session with a phone URL for an
+// in-page app (a web media item with app access) to display. The app's phone
+// token is minted once per session and kept apart from operator links so link
+// eviction never invalidates it.
+func (s *Service) AppSession(nodeID string) (SessionCreated, error) {
 	if nodeID == "" {
 		return SessionCreated{}, ErrInvalid
 	}
@@ -225,15 +226,15 @@ func (s *Service) Guide(nodeID string) (SessionCreated, error) {
 	if value == nil {
 		return SessionCreated{}, ErrSessionMissing
 	}
-	if value.guideToken == "" {
+	if value.appToken == "" {
 		tokenBytes := make([]byte, 32)
 		if _, err := io.ReadFull(s.Random, tokenBytes); err != nil {
 			return SessionCreated{}, err
 		}
-		value.guideToken = base64.RawURLEncoding.EncodeToString(tokenBytes)
-		value.guideHash = sha256.Sum256([]byte(value.guideToken))
+		value.appToken = base64.RawURLEncoding.EncodeToString(tokenBytes)
+		value.appHash = sha256.Sum256([]byte(value.appToken))
 	}
-	return s.created(value.id, value.guideToken, value.showQR, value.expiresAt), nil
+	return s.created(value.id, value.appToken, value.showQR, value.expiresAt), nil
 }
 
 func (value *session) authorized(hash [32]byte) bool {
@@ -241,8 +242,8 @@ func (value *session) authorized(hash [32]byte) bool {
 	for _, stored := range value.tokenHashes {
 		matched |= subtle.ConstantTimeCompare(hash[:], stored[:])
 	}
-	if value.guideToken != "" {
-		matched |= subtle.ConstantTimeCompare(hash[:], value.guideHash[:])
+	if value.appToken != "" {
+		matched |= subtle.ConstantTimeCompare(hash[:], value.appHash[:])
 	}
 	return matched == 1
 }

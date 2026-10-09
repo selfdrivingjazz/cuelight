@@ -27,8 +27,6 @@ export interface PlaybackMetadata {
   media?: Media;
   /** An already-authorized object URL for a still: the media's persisted poster, or a web page capture when `media` is absent. */
   mediaPreviewUrl?: string;
-  channelName?: string;
-  blockTitle?: string;
   startsAt?: string;
   endsAt?: string;
   durationMs?: number;
@@ -215,9 +213,6 @@ function MetadataSummary({ metadata, empty }: { metadata?: PlaybackMetadata; emp
   return <div className="min-w-0">
     <p className="truncate text-sm font-medium text-foreground">{metadata.title}</p>
     {metadata.subtitle && <p className="mt-1 truncate text-xs text-muted-foreground">{metadata.subtitle}</p>}
-    {(metadata.channelName || metadata.blockTitle) && <p className="mt-1 truncate text-xs text-muted-foreground">
-      {[metadata.channelName, metadata.blockTitle].filter(Boolean).join(" · ")}
-    </p>}
   </div>;
 }
 
@@ -229,12 +224,8 @@ function ObservedIdentity({ report, observedNow }: { report?: NodeReport; observ
   </div>;
 
   const media = observedNow?.title ?? (observed.mediaId ? "Media active" : observed.state === "off_air" ? "No media on air" : "Media not reported");
-  const channel = observedNow?.channelName ?? (observed.channelId ? "Channel active" : "Channel not reported");
-  const block = observedNow?.blockTitle ?? (observed.blockId ? "Block active" : "Block not reported");
-  return <dl className="grid gap-3 text-sm sm:grid-cols-3">
+  return <dl className="text-sm">
     <div><dt className="text-xs text-muted-foreground">Current media</dt><dd className="mt-1 font-medium">{media}</dd></div>
-    <div><dt className="text-xs text-muted-foreground">Channel</dt><dd className="mt-1">{channel}</dd></div>
-    <div><dt className="text-xs text-muted-foreground">Block</dt><dd className="mt-1">{block}</dd></div>
   </dl>;
 }
 
@@ -269,8 +260,6 @@ function technicalItems(node: Node, report?: NodeReport, capabilities?: Capabili
 
   if (observed) {
     const ids: Array<[string, string | undefined]> = [
-      ["Observed channel ID", observed.channelId],
-      ["Observed block ID", observed.blockId],
       ["Observed item ID", observed.itemId],
       ["Observed media ID", observed.mediaId],
       ["Observed asset ID", observed.assetId],
@@ -365,7 +354,7 @@ export function NodePlaybackView({
   const summary = nodeHealth({ report, health, healthDetail });
   const observed = report?.currentContent;
   const observedTitle = observedNow?.title ?? (observed?.mediaId ? "Media playing" : observed?.state === "off_air" ? "Off air" : "Playback state");
-  const observedSubtitle = observedNow?.subtitle ?? ([observedNow?.channelName, observedNow?.blockTitle].filter(Boolean).join(" · ") || undefined);
+  const observedSubtitle = observedNow?.subtitle;
   const expectedHeadingId = React.useId();
   const captureHeadingId = React.useId();
 

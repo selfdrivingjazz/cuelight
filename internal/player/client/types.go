@@ -100,8 +100,6 @@ type CurrentContent struct {
 	ReleaseDigest    string                   `json:"releaseDigest"`
 	PresentationKind release.PresentationKind `json:"presentationKind"`
 	State            string                   `json:"state"`
-	ChannelID        string                   `json:"channelId,omitempty"`
-	BlockID          string                   `json:"blockId,omitempty"`
 	ItemID           string                   `json:"itemId,omitempty"`
 	MediaID          string                   `json:"mediaId,omitempty"`
 	AssetID          string                   `json:"assetId,omitempty"`
@@ -174,8 +172,10 @@ type ArtifactContent struct {
 	Partial      bool
 }
 
-// CableGuideToken authorises a hosted Cable guide page for one deployment.
-type CableGuideToken struct {
+// AppToken authorises an app-access web page to call the /app API, which is
+// served at APIURL, for one node and media item.
+type AppToken struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expiresAt"`
+	APIURL    string    `json:"apiUrl"`
 }

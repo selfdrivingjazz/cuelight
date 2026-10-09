@@ -218,8 +218,8 @@ func (s *Store) RevokeBrowserNode(ctx context.Context, nodeID string, now time.T
 		if rows, _ := result.RowsAffected(); rows != 1 {
 			return webnode.ErrNodeNotFound
 		}
-		if _, err = tx.ExecContext(txCtx, `DELETE FROM cable_guide_tokens WHERE node_id = $1`, nodeID); err != nil {
-			return wrap("revoke cable guide tokens", err)
+		if _, err = tx.ExecContext(txCtx, `DELETE FROM app_tokens WHERE node_id = $1`, nodeID); err != nil {
+			return wrap("revoke app tokens", err)
 		}
 		_, err = tx.ExecContext(txCtx, `UPDATE browser_node_credentials SET revoked_at = $2 WHERE node_id = $1 AND revoked_at IS NULL`, nodeID, now)
 		return wrap("revoke browser credentials", err)

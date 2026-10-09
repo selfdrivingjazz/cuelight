@@ -33,8 +33,6 @@ const report = (state?: "playing" | "paused" | "off_air" | "stale"): NodeReport 
     releaseDigest: "release-digest",
     presentationKind: "media-schedule",
     state,
-    channelId: "channel-9",
-    blockId: "block-3",
     mediaId: "media-2",
     transitionedAt: "2026-09-02T11:55:00.000Z",
   } : undefined,
@@ -43,6 +41,7 @@ const report = (state?: "playing" | "paused" | "off_air" | "stale"): NodeReport 
 const media: Media = {
   id: "media-2",
   kind: "file",
+  appAccess: false,
   assetId: "asset-2",
   title: "Morning headlines",
   tags: ["news"],
@@ -95,9 +94,9 @@ describe("fleet visual playback surfaces", () => {
     const markup = renderToStaticMarkup(<NodePlaybackView
       node={node("lobby", "Lobby display")}
       report={report("playing")}
-      observedNow={{ title: "Morning headlines", channelName: "Channel 9", blockTitle: "Morning block" }}
+      observedNow={{ title: "Morning headlines" }}
       expectedNow={{ title: "Morning headlines", media, mediaPreviewUrl: "blob:expected-media" }}
-      next={{ title: "Weather", channelName: "Channel 9" }}
+      next={{ title: "Weather" }}
     />);
 
     expect(markup).toContain("Expected now");

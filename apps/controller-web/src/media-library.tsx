@@ -17,6 +17,7 @@ import {
   PreviewMosaic,
   PreviewSurface,
   Skeleton,
+  StatusBadge,
   TechnicalDetails,
   useToast,
   type NavigationLink,
@@ -193,7 +194,7 @@ export function webHost(url: string | undefined): string {
 function MediaLibraryCard({ media }: { media: Media }) {
   return <MediaCard
     title={media.title}
-    artist={media.kind === "web" ? (media.deploymentId ? "Hosted Cable guide" : webHost(media.url)) : media.artist}
+    artist={media.kind === "web" ? webHost(media.url) : media.artist}
     preview={<MediaThumbnail media={media} />}
     metadata={media.kind === "web"
       ? <span className="inline-flex items-center gap-1.5">{media.faviconUrl && <img src={media.faviconUrl} alt="" className="h-3.5 w-3.5 rounded-sm" loading="lazy" referrerPolicy="no-referrer" />}{mediaKindLabel(media)}</span>
@@ -204,14 +205,23 @@ function MediaLibraryCard({ media }: { media: Media }) {
   />;
 }
 
+function AppAccessToggle({ checked, disabled, onChange }: { checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
+  const helpId = React.useId();
+  return <div className="flex items-start gap-2 text-sm">
+    <input id={`${helpId}-input`} className="mt-0.5 h-4 w-4 accent-primary" type="checkbox" aria-describedby={helpId} checked={checked} disabled={disabled} onChange={(event) => onChange(event.currentTarget.checked)} />
+    <span><label className="font-medium" htmlFor={`${helpId}-input`}>Cuelight app</label><span id={helpId} className="block text-xs text-muted-foreground">Give this page access to the screen's remote and the media library</span></span>
+  </div>;
+}
+
 function AddWebPageForm({ onAdded }: { onAdded: (media: Media) => void }) {
   const [url, setUrl] = React.useState("");
   const [title, setTitle] = React.useState("");
+  const [appAccess, setAppAccess] = React.useState(false);
   const mutation = useMutation({
     mutationFn: async () => {
       const value = url.trim();
       if (!/^https?:\/\//i.test(value)) throw new Error("Enter a web page URL starting with http:// or https://.");
-      return readApiResult(await api.POST("/media", { params: { header: { "Idempotency-Key": crypto.randomUUID() } }, body: { kind: "web", url: value, title: title.trim() || undefined } }));
+      return readApiResult(await api.POST("/media", { params: { header: { "Idempotency-Key": crypto.randomUUID() } }, body: { kind: "web", url: value, title: title.trim() || undefined, appAccess } }));
     },
     onSuccess: onAdded,
   });
@@ -219,6 +229,7 @@ function AddWebPageForm({ onAdded }: { onAdded: (media: Media) => void }) {
     <label className="block text-sm font-medium">Page URL<input className={fieldClass} type="url" inputMode="url" required placeholder="https://example.com" value={url} onChange={(event) => setUrl(event.currentTarget.value)} /></label>
     <label className="block text-sm font-medium">Title <span className="font-normal text-muted-foreground">(optional)</span><input className={fieldClass} value={title} maxLength={300} placeholder="Uses the page title" onChange={(event) => setTitle(event.currentTarget.value)} /></label>
     <Button type="submit" disabled={mutation.isPending || !url.trim()}>{mutation.isPending ? "Adding…" : "Add web page"}</Button>
+    <div className="sm:col-span-3"><AppAccessToggle checked={appAccess} disabled={mutation.isPending} onChange={setAppAccess} /></div>
     {mutation.error instanceof Error && <p role="alert" className="text-sm text-destructive sm:col-span-3">{mutation.error.message}</p>}
   </form>;
 }
@@ -238,7 +249,7 @@ export function MediaLibraryPage() {
     queryFn: () => listMedia(search),
     placeholderData: keepPreviousData,
     // Web pages still being captured poll until their thumbnail lands.
-    refetchInterval: (current) => current.state.data?.items.some((item) => item.kind === "web" && !item.deploymentId && !item.thumbnail && !item.thumbnailError) ? 3000 : false,
+    refetchInterval: (current) => current.state.data?.items.some((item) => item.kind === "web" && !item.thumbnail && !item.thumbnailError) ? 3000 : false,
   });
   const canAdd = Boolean(auth.operator && hasCapability(auth.operator, "media_write", "media_write"));
   const adding = search.add;
@@ -298,7 +309,7 @@ export function MediaLibraryPage() {
             <option value="all">All media</option>
             <option value="image">Images</option>
             <option value="video">Videos</option>
-            <option value="web">Web pages & Cable</option>
+            <option value="web">Web pages</option>
           </select>
         </label>
         <label className="min-w-0 flex-1 sm:flex-none">
@@ -421,47 +432,47 @@ function UsageSummary({ usage, pending, error, retry }: { usage?: UsagePage; pen
   if (error) return <QueryError error={error} retry={retry} />;
   const references = usage?.references ?? [];
   const playlists = references.filter((reference) => reference.kind === "playlist").length;
-  const blocks = references.filter((reference) => reference.kind === "block").length;
+  const releases = references.filter((reference) => reference.kind === "release").length;
   return <Card>
     <CardHeader><CardTitle>Used in</CardTitle></CardHeader>
     <CardContent className="space-y-4">
-      {references.length > 0 && <p className="text-sm text-muted-foreground">{playlists} {playlists === 1 ? "playlist" : "playlists"} · {blocks} {blocks === 1 ? "block" : "blocks"}</p>}
+      {references.length > 0 && <p className="text-sm text-muted-foreground">{playlists} {playlists === 1 ? "playlist" : "playlists"} · {releases} {releases === 1 ? "release" : "releases"}</p>}
       {references.length > 0
         ? <ul className="space-y-2 border-t border-border pt-4">{references.map((reference) => <li key={`${reference.kind}:${reference.id}`}><a className="text-sm font-medium text-primary hover:underline" href={reference.href}>{reference.name}</a><span className="ml-2 text-xs capitalize text-muted-foreground">{reference.kind}</span></li>)}</ul>
-        : <p className="text-sm text-muted-foreground">Not used by any playlist or block.</p>}
+        : <p className="text-sm text-muted-foreground">Not used by any playlist or release.</p>}
     </CardContent>
   </Card>;
 }
-type CablePlaylist = components["schemas"]["CablePlaylist"];
+type Playlist = components["schemas"]["Playlist"];
 
 function MediaPlaylistAdder({ media }: { media: Media }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const playlists = useQuery({
     queryKey: ["controller", "media-playlist-options"],
-    queryFn: async () => readApiResult(await api.GET("/cable/playlists", { params: { query: { limit: 100 } } })),
+    queryFn: async () => readApiResult(await api.GET("/playlists", { params: { query: { limit: 100 } } })),
   });
   const [playlistId, setPlaylistId] = React.useState("");
   const [durationSeconds, setDurationSeconds] = React.useState(60);
   const mutation = useMutation({
     mutationFn: async () => {
       if (!playlistId) throw new Error("Choose a playlist.");
-      const playlist = readApiResult(await api.GET("/cable/playlists/{playlistId}", { params: { path: { playlistId } } })) as CablePlaylist;
+      const playlist = readApiResult(await api.GET("/playlists/{playlistId}", { params: { path: { playlistId } } })) as Playlist;
       const position = playlist.items.reduce((highest, item) => Math.max(highest, item.position), 0) + 1;
-      return readApiResult(await api.PATCH("/cable/playlists/{playlistId}", {
+      return readApiResult(await api.PATCH("/playlists/{playlistId}", {
         params: { path: { playlistId }, header: { "If-Match": `"v${playlist.version}"` } },
         body: {
           name: playlist.name,
           description: playlist.description,
           items: [
             ...playlist.items.map((item) => ({
-              assetId: item.assetId,
+              ...(item.mediaId ? { mediaId: item.mediaId } : { assetId: item.assetId }),
               position: item.position,
               durationSeconds: item.durationSeconds,
               title: item.title,
               subtitle: item.subtitle,
             })),
-            { assetId: media.assetId!, position, durationSeconds, title: media.title },
+            { mediaId: media.id, position, durationSeconds, title: media.title },
           ],
         },
       }));
@@ -498,7 +509,7 @@ export function MediaDetailPage() {
   const mediaQuery = useQuery({
     queryKey: ["controller", "media-detail", mediaId],
     queryFn: () => getMedia(mediaId),
-    refetchInterval: (current) => { const media = current.state.data?.media; return media?.kind === "web" && !media.deploymentId && !media.thumbnail && !media.thumbnailError ? 3000 : false; },
+    refetchInterval: (current) => { const media = current.state.data?.media; return media?.kind === "web" && !media.thumbnail && !media.thumbnailError ? 3000 : false; },
   });
   if (mediaQuery.isPending) return <PageFrame><Skeleton className="h-8 w-48" /><Skeleton className="aspect-video w-full" /></PageFrame>;
   if (mediaQuery.isError) return <PageFrame><QueryError error={mediaQuery.error} retry={() => void mediaQuery.refetch()} /></PageFrame>;
@@ -517,17 +528,18 @@ function relativeTime(value: string): string {
   return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
-/** A web page or hosted Cable guide: capture preview, assignment, and (for pages) title/recapture/remove. */
+/** A web page: capture preview, assignment, title/app access editing, recapture, and removal. */
 function WebMediaDetail({ media, etag }: { media: Media; etag: string }) {
   const auth = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const isCable = Boolean(media.deploymentId);
-  const canWrite = !isCable && Boolean(auth.operator && hasCapability(auth.operator, "media_write", "media_write"));
+  const canWrite = Boolean(auth.operator && hasCapability(auth.operator, "media_write", "media_write"));
   const canAssign = Boolean(auth.operator && hasCapability(auth.operator, "assignment_write", "assignment_write"));
   const [title, setTitle] = React.useState(media.title);
+  const [appAccess, setAppAccess] = React.useState(media.appAccess);
   React.useEffect(() => setTitle(media.title), [media.title]);
+  React.useEffect(() => setAppAccess(media.appAccess), [media.appAccess]);
   const store = (updated: Media, nextEtag?: string) => {
     queryClient.setQueryData(["controller", "media-detail", media.id], { media: updated, etag: nextEtag ?? `"media:${updated.id}:${updated.version}"` });
     void queryClient.invalidateQueries({ queryKey: ["controller", "media"] });
@@ -538,10 +550,10 @@ function WebMediaDetail({ media, etag }: { media: Media; etag: string }) {
   });
   const rename = useMutation({
     mutationFn: async () => {
-      const result = await api.PATCH("/media/{mediaId}", { params: { path: { mediaId: media.id }, header: { "If-Match": etag, "Idempotency-Key": crypto.randomUUID() } }, body: { title: title.trim() } });
+      const result = await api.PATCH("/media/{mediaId}", { params: { path: { mediaId: media.id }, header: { "If-Match": etag, "Idempotency-Key": crypto.randomUUID() } }, body: { title: title.trim(), appAccess } });
       return { media: readApiResult(result), etag: result.response.headers.get("ETag") ?? undefined };
     },
-    onSuccess: (updated) => { store(updated.media, updated.etag); toast.success("Title saved."); },
+    onSuccess: (updated) => { store(updated.media, updated.etag); toast.success("Changes saved."); },
   });
   const remove = useMutation({
     mutationFn: async () => {
@@ -557,7 +569,7 @@ function WebMediaDetail({ media, etag }: { media: Media; etag: string }) {
   const error = refresh.error ?? rename.error ?? remove.error;
 
   return <PageFrame>
-    <PageHeader title={media.title} description={isCable ? "Hosted Cable guide, kept in sync with its deployment." : media.url} meta={<p className="text-sm text-muted-foreground">{mediaKindLabel(media)} · Added {new Date(media.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}</p>}>
+    <PageHeader title={media.title} description={media.url} meta={<p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">{media.appAccess && <StatusBadge tone="info">Cuelight app</StatusBadge>}<span>{mediaKindLabel(media)} · Added {new Date(media.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}</span></p>}>
       {media.url && <Button type="button" variant="secondary" onClick={() => window.open(media.url, "_blank", "noopener,noreferrer")}>Open page</Button>}
       {canWrite && <Button type="button" variant="secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isPending ? "Capturing…" : "Recapture"}</Button>}
     </PageHeader>
@@ -574,17 +586,16 @@ function WebMediaDetail({ media, etag }: { media: Media; etag: string }) {
         <CardContent className="space-y-4">
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             {media.url && <><dt className="text-muted-foreground">URL</dt><dd className="break-all"><a className="hover:text-primary" href={media.url} target="_blank" rel="noreferrer noopener">{media.url}</a></dd></>}
-            {media.deploymentId && <><dt className="text-muted-foreground">Deployment</dt><dd><Link className="text-primary hover:underline" to="/programming/deployments/$deploymentId" params={{ deploymentId: media.deploymentId }}>Edit channels and schedule</Link></dd></>}
             <dt className="text-muted-foreground">Added</dt><dd>{new Date(media.createdAt).toLocaleString()}</dd>
           </dl>
           {canWrite && <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); rename.mutate(); }}>
             <label className="block text-sm font-medium">Title<input className={fieldClass} value={title} maxLength={300} required onChange={(event) => setTitle(event.currentTarget.value)} /></label>
+            <AppAccessToggle checked={appAccess} disabled={rename.isPending} onChange={setAppAccess} />
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" variant="secondary" disabled={rename.isPending || !title.trim() || title.trim() === media.title}>{rename.isPending ? "Saving…" : "Save title"}</Button>
+              <Button type="submit" variant="secondary" disabled={rename.isPending || !title.trim() || (title.trim() === media.title && appAccess === media.appAccess)}>{rename.isPending ? "Saving…" : "Save changes"}</Button>
               <Button type="button" variant="ghost" disabled={remove.isPending} onClick={() => { if (window.confirm("Remove this web page from the library? Screens already showing it keep playing.")) remove.mutate(); }}>Remove from library</Button>
             </div>
           </form>}
-          {isCable && <p className="text-sm text-muted-foreground">Cable guides are created, renamed, and removed with their deployment.</p>}
           {error instanceof Error && <p role="alert" className="text-sm text-destructive">{error.message}</p>}
         </CardContent>
       </Card>
@@ -599,7 +610,6 @@ function FileMediaDetail({ media, artifact, playback, etag }: { media: Media; ar
   const [assigning, setAssigning] = React.useState(false);
   const [addingToPlaylist, setAddingToPlaylist] = React.useState(false);
   const canEdit = Boolean(auth.operator && hasCapability(auth.operator, "media_write", "media_write"));
-  const canAuthor = Boolean(auth.operator && hasCapability(auth.operator, "cable_write", "cable_write"));
   const kind = previewKind(artifact.mediaType);
   const dimensions = measured;
   const format = artifact.mediaType.split("/")[1]?.toUpperCase() ?? artifact.mediaType;
@@ -610,7 +620,7 @@ function FileMediaDetail({ media, artifact, playback, etag }: { media: Media; ar
       description={media.artist}
       meta={<p className="text-sm text-muted-foreground">{summary.join(" · ")}</p>}
     >
-      {canAuthor && <Button type="button" variant="secondary" aria-expanded={addingToPlaylist} aria-controls="media-playlist-picker" onClick={() => { setAddingToPlaylist((value) => !value); setAssigning(false); }}>{addingToPlaylist ? "Close playlist picker" : "Add to playlist"}</Button>}
+      {canEdit && <Button type="button" variant="secondary" aria-expanded={addingToPlaylist} aria-controls="media-playlist-picker" onClick={() => { setAddingToPlaylist((value) => !value); setAssigning(false); }}>{addingToPlaylist ? "Close playlist picker" : "Add to playlist"}</Button>}
       <Button type="button" variant={assigning ? "secondary" : "primary"} aria-expanded={assigning} aria-controls="media-assignment" onClick={() => { setAssigning((value) => !value); setAddingToPlaylist(false); }}>{assigning ? "Close assignment" : "Assign to display"}</Button>
     </PageHeader>
     {addingToPlaylist && <div id="media-playlist-picker"><MediaPlaylistAdder media={media} /></div>}

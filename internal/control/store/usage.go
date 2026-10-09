@@ -28,15 +28,8 @@ var usageRelations = map[usage.Kind]usageRelation{
 			SELECT DISTINCT 'playlist'::text AS kind, p.id::text AS id, p.name,
 				'/library/playlists/' || p.id::text AS href
 			FROM media m
-			JOIN cable_playlist_items i ON i.asset_id = m.asset_id OR i.media_id = m.id
-			JOIN cable_playlists p ON p.id = i.playlist_id
-			WHERE m.id = $1
-			UNION ALL
-			SELECT DISTINCT 'block'::text AS kind, b.id::text AS id, b.title AS name,
-				'/programming/blocks/' || b.id::text AS href
-			FROM media m
-			JOIN cable_playlist_items i ON i.asset_id = m.asset_id OR i.media_id = m.id
-			JOIN cable_blocks b ON b.playlist_id = i.playlist_id
+			JOIN playlist_items i ON i.asset_id = m.asset_id OR i.media_id = m.id
+			JOIN playlists p ON p.id = i.playlist_id
 			WHERE m.id = $1
 		) refs
 		WHERE ($2 = '' OR (kind, id) > ($2, $3))
@@ -44,78 +37,13 @@ var usageRelations = map[usage.Kind]usageRelation{
 		LIMIT $4`,
 	},
 	usage.KindPlaylist: {
-		sourceTable: "cable_playlists",
+		sourceTable: "playlists",
 		query: `SELECT kind, id, name, href FROM (
-			SELECT DISTINCT 'block'::text AS kind, b.id::text AS id, b.title AS name,
-				'/programming/blocks/' || b.id::text AS href
-			FROM cable_blocks b
-			WHERE b.playlist_id = $1
-		) refs
-		WHERE ($2 = '' OR (kind, id) > ($2, $3))
-		ORDER BY kind, id
-		LIMIT $4`,
-	},
-	usage.KindBlock: {
-		sourceTable: "cable_blocks",
-		query: `SELECT kind, id, name, href FROM (
-			SELECT DISTINCT 'channel'::text AS kind, c.id::text AS id, c.name,
-				'/programming/channels/' || c.id::text AS href
-			FROM cable_blocks b
-			JOIN cable_channels c ON c.id = b.channel_id
-			WHERE b.id = $1
-		) refs
-		WHERE ($2 = '' OR (kind, id) > ($2, $3))
-		ORDER BY kind, id
-		LIMIT $4`,
-	},
-	usage.KindChannel: {
-		sourceTable: "cable_channels",
-		query: `SELECT kind, id, name, href FROM (
-			SELECT DISTINCT 'profile'::text AS kind, p.id::text AS id, p.name,
-				'/programming/profiles/' || p.id::text AS href
-			FROM cable_channels c
-			JOIN cable_profiles p ON p.deployment_id = c.deployment_id
-			WHERE c.id = $1
-			UNION ALL
-			SELECT DISTINCT 'revision'::text AS kind, r.id::text AS id, r.digest AS name,
-				'/programming/revisions/' || r.id::text AS href
-			FROM cable_channels c
-			JOIN cable_revisions r ON r.deployment_id = c.deployment_id
-			WHERE c.id = $1
-		) refs
-		WHERE ($2 = '' OR (kind, id) > ($2, $3))
-		ORDER BY kind, id
-		LIMIT $4`,
-	},
-	usage.KindProfile: {
-		sourceTable: "cable_profiles",
-		query: `SELECT kind, id, name, href FROM (
-			SELECT DISTINCT 'release'::text AS kind, r.id::text AS id, r.digest AS name,
-				'/releases/' || r.id::text AS href
-			FROM cable_profiles p
-			JOIN releases r ON r.id = p.release_id
-			WHERE p.id = $1
-			UNION ALL
 			SELECT DISTINCT 'assignment'::text AS kind, a.id::text AS id, n.name,
 				'/screens/' || a.node_id::text || '/assignment' AS href
-			FROM cable_profiles p
-			JOIN releases r ON r.id = p.release_id
-			JOIN assignments a ON a.release_id = r.id
+			FROM assignments a
 			JOIN nodes n ON n.id = a.node_id
-			WHERE p.id = $1
-		) refs
-		WHERE ($2 = '' OR (kind, id) > ($2, $3))
-		ORDER BY kind, id
-		LIMIT $4`,
-	},
-	usage.KindRevision: {
-		sourceTable: "cable_revisions",
-		query: `SELECT kind, id, name, href FROM (
-			SELECT DISTINCT 'deployment'::text AS kind, d.id::text AS id, d.name,
-				'/programming/deployments/' || d.id::text AS href
-			FROM cable_revisions r
-			JOIN cable_deployments d ON d.id = r.deployment_id
-			WHERE r.id = $1
+			WHERE a.playlist_id = $1
 		) refs
 		WHERE ($2 = '' OR (kind, id) > ($2, $3))
 		ORDER BY kind, id
