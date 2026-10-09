@@ -87,6 +87,10 @@ type OneTimeToken struct {
 	ID        string `json:"id"`
 	Secret    string `json:"secret"`
 	ExpiresAt string `json:"expiresAt"`
+	// JoinURL is the cuelight://join link desktop apps open; enrollment tokens only.
+	JoinURL string `json:"joinUrl,omitempty"`
+	// CASha256 pins a self-signed control root in JoinURL.
+	CASha256 string `json:"caSha256,omitempty"`
 }
 
 type RemoteLink struct {

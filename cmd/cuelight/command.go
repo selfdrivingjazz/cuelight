@@ -1170,6 +1170,9 @@ func printSecret(output io.Writer, mode outputMode, created operator.OneTimeToke
 		writeJSON(output, created)
 	} else {
 		fmt.Fprintf(output, "ID: %s\nExpires: %s\nSecret: %s\n", created.ID, created.ExpiresAt, created.Secret)
+		if created.JoinURL != "" {
+			fmt.Fprintf(output, "Join link: %s\n", created.JoinURL)
+		}
 	}
 }
 
