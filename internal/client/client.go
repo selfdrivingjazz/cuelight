@@ -347,6 +347,41 @@ func (c *Client) MediaForAsset(ctx context.Context, assetID string) (Document, b
 	return result.Items[0], true, nil
 }
 
+// ListMediaPage fetches one page of the media library; request.Filters carries
+// query filters such as kind.
+func (c *Client) ListMediaPage(ctx context.Context, request PageRequest) (Page[Document], error) {
+	return c.documentPage(ctx, "/media", request)
+}
+
+func (c *Client) ListPlaylistsPage(ctx context.Context, request PageRequest) (Page[Document], error) {
+	return c.documentPage(ctx, "/playlists", request)
+}
+
+func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (Document, error) {
+	var result Document
+	err := c.doJSON(ctx, http.MethodGet, "/playlists/"+url.PathEscape(playlistID), nil, "", "", &result, http.StatusOK)
+	return result, err
+}
+
+func (c *Client) CreatePlaylist(ctx context.Context, input PlaylistInput, idempotencyKey string) (Document, error) {
+	var result Document
+	err := c.doJSON(ctx, http.MethodPost, "/playlists", input, idempotencyKey, "", &result, http.StatusCreated)
+	return result, err
+}
+
+func (c *Client) documentPage(ctx context.Context, base string, request PageRequest) (Page[Document], error) {
+	path, err := pagePath(base, request)
+	if err != nil {
+		return Page[Document]{}, err
+	}
+	var response Page[Document]
+	err = c.doJSON(ctx, http.MethodGet, path, nil, "", "", &response, http.StatusOK)
+	if err == nil && response.Items == nil {
+		response.Items = []Document{}
+	}
+	return response, err
+}
+
 func (c *Client) PutAssignment(ctx context.Context, nodeID, ifMatch, idempotencyKey string, input AssignmentInput) (Assignment, error) {
 	var result Assignment
 	path := "/nodes/" + url.PathEscape(nodeID) + "/assignment"

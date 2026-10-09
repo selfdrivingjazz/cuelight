@@ -145,6 +145,20 @@ type Assignment struct {
 	DesiredGeneration int64  `json:"desiredGeneration"`
 }
 
+// PlaylistItemInput is one entry of PlaylistInput; Position is 1-based.
+type PlaylistItemInput struct {
+	MediaID         string `json:"mediaId,omitempty"`
+	AssetID         string `json:"assetId,omitempty"`
+	Position        int    `json:"position"`
+	DurationSeconds int    `json:"durationSeconds"`
+}
+
+type PlaylistInput struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	Items       []PlaylistItemInput `json:"items"`
+}
+
 // PageRequest is the common list query contract. Cursor remains opaque to the
 // client; callers pass a server-issued value unchanged.
 type PageRequest struct {

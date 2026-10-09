@@ -285,3 +285,146 @@ func executeCLI(t *testing.T, server *httptest.Server, stdin io.Reader, args ...
 	})
 	return cliResult{code: code, stdout: stdout.String(), stderr: stderr.String()}
 }
+
+func TestMediaListFollowsCursorsAndFiltersKind(t *testing.T) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		query := request.URL.Query()
+		if request.URL.Path != "/media" || query.Get("kind") != "web" {
+			t.Errorf("request = %s", request.URL)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		if query.Get("cursor") == "" {
+			fmt.Fprint(response, `{"items":[{"id":"m1","kind":"web","title":"Turf","url":"https://example.test/?a"}],"page":{"nextCursor":"c2","previousCursor":null,"hasMore":true}}`)
+			return
+		}
+		if query.Get("cursor") != "c2" {
+			t.Errorf("cursor = %q", query.Get("cursor"))
+		}
+		fmt.Fprint(response, `{"items":[{"id":"m2","kind":"file","title":"Clip","artifact":{"mediaType":"video/mp4"}}],"page":{"nextCursor":null,"previousCursor":"c1","hasMore":false}}`)
+	}))
+	defer server.Close()
+
+	result := executeCLI(t, server, nil, "media", "list", "--kind", "web")
+	if result.code != exitOK || !strings.Contains(result.stdout, "m1\tweb\tTurf\thttps://example.test/?a") || !strings.Contains(result.stdout, "m2\tfile\tClip\tvideo/mp4") {
+		t.Fatalf("result = %#v", result)
+	}
+	limited := executeCLI(t, server, nil, "--output", "jsonl", "media", "list", "--kind", "web", "--limit", "1")
+	if limited.code != exitOK || strings.Count(limited.stdout, "\n") != 1 {
+		t.Fatalf("limited = %#v", limited)
+	}
+}
+
+func TestMediaAddWebSendsAppAccess(t *testing.T) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var input map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			t.Error(err)
+		}
+		if request.Method != http.MethodPost || request.URL.Path != "/media" || input["kind"] != "web" || input["appAccess"] != true {
+			t.Errorf("request = %s %s %v", request.Method, request.URL.Path, input)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusCreated)
+		fmt.Fprint(response, `{"id":"m1","kind":"web","appAccess":true}`)
+	}))
+	defer server.Close()
+
+	result := executeCLI(t, server, nil, "media", "add-web", "--url", "https://example.test/", "--app-access")
+	if result.code != exitOK {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestPlaylistCreatePreservesItemOrder(t *testing.T) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/playlists" || request.Header.Get("Idempotency-Key") != "key-1" {
+			t.Errorf("request = %s %s key %q", request.Method, request.URL.Path, request.Header.Get("Idempotency-Key"))
+		}
+		var input operator.PlaylistInput
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			t.Error(err)
+		}
+		want := []operator.PlaylistItemInput{{MediaID: "web-b", Position: 1, DurationSeconds: 30}, {MediaID: "web-a", Position: 2, DurationSeconds: 600}}
+		if input.Name != "Turf" || fmt.Sprint(input.Items) != fmt.Sprint(want) {
+			t.Errorf("input = %#v", input)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusCreated)
+		fmt.Fprint(response, `{"id":"p1","name":"Turf","version":1,"items":[{"mediaId":"web-b","position":1,"durationSeconds":30,"title":"B"}]}`)
+	}))
+	defer server.Close()
+
+	result := executeCLI(t, server, nil, "playlist", "create", "--name", "Turf", "--item", "web-b:30", "--item", "web-a:600", "--idempotency-key", "key-1")
+	if result.code != exitOK || !strings.Contains(result.stdout, "ID: p1") || !strings.Contains(result.stdout, "1\tweb-b\t30\tB") {
+		t.Fatalf("result = %#v", result)
+	}
+	if bad := executeCLI(t, server, nil, "playlist", "create", "--name", "Turf", "--item", "web-b:soon"); bad.code != exitUsage {
+		t.Fatalf("bad duration = %#v", bad)
+	}
+}
+
+func TestPlaylistCreateSurfacesServerValidation(t *testing.T) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/problem+json")
+		response.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(response, `{"type":"about:blank","title":"Bad Request","status":400,"detail":"invalid argument: item 1 needs a positive durationSeconds"}`)
+	}))
+	defer server.Close()
+
+	result := executeCLI(t, server, nil, "playlist", "create", "--name", "Turf", "--item", "web-a")
+	if result.code != exitAPI || !strings.Contains(result.stderr, "item 1 needs a positive durationSeconds (HTTP 400)") {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestPlaylistListAndShow(t *testing.T) {
+	server := newAPIServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/playlists":
+			fmt.Fprint(response, `{"items":[{"id":"p1","name":"Turf","version":2,"items":[{},{}]}],"page":{"nextCursor":null,"previousCursor":null,"hasMore":false}}`)
+		case "/playlists/p1":
+			fmt.Fprint(response, `{"id":"p1","name":"Turf","version":2,"items":[{"mediaId":"m1","position":1,"durationSeconds":45,"title":"One"}]}`)
+		default:
+			t.Errorf("path = %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	if list := executeCLI(t, server, nil, "playlist", "list"); list.code != exitOK || !strings.Contains(list.stdout, "p1\tTurf\t2\t2") {
+		t.Fatalf("list = %#v", list)
+	}
+	if show := executeCLI(t, server, nil, "playlist", "show", "p1"); show.code != exitOK || !strings.Contains(show.stdout, "1\tm1\t45\tOne") {
+		t.Fatalf("show = %#v", show)
+	}
+}
+
+func TestHelpNeedsNoConfig(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent.json")
+	cases := [][]string{
+		{"media", "--help"},
+		{"playlist", "-h"},
+		{"token", "list", "--help"},
+		{"node", "show", "-h"},
+		{"media", "list", "--help"},
+		{"media", "upload", "--help"},
+		{"playlist", "create", "--help"},
+		{"config", "show", "--help"},
+		{"status", "--help"},
+	}
+	for groupName := range commandUsage {
+		cases = append(cases, []string{groupName, "--help"})
+	}
+	for _, args := range cases {
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), append([]string{"--config", missing}, args...), commandIO{stdin: strings.NewReader(""), stdout: &stdout, stderr: &stderr})
+		if code != exitOK || !strings.Contains(stdout.String(), "usage") || stderr.Len() != 0 {
+			t.Errorf("%v: code %d stdout %q stderr %q", args, code, stdout.String(), stderr.String())
+		}
+	}
+	var stdout bytes.Buffer
+	run(context.Background(), []string{"--config", missing, "playlist", "create", "--help"}, commandIO{stdout: &stdout, stderr: io.Discard})
+	if !strings.Contains(stdout.String(), "-item") || !strings.Contains(stdout.String(), "-idempotency-key") {
+		t.Fatalf("playlist create help = %q", stdout.String())
+	}
+}
