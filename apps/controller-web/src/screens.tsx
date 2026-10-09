@@ -11,7 +11,7 @@ import { MediaTargetField } from "./components/MediaPicker";
 import { NodePlaybackView, ScreenTile, nextNodeSelection, type FleetNodeVisual, type NodeCapture, type NodeReport, type PlaybackMetadata } from "./fleet-visual";
 import { getMedia, type Media } from "./media-library";
 import { useMediaThumbnail } from "./media-thumbnail";
-import { LoadingCard, QueryError, RouterLink, RoutePending, SearchBox, Toolbar, formatWhen, getNode, getNodeAssignment, getNodeCapabilities, getNodeStatus, hasScope, listNodeEvents, listNodes, queryKeys, shortId } from "./kit";
+import { LoadingCard, QueryError, RouterLink, RoutePending, SearchBox, Toolbar, formatWhen, getNode, getNodeAssignment, getNodeCapabilities, getNodeStatus, getOptionalAssignment, hasScope, listNodeEvents, listNodes, queryKeys, shortId } from "./kit";
 import { ScreenSoftwareCard, SoftwareBadges, useNodeSoftware } from "./software";
 
 type ScreenshotFailureCode = "unsupported" | "failed" | "expired" | "timeout" | "cancelled" | "http";
@@ -260,7 +260,8 @@ function BulkAssignmentComposer({ nodes, onClose }: { nodes: readonly Node[]; on
         const etag = current.response.headers.get("ETag") ?? "*";
         readApiResult(await api.PUT("/nodes/{nodeId}/assignment", {
           params: { path: { nodeId: node.id }, header: { "If-Match": etag, "Idempotency-Key": crypto.randomUUID() } },
-          body: { mediaId: media.id, deliveryMode: media.kind === "web" || !deliveryMode ? undefined : deliveryMode, expectedGeneration: node.desiredGeneration ?? 0, remoteInput: false, showQr: false },
+          // Remote settings are omitted so each screen keeps its own.
+          body: { mediaId: media.id, deliveryMode: media.kind === "web" || !deliveryMode ? undefined : deliveryMode, expectedGeneration: node.desiredGeneration ?? 0 },
         }));
       }
     },
@@ -312,7 +313,6 @@ export function ScreensPage() {
 
 export const screenTabs = [{ label: "Now playing", slug: "" }, { label: "Assignment", slug: "assignment" }, { label: "Remote", slug: "remote" }, { label: "Events", slug: "events" }, { label: "System", slug: "system" }] as const;
 export type ScreenTab = typeof screenTabs[number]["slug"];
-type NodeAssignment = components["schemas"]["Assignment"];
 
 export function ScreenDetailPage({ nodeId, tab }: { nodeId: string; tab: ScreenTab }) {
   const node = useQuery({ queryKey: queryKeys.node(nodeId), queryFn: () => getNode(nodeId) });
@@ -344,15 +344,6 @@ function NowPlayingPanel({ node }: { node: Node }) {
   if (status.isPending) return <LoadingCard />;
   if (status.isError) return <QueryError error={status.error} retry={() => void status.refetch()} />;
   return <ScreenVisual node={node} report={status.data ?? undefined} capture={capture} actions={<NodeScreenshotControl nodeId={node.id} onCapture={onCapture} />} render={(visual) => <NodePlaybackView {...visual} />} />;
-}
-
-async function getOptionalAssignment(nodeId: string): Promise<NodeAssignment | null> {
-  try {
-    return await getNodeAssignment(nodeId);
-  } catch (error) {
-    if (error instanceof ApiRequestError && error.status === 404) return null;
-    throw error;
-  }
 }
 
 function AssignmentPanel({ node }: { node: Node }) {

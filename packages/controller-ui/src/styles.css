@@ -227,6 +227,9 @@ table td {
 .remote-top h1 { margin: 2px 0 0; font-size: 1.3rem; letter-spacing: .12em; text-transform: uppercase; }
 .remote-status { padding: 5px 10px; border: 1px solid rgba(126, 215, 255, .4); border-radius: 999px; color: #a9d9ef; font-size: .68rem; }
 .remote-status.error { border-color: rgba(255, 126, 126, .55); color: #ffc3c3; }
+.remote-status.ended { border-color: rgba(255, 196, 126, .55); color: #ffe0b8; }
+.remote-ended { margin: 0; padding: 10px 12px; border: 1px solid rgba(255, 196, 126, .45); border-radius: 12px; background: rgba(40, 24, 8, .7); color: #ffe0b8; font-size: .82rem; line-height: 1.35; }
+.remote-ended small { display: block; margin-top: 4px; color: #c9a77d; font-size: .7rem; }
 
 .remote-rockers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .remote-rocker { display: grid; gap: 6px; padding: 8px; border: 1px solid rgba(126, 215, 255, .25); border-radius: 16px; background: rgba(7, 15, 28, .82); text-align: center; }

@@ -11,12 +11,30 @@ export type RemoteEventInput =
 const minPostIntervalMs = 50; // ≤ 20 events/s
 const isMove = (event: RemoteEventInput) => event.type === "pointer" && event.state === "move";
 
+export type RemoteStatus = { state: "ready" } | { state: "error" } | { state: "ended"; detail?: string };
+
+/** Responses meaning the session ended or remote control was turned off; only a fresh scan helps. */
+const endedStatuses = new Set([401, 403, 404, 409, 410]);
+
+/** Classifies an event POST response, reading the problem detail when the remote is no longer active. */
+export async function remotePostStatus(response: Response): Promise<RemoteStatus> {
+  if (response.ok) return { state: "ready" };
+  if (!endedStatuses.has(response.status)) return { state: "error" };
+  try {
+    const problem: unknown = await response.json();
+    const detail = problem && typeof problem === "object" && "detail" in problem && typeof problem.detail === "string" ? problem.detail : undefined;
+    return { state: "ended", detail };
+  } catch {
+    return { state: "ended" };
+  }
+}
+
 /**
  * Serial remote event sender: at most one POST in flight, consecutive pointer moves coalesce to
  * the latest, other events keep their order. Sequences are assigned at send time so they stay
  * strictly increasing.
  */
-export function useRemoteSender(sessionId: string, token: string, onStatus: (status: "ready" | "error") => void) {
+export function useRemoteSender(sessionId: string, token: string, onStatus: (status: RemoteStatus) => void) {
   const sequence = React.useRef(Date.now() * 1_000);
   const pending = React.useRef<RemoteEventInput[]>([]);
   const busy = React.useRef(false);
@@ -42,9 +60,9 @@ export function useRemoteSender(sessionId: string, token: string, onStatus: (sta
             credentials: "omit",
             cache: "no-store",
           });
-          statusRef.current(response.ok ? "ready" : "error");
+          statusRef.current(await remotePostStatus(response));
         } catch {
-          statusRef.current("error");
+          statusRef.current({ state: "error" });
         }
       }
     } finally {
@@ -230,7 +248,7 @@ export function RemoteControlPage() {
   const dialTimer = React.useRef<number | undefined>(undefined);
   const [dial, setDial] = React.useState("");
   const [mode, setMode] = React.useState<"remote" | "trackpad">("remote");
-  const [status, setStatus] = React.useState<"ready" | "error">(token ? "ready" : "error");
+  const [status, setStatus] = React.useState<RemoteStatus>(token ? { state: "ready" } : { state: "ended" });
   const sendEvent = useRemoteSender(sessionId, token, setStatus);
   const send = (key: string) => sendEvent({ type: "key", key });
   React.useEffect(() => () => { if (dialTimer.current) window.clearTimeout(dialTimer.current); }, []);
@@ -246,7 +264,8 @@ export function RemoteControlPage() {
   const button = (label: React.ReactNode, key: string, className = "") => <button className={`remote-button ${className}`} type="button" onClick={() => send(key)}>{label}</button>;
   return <main className="remote-shell">
     <section className="remote-body">
-      <header className="remote-top"><div><p>Cuelight</p><h1>Remote</h1></div><span className={`remote-status ${status}`}>{status === "ready" ? "Connected" : "Connection error"}</span></header>
+      <header className="remote-top"><div><p>Cuelight</p><h1>Remote</h1></div><span className={`remote-status ${status.state}`}>{status.state === "ready" ? "Connected" : status.state === "ended" ? "Disconnected" : "Connection error"}</span></header>
+      {status.state === "ended" && <p role="alert" className="remote-ended">This remote is no longer active — scan the code on the screen again.{status.detail && <small>{status.detail}</small>}</p>}
       <div className="remote-modes" role="tablist" aria-label="Remote mode">
         <button role="tab" type="button" aria-selected={mode === "remote"} className={`remote-button${mode === "remote" ? " active" : ""}`} onClick={() => setMode("remote")}>Remote</button>
         <button role="tab" type="button" aria-selected={mode === "trackpad"} className={`remote-button${mode === "trackpad" ? " active" : ""}`} onClick={() => setMode("trackpad")}>Trackpad</button>

@@ -232,6 +232,13 @@ desktop renderer, which injects them as native input. Get a phone link for a
 node's active session on the screen's **Remote** tab (`/screens/{id}/remote`) or with
 `cuelight node remote-link NODE_ID`; **Show QR** also draws one in the corner of the output.
 
+Remote settings stick to the screen: an assignment that omits `remoteInput`/`showQr`
+(the bulk assign, `cuelight play`, `cuelight assignment set` without remote flags) keeps
+the screen's current values, and the remote session — with every phone already
+connected — carries over while remote control stays on. Turn it off explicitly with
+**Allow remote control** unticked, `remoteInput: false`, or `--no-remote` (which also
+ends connected phones; they must scan again after it is turned back on).
+
 ## Web apps with app access
 
 A web media item can be given **app access** (`appAccess: true` on `POST /media` or

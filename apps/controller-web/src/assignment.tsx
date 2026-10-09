@@ -3,9 +3,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "@cuelight/api-client";
 import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState, useToast } from "@cuelight/controller-ui";
 import { api, readApiResult } from "./api";
+import { getOptionalAssignment, queryKeys } from "./kit";
 import { MediaTargetField, mediaKindLabel } from "./components/MediaPicker";
 
 type Media = components["schemas"]["Media"];
+type Assignment = components["schemas"]["Assignment"];
+export interface RemoteChoice { remoteInput: boolean; showQR: boolean }
+
+/** The screen's current phone-remote settings, which a reassignment keeps unless the operator changes them. */
+export function currentRemote(assignment: Assignment | null | undefined): RemoteChoice {
+  const remoteInput = assignment?.remoteInput ?? false;
+  return { remoteInput, showQR: remoteInput && (assignment?.showQr ?? false) };
+}
+
+/** Assignment body remote fields: omitted unless changed, so the server keeps the screen's settings even if they changed since the form loaded. */
+export function remoteBody(changed: RemoteChoice | undefined): { remoteInput?: boolean; showQr?: boolean } {
+  return changed ? { remoteInput: changed.remoteInput, showQr: changed.remoteInput && changed.showQR } : {};
+}
 export type DeliveryChoice = "" | "stream" | "cache_then_play";
 
 export interface NodeAssignmentComposerProps {
@@ -38,10 +52,13 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedMedia, title }: NodeA
   const [nodeId, setNodeId] = React.useState(fixedNodeId ?? "");
   const [picked, setPicked] = React.useState<Media | undefined>(undefined);
   const [deliveryMode, setDeliveryMode] = React.useState<DeliveryChoice>("");
-  const [remoteInput, setRemoteInput] = React.useState(false);
-  const [showQR, setShowQR] = React.useState(false);
+  const [changedRemote, setChangedRemote] = React.useState<RemoteChoice & { nodeId: string }>();
   React.useEffect(() => { if (fixedNodeId) setNodeId(fixedNodeId); }, [fixedNodeId]);
   const media = fixedMedia ?? picked;
+  const currentQuery = useQuery({ queryKey: queryKeys.nodeAssignment(nodeId), queryFn: () => getOptionalAssignment(nodeId), enabled: nodeId !== "" });
+  const edited = changedRemote?.nodeId === nodeId ? changedRemote : undefined;
+  const remote = edited ?? currentRemote(currentQuery.data);
+  const remoteLoading = nodeId !== "" && currentQuery.isPending;
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -49,7 +66,7 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedMedia, title }: NodeA
       const node = readApiResult(await api.GET("/nodes/{nodeId}", { params: { path: { nodeId } } }));
       return readApiResult(await api.PUT("/nodes/{nodeId}/assignment", {
         params: { path: { nodeId }, header: { "If-Match": "*", "Idempotency-Key": crypto.randomUUID() } },
-        body: { mediaId: media.id, deliveryMode: media.kind === "web" || !deliveryMode ? undefined : deliveryMode, expectedGeneration: node.desiredGeneration ?? 0, remoteInput, showQr: remoteInput && showQR },
+        body: { mediaId: media.id, deliveryMode: media.kind === "web" || !deliveryMode ? undefined : deliveryMode, expectedGeneration: node.desiredGeneration ?? 0, ...remoteBody(edited) },
       }));
     },
     onSuccess: () => {
@@ -60,6 +77,7 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedMedia, title }: NodeA
       toast.success("Assignment updated.");
     },
   });
+  const remoteDisabled = nodeId === "" || remoteLoading || mutation.isPending;
 
   const pending = nodeQuery.isPending;
   return <Card className="w-full">{title && <CardHeader><CardTitle>{title}</CardTitle></CardHeader>}<CardContent className={title ? "space-y-5" : "space-y-5 pt-5"}>
@@ -70,8 +88,10 @@ export function NodeAssignmentComposer({ fixedNodeId, fixedMedia, title }: NodeA
     {!fixedNodeId && <label className="block text-sm font-medium">Screen<select className={fieldClass} value={nodeId} onChange={(event) => setNodeId(event.currentTarget.value)} disabled={pending}><option value="">Choose a screen</option>{nodeQuery.data?.items.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></label>}
     <DeliveryField media={media} value={deliveryMode} onChange={setDeliveryMode} disabled={mutation.isPending} />
     <div className="space-y-3 border-t border-border pt-4">
-      <label className="flex items-center gap-2 text-sm"><input className="h-4 w-4 accent-primary" type="checkbox" checked={remoteInput} onChange={(event) => { setRemoteInput(event.currentTarget.checked); if (!event.currentTarget.checked) setShowQR(false); }} />Allow remote control</label>
-      {remoteInput && <label className="flex items-center gap-2 pl-6 text-sm text-muted-foreground"><input className="h-4 w-4 accent-primary" type="checkbox" checked={showQR} onChange={(event) => setShowQR(event.currentTarget.checked)} />Show a remote-control QR code on the screen</label>}
+      <label className="flex items-center gap-2 text-sm"><input className="h-4 w-4 accent-primary" type="checkbox" checked={remote.remoteInput} disabled={remoteDisabled} onChange={(event) => { const remoteInput = event.currentTarget.checked; setChangedRemote({ nodeId, remoteInput, showQR: remoteInput && remote.showQR }); }} />Allow remote control</label>
+      {remote.remoteInput && <label className="flex items-center gap-2 pl-6 text-sm text-muted-foreground"><input className="h-4 w-4 accent-primary" type="checkbox" checked={remote.showQR} disabled={remoteDisabled} onChange={(event) => setChangedRemote({ nodeId, remoteInput: true, showQR: event.currentTarget.checked })} />Show a remote-control QR code on the screen</label>}
+      {remoteLoading && <p className="text-sm text-muted-foreground">Loading this screen's remote settings…</p>}
+      {currentQuery.isError && !edited && <p className="text-sm text-muted-foreground">This screen's remote settings could not be loaded; they stay as they are unless you change them.</p>}
     </div>
     {mutation.error instanceof Error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
     <Button onClick={() => mutation.mutate()} disabled={pending || mutation.isPending || !nodeId || !media}>{mutation.isPending ? "Assigning…" : "Assign to screen"}</Button>

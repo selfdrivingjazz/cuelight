@@ -90,7 +90,8 @@ async function installControllerApi(page: Page, requireToken = false): Promise<A
     if (path === `/nodes/${node.id}/assignment` && request.method() === "PUT") {
       const body = request.postDataJSON() as Record<string, unknown>;
       capture.assignmentBodies.push(body);
-      return reply({ id: "assignment-two", nodeId: node.id, mediaId: body.mediaId, releaseId: "99999999-9999-9999-9999-999999999998", releaseDigest: "d".repeat(64), deliveryMode: "stream", expectedGeneration: 4, desiredGeneration: 5, remoteInput: body.remoteInput, showQr: body.showQr });
+      // Omitted remote settings keep the screen's current ones, as the server does.
+      return reply({ id: "assignment-two", nodeId: node.id, mediaId: body.mediaId, releaseId: "99999999-9999-9999-9999-999999999998", releaseDigest: "d".repeat(64), deliveryMode: "stream", expectedGeneration: 4, desiredGeneration: 5, remoteInput: body.remoteInput ?? true, showQr: body.showQr ?? false });
     }
     if (path === `/nodes/${node.id}/assignment`) return reply({ id: "assignment-one", nodeId: node.id, mediaId: webMedia.id, releaseId: "99999999-9999-9999-9999-999999999999", releaseDigest: "c".repeat(64), deliveryMode: "stream", expectedGeneration: 3, desiredGeneration: 4, remoteInput: true, showQr: false });
     if (path === "/profiles" && request.method() === "GET") return reply({ items: [savedProfile] });
@@ -416,9 +417,15 @@ test("operator adds a web page as media and assigns it to a screen by media id",
   expect(capture.createdMediaBody).toEqual({ kind: "web", url: "https://status.example.com/board", appAccess: true });
   await expect(page.getByRole("heading", { name: "Status board", exact: true })).toBeVisible();
   await page.getByLabel("Screen").selectOption({ label: "Lobby display" });
+  // The screen already allows remote control; reassigning keeps it.
+  await expect(page.getByLabel("Allow remote control")).toBeChecked();
   await page.getByRole("button", { name: "Assign to screen" }).click();
   await expect(page.getByRole("region", { name: "Notifications" }).getByRole("status").filter({ hasText: "Assignment updated." })).toBeVisible();
-  expect(capture.assignmentBodies).toEqual([{ mediaId: webMedia.id, expectedGeneration: 4, remoteInput: false, showQr: false }]);
+  expect(capture.assignmentBodies).toEqual([{ mediaId: webMedia.id, expectedGeneration: 4 }]);
+  await page.getByLabel("Allow remote control").uncheck();
+  await page.getByRole("button", { name: "Assign to screen" }).click();
+  await expect.poll(() => capture.assignmentBodies.length).toBe(2);
+  expect(capture.assignmentBodies[1]).toEqual({ mediaId: webMedia.id, expectedGeneration: 4, remoteInput: false, showQr: false });
 });
 
 test("assignment composer picks any media kind from one picker", async ({ page }) => {

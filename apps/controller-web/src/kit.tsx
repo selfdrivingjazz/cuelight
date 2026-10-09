@@ -35,6 +35,15 @@ export async function getNodeStatus(nodeId: string) {
 }
 export async function getNodeCapabilities(nodeId: string) { return readApiResult(await api.GET("/nodes/{nodeId}/capabilities", { params: { path: { nodeId } } })); }
 export async function getNodeAssignment(nodeId: string) { return readApiResult(await api.GET("/nodes/{nodeId}/assignment", { params: { path: { nodeId } } })); }
+/** A screen that was never assigned has no assignment (404); that is a state, not an error. */
+export async function getOptionalAssignment(nodeId: string) {
+  try {
+    return await getNodeAssignment(nodeId);
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) return null;
+    throw error;
+  }
+}
 export async function listNodeEvents(nodeId: string, cursor?: string) { return readApiResult(await api.GET("/nodes/{nodeId}/events", { params: { path: { nodeId }, query: { cursor, limit: 50 } } })); }
 export async function listAssets(search: PageSearch) { return readApiResult(await api.GET("/assets", { params: { query: pageSearch(search) } })); }
 export async function getAsset(assetId: string) { return readApiResult(await api.GET("/assets/{assetId}", { params: { path: { assetId } } })); }
