@@ -388,7 +388,7 @@ function RemotePanel({ node }: { node: Node }) {
       ]} />}
       {!assignment.isPending && !remoteAllowed && <p className="rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-sm">Remote control is off for this screen. Turn on <strong>Allow remote control</strong> in <Link className="font-medium text-primary hover:underline" to="/screens/$nodeId/assignment" params={{ nodeId: node.id }}>Assignment</Link>.</p>}
       <Button onClick={() => link.mutate()} disabled={link.isPending}>{link.isPending ? "Creating link…" : link.data ? "Create a new link" : "Create phone link"}</Button>
-      {link.isError && <ErrorState title={status === 404 ? "No active remote session" : status === 409 ? "Remote control is off" : "Link unavailable"} description={status === 404 ? "The screen has not opened a remote session yet. Make sure it is online and remote control is allowed, then try again." : status === 409 ? "Allow remote control in this screen's assignment first." : link.error.message} />}
+      {link.isError && <ErrorState title={status === 404 || status === 409 ? "Remote control is off" : "Link unavailable"} description={status === 404 || status === 409 ? "Allow remote control in this screen's assignment first." : link.error.message} />}
     </CardContent></Card>
     {link.data && <Card><CardHeader><CardTitle>Scan to control {node.name}</CardTitle></CardHeader><CardContent className="space-y-4">
       <div className="mx-auto w-full max-w-[16rem] rounded-lg bg-white p-3">{qr ? <img src={qr} alt={`QR code for the ${node.name} phone remote`} className="aspect-square w-full [image-rendering:pixelated]" /> : <Skeleton className="aspect-square w-full" />}</div>
