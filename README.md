@@ -238,6 +238,9 @@ the screen's current values, and the remote session — with every phone already
 connected — carries over while remote control stays on. Turn it off explicitly with
 **Allow remote control** unticked, `remoteInput: false`, or `--no-remote` (which also
 ends connected phones; they must scan again after it is turned back on).
+Remote sessions live in control's memory, so after a control restart or upgrade a
+screen's session is recreated on demand (by its app page, `remote-link`, or the node)
+and phones connected before the restart scan the new code once.
 
 ## Web apps with app access
 

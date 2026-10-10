@@ -190,7 +190,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mint a phone link for the node's active remote-input session. */
+        /** Mint a phone link for the node's remote-input session, opening one for its current assignment if it has none (as after a control restart). */
         post: operations["createNodeRemoteLink"];
         delete?: never;
         options?: never;
@@ -2620,7 +2620,7 @@ export interface operations {
                     "application/json": components["schemas"]["RemoteLink"];
                 };
             };
-            /** @description The node has no active remote-input session. */
+            /** @description The node has no active remote-input session and its current assignment does not allow remote input. */
             404: {
                 headers: {
                     [name: string]: unknown;

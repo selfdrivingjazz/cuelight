@@ -31,13 +31,15 @@ type Policy struct {
 }
 
 // PolicyRepository reports a node's current desired generation and the remote
-// policy of its assignment. Enabled holds only when every assignment from
-// generation since through the current one allowed remote input, so a session
-// outlives reassignments that keep remote input on but never one that turned
-// it off. An unknown node or a since beyond the current generation is
-// ErrDisabled.
+// policy of its assignment. RemotePolicy's Enabled holds only when every
+// assignment from generation since through the current one allowed remote
+// input, so a session outlives reassignments that keep remote input on but
+// never one that turned it off. CurrentRemotePolicy reports the current
+// assignment's policy alone. An unknown node, a node without an assignment or
+// a since beyond the current generation is ErrDisabled.
 type PolicyRepository interface {
 	RemotePolicy(ctx context.Context, nodeID string, since int64) (Policy, int64, error)
+	CurrentRemotePolicy(ctx context.Context, nodeID string) (Policy, int64, error)
 }
 
 type Event struct {
@@ -102,6 +104,9 @@ func (s *Service) normalized() error {
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return errors.New("remote public URL must be absolute HTTPS")
 	}
+	// Concurrent first calls may fill the defaults at once.
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	if s.TTL <= 0 {
 		s.TTL = 10 * time.Minute
 	}
@@ -142,38 +147,87 @@ func (s *Service) Create(ctx context.Context, nodeID string, generation int64) (
 	if err != nil {
 		return SessionCreated{}, err
 	}
-	idBytes, tokenBytes := make([]byte, 16), make([]byte, 32)
-	if _, err := io.ReadFull(s.Random, idBytes); err != nil {
-		return SessionCreated{}, err
-	}
-	if _, err := io.ReadFull(s.Random, tokenBytes); err != nil {
-		return SessionCreated{}, err
-	}
-	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 	now := s.Now().UTC()
+	fresh, token, err := s.newSession(nodeID, generation, policy.ShowQR, now)
+	if err != nil {
+		return SessionCreated{}, err
+	}
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	if value := s.sessions[existingID]; value != nil && value.generation == since && now.Before(value.expiresAt) {
 		value.tokenHashes = appendBounded(value.tokenHashes, value.qrHash)
-		value.qrHash = sha256.Sum256([]byte(token))
-		value.generation, value.showQR, value.expiresAt = generation, policy.ShowQR, now.Add(s.TTL)
+		value.qrHash = fresh.qrHash
+		value.generation, value.showQR, value.expiresAt = generation, policy.ShowQR, fresh.expiresAt
 		// The new presentation polls from the start; earlier input is not its.
 		value.events = []Event{}
 		return s.created(value.id, token, value.showQR, value.expiresAt), nil
 	}
-	id := base64.RawURLEncoding.EncodeToString(idBytes)
+	s.install(fresh)
+	return s.created(fresh.id, token, fresh.showQR, fresh.expiresAt), nil
+}
+
+// newSession builds a session for the node's generation along with its
+// on-screen token; the caller installs it.
+func (s *Service) newSession(nodeID string, generation int64, showQR bool, now time.Time) (*session, string, error) {
+	idBytes, tokenBytes := make([]byte, 16), make([]byte, 32)
+	if _, err := io.ReadFull(s.Random, idBytes); err != nil {
+		return nil, "", err
+	}
+	if _, err := io.ReadFull(s.Random, tokenBytes); err != nil {
+		return nil, "", err
+	}
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 	// Sequences start at the creation time in microseconds so they stay
 	// monotonic across session renewals and control-plane restarts; consumers
 	// holding an older cursor keep receiving the new session's events.
-	value := &session{id: id, nodeID: nodeID, generation: generation, qrHash: sha256.Sum256([]byte(token)), showQR: policy.ShowQR, expiresAt: now.Add(s.TTL), events: []Event{}, wake: make(chan struct{}), windowStarted: now, lastSequence: now.UnixMicro()}
+	return &session{id: base64.RawURLEncoding.EncodeToString(idBytes), nodeID: nodeID, generation: generation, qrHash: sha256.Sum256([]byte(token)), showQR: showQR, expiresAt: now.Add(s.TTL), events: []Event{}, wake: make(chan struct{}), windowStarted: now, lastSequence: now.UnixMicro()}, token, nil
+}
+
+// install makes value its node's only session, ending the node's others.
+// The caller holds the mutex.
+func (s *Service) install(value *session) {
 	for sessionID, existing := range s.sessions {
-		if existing.nodeID == nodeID {
+		if existing.nodeID == value.nodeID {
 			close(existing.wake)
 			delete(s.sessions, sessionID)
 		}
 	}
-	s.sessions[id] = value
-	return s.created(id, token, policy.ShowQR, value.expiresAt), nil
+	s.sessions[value.id] = value
+}
+
+// restore gives a node without an active session one for its current
+// generation, as the node's own Create would, when that generation's
+// assignment allows remote input. Sessions live only in memory, so this is
+// how a screen's in-page app and operator links recover after a control-plane
+// restart; the node's next Create rebinds the restored session instead of
+// replacing it. A node without an assignment allowing remote input stays
+// without a session: ErrSessionMissing.
+func (s *Service) restore(ctx context.Context, nodeID string) error {
+	s.mutex.Lock()
+	active := s.activeSession(nodeID) != nil
+	s.mutex.Unlock()
+	if active {
+		return nil
+	}
+	policy, generation, err := s.Policies.CurrentRemotePolicy(ctx, nodeID)
+	if errors.Is(err, ErrDisabled) || (err == nil && (!policy.Enabled || generation <= 0)) {
+		return ErrSessionMissing
+	}
+	if err != nil {
+		return err
+	}
+	value, _, err := s.newSession(nodeID, generation, policy.ShowQR, s.Now().UTC())
+	if err != nil {
+		return err
+	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	// A concurrent caller or the node's own Create may have installed one
+	// during the lookup; keep that one.
+	if s.activeSession(nodeID) == nil {
+		s.install(value)
+	}
+	return nil
 }
 
 // currentPolicy returns the node's remote policy when generation is current
@@ -207,12 +261,16 @@ func appendBounded(hashes [][32]byte, hash [32]byte) [][32]byte {
 }
 
 // Link mints an additional phone token for the node's active session so an
-// operator can obtain a remote URL without seeing the on-screen QR code.
+// operator can obtain a remote URL without seeing the on-screen QR code. A
+// node without one gets a session restored for its current assignment.
 func (s *Service) Link(ctx context.Context, nodeID string) (SessionCreated, error) {
 	if nodeID == "" {
 		return SessionCreated{}, ErrInvalid
 	}
 	if err := s.normalized(); err != nil {
+		return SessionCreated{}, err
+	}
+	if err := s.restore(ctx, nodeID); err != nil {
 		return SessionCreated{}, err
 	}
 	s.mutex.Lock()
@@ -258,12 +316,16 @@ func (s *Service) activeSession(nodeID string) *session {
 // AppSession returns the node's active session with a phone URL for an
 // in-page app (a web media item with app access) to display. The app's phone
 // token is minted once per session and kept apart from operator links so link
-// eviction never invalidates it.
-func (s *Service) AppSession(nodeID string) (SessionCreated, error) {
+// eviction never invalidates it. A node without an active session gets one
+// restored for its current assignment.
+func (s *Service) AppSession(ctx context.Context, nodeID string) (SessionCreated, error) {
 	if nodeID == "" {
 		return SessionCreated{}, ErrInvalid
 	}
 	if err := s.normalized(); err != nil {
+		return SessionCreated{}, err
+	}
+	if err := s.restore(ctx, nodeID); err != nil {
 		return SessionCreated{}, err
 	}
 	s.mutex.Lock()

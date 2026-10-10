@@ -4,15 +4,21 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
 
-// policies reports a fixed policy for whatever generation is asked about.
+// policies reports a fixed policy for whatever generation is asked about. It
+// knows no current assignment, so a missing session is never restored.
 type policies struct{ policy Policy }
 
 func (p policies) RemotePolicy(_ context.Context, _ string, since int64) (Policy, int64, error) {
 	return p.policy, since, nil
+}
+
+func (p policies) CurrentRemotePolicy(context.Context, string) (Policy, int64, error) {
+	return Policy{}, 0, ErrDisabled
 }
 
 // history models assignment history: remote[i] is generation i+1's remote
@@ -29,6 +35,113 @@ func (h *history) RemotePolicy(_ context.Context, _ string, since int64) (Policy
 		enabled = enabled && on
 	}
 	return Policy{Enabled: enabled, ShowQR: enabled}, current, nil
+}
+
+func (h *history) CurrentRemotePolicy(ctx context.Context, nodeID string) (Policy, int64, error) {
+	return h.RemotePolicy(ctx, nodeID, int64(len(h.remote)))
+}
+
+// gatedHistory holds every current-assignment lookup until all expected
+// callers have made one, so they all miss the session before any restores it.
+type gatedHistory struct {
+	history
+	arrived sync.WaitGroup
+}
+
+func (h *gatedHistory) CurrentRemotePolicy(ctx context.Context, nodeID string) (Policy, int64, error) {
+	h.arrived.Done()
+	h.arrived.Wait()
+	return h.history.CurrentRemotePolicy(ctx, nodeID)
+}
+
+func TestMissingSessionIsRestoredForTheCurrentAssignment(t *testing.T) {
+	now := time.Unix(1_000, 0).UTC()
+	policies := &history{}
+	service := &Service{Policies: policies, PublicURL: "https://control.example", TTL: time.Hour, Now: func() time.Time { return now }}
+	ctx := context.Background()
+	// No assignment, then an assignment with remote input off: nothing to restore.
+	for _, remote := range [][]bool{nil, {true, false}} {
+		policies.remote = remote
+		if _, err := service.AppSession(ctx, "node"); !errors.Is(err, ErrSessionMissing) {
+			t.Fatalf("app session for remote %v = %v", remote, err)
+		}
+		if _, err := service.Link(ctx, "node"); !errors.Is(err, ErrSessionMissing) {
+			t.Fatalf("link for remote %v = %v", remote, err)
+		}
+	}
+
+	// Remote input on for the current generation, as after a control-plane
+	// restart dropped the session: the app and an operator get one.
+	policies.remote = append(policies.remote, true)
+	app, err := service.AppSession(ctx, "node")
+	if err != nil || app.ID == "" || app.Token == "" || !app.ShowQR || !app.ExpiresAt.Equal(now.Add(time.Hour)) {
+		t.Fatalf("restored app session = %#v, %v", app, err)
+	}
+	link, err := service.Link(ctx, "node")
+	if err != nil || link.ID != app.ID || link.Token == app.Token {
+		t.Fatalf("link on restored session = %#v, %v", link, err)
+	}
+	for _, token := range []string{app.Token, link.Token} {
+		if err := service.Post(ctx, app.ID, token, Event{Sequence: 1, Type: "key", Key: "Enter"}); err != nil {
+			t.Fatalf("phone on restored session: %v", err)
+		}
+	}
+	if page, err := service.Poll(ctx, "node", app.ID, 0, 0); err != nil || len(page.Events) != 2 {
+		t.Fatalf("app poll on restored session = %#v, %v", page, err)
+	}
+
+	// The player's own session for the generation is the restored one, so
+	// phones that scanned the app's code keep working.
+	player, err := service.Create(ctx, "node", 3)
+	if err != nil || player.ID != app.ID {
+		t.Fatalf("player session = %#v, %v; want the restored session", player, err)
+	}
+	if again, err := service.AppSession(ctx, "node"); err != nil || again.ID != app.ID || again.Token != app.Token {
+		t.Fatalf("app session after the player's = %#v, %v", again, err)
+	}
+	for _, token := range []string{app.Token, link.Token, player.Token} {
+		if err := service.Post(ctx, app.ID, token, Event{Sequence: 1, Type: "key", Key: "Enter"}); err != nil {
+			t.Fatalf("phone after the player's session: %v", err)
+		}
+	}
+
+	// An expired session is restored as a new one.
+	now = now.Add(2 * time.Hour)
+	if renewed, err := service.AppSession(ctx, "node"); err != nil || renewed.ID == app.ID {
+		t.Fatalf("app session after expiry = %#v, %v", renewed, err)
+	}
+}
+
+func TestConcurrentRestoresShareOneSession(t *testing.T) {
+	const callers = 8
+	policies := &gatedHistory{history: history{remote: []bool{true}}}
+	policies.arrived.Add(callers)
+	service := &Service{Policies: policies, PublicURL: "https://control.example"}
+	ids := make([]string, callers)
+	errs := make([]error, callers)
+	var done sync.WaitGroup
+	for index := range callers {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			var value SessionCreated
+			if index%2 == 0 {
+				value, errs[index] = service.AppSession(context.Background(), "node")
+			} else {
+				value, errs[index] = service.Link(context.Background(), "node")
+			}
+			ids[index] = value.ID
+		}()
+	}
+	done.Wait()
+	for index, id := range ids {
+		if errs[index] != nil || id != ids[0] {
+			t.Fatalf("caller %d = %q, %v; want session %q", index, id, errs[index], ids[0])
+		}
+	}
+	if len(service.sessions) != 1 {
+		t.Fatalf("sessions = %d; want 1", len(service.sessions))
+	}
 }
 
 func TestSessionAuthenticatesOrdersAndScopesEvents(t *testing.T) {
@@ -183,18 +296,18 @@ func TestAppSessionLinkIsStablePerSessionAndSurvivesLinkEviction(t *testing.T) {
 	now := time.Unix(1_000, 0).UTC()
 	service := &Service{Policies: policies{Policy{Enabled: true, ShowQR: true}}, PublicURL: "https://control.example", TTL: time.Hour, Now: func() time.Time { return now }}
 	ctx := context.Background()
-	if _, err := service.AppSession("node"); !errors.Is(err, ErrSessionMissing) {
+	if _, err := service.AppSession(ctx, "node"); !errors.Is(err, ErrSessionMissing) {
 		t.Fatalf("no session = %v", err)
 	}
 	created, err := service.Create(ctx, "node", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, err := service.AppSession("node")
+	app, err := service.AppSession(ctx, "node")
 	if err != nil || app.ID != created.ID || app.Token == created.Token || !app.ShowQR || !app.ExpiresAt.Equal(created.ExpiresAt) {
 		t.Fatalf("app = %#v, %v", app, err)
 	}
-	if again, _ := service.AppSession("node"); again.RemoteURL != app.RemoteURL {
+	if again, _ := service.AppSession(ctx, "node"); again.RemoteURL != app.RemoteURL {
 		t.Fatalf("app URL changed within a session: %s vs %s", again.RemoteURL, app.RemoteURL)
 	}
 	for range maxSessionTokens + 1 {
@@ -209,7 +322,7 @@ func TestAppSessionLinkIsStablePerSessionAndSurvivesLinkEviction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next, err := service.AppSession("node"); err != nil || next.ID != created.ID || rebound.ID != created.ID || next.Token != app.Token {
+	if next, err := service.AppSession(ctx, "node"); err != nil || next.ID != created.ID || rebound.ID != created.ID || next.Token != app.Token {
 		t.Fatalf("rebound app = %#v, %v", next, err)
 	}
 	now = now.Add(2 * time.Hour)
@@ -217,7 +330,7 @@ func TestAppSessionLinkIsStablePerSessionAndSurvivesLinkEviction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next, err := service.AppSession("node"); err != nil || next.ID != renewed.ID || next.ID == created.ID || next.Token == app.Token {
+	if next, err := service.AppSession(ctx, "node"); err != nil || next.ID != renewed.ID || next.ID == created.ID || next.Token == app.Token {
 		t.Fatalf("renewed app = %#v, %v", next, err)
 	}
 }
@@ -283,7 +396,7 @@ func TestSessionSurvivesReassignmentsWhileRemoteStaysOn(t *testing.T) {
 	if err := post(fresh.ID, fresh.Token); err != nil {
 		t.Fatal(err)
 	}
-	if app, err := service.AppSession("node"); err != nil || app.ID != fresh.ID {
+	if app, err := service.AppSession(ctx, "node"); err != nil || app.ID != fresh.ID {
 		t.Fatalf("app session = %#v, %v", app, err)
 	}
 }
@@ -304,4 +417,8 @@ type togglePolicies struct{ enabled bool }
 
 func (p *togglePolicies) RemotePolicy(_ context.Context, _ string, since int64) (Policy, int64, error) {
 	return Policy{Enabled: p.enabled}, since, nil
+}
+
+func (p *togglePolicies) CurrentRemotePolicy(_ context.Context, _ string) (Policy, int64, error) {
+	return Policy{Enabled: p.enabled}, 1, nil
 }

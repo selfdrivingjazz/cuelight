@@ -58,7 +58,7 @@ func withAPIURL(token Token, r *http.Request) Token {
 }
 
 type RemoteSessions interface {
-	AppSession(nodeID string) (remote.SessionCreated, error)
+	AppSession(ctx context.Context, nodeID string) (remote.SessionCreated, error)
 	Poll(ctx context.Context, nodeID, id string, after int64, wait time.Duration) (remote.EventPage, error)
 }
 
@@ -202,11 +202,11 @@ func (h appHandler) playlist(w http.ResponseWriter, r *http.Request, _ Grant) {
 	writeJSON(w, http.StatusOK, value)
 }
 
-func (h appHandler) remote(nodeID string) *AppRemote {
+func (h appHandler) remote(ctx context.Context, nodeID string) *AppRemote {
 	if h.deps.Remote == nil {
 		return nil
 	}
-	session, err := h.deps.Remote.AppSession(nodeID)
+	session, err := h.deps.Remote.AppSession(ctx, nodeID)
 	if err != nil {
 		return nil
 	}
@@ -230,7 +230,7 @@ func (h appHandler) remoteEvents(w http.ResponseWriter, r *http.Request, grant G
 	var session remote.SessionCreated
 	sessionErr := remote.ErrSessionMissing
 	if h.deps.Remote != nil {
-		session, sessionErr = h.deps.Remote.AppSession(grant.NodeID)
+		session, sessionErr = h.deps.Remote.AppSession(r.Context(), grant.NodeID)
 	}
 	if sessionErr == nil {
 		events, err := h.deps.Remote.Poll(r.Context(), grant.NodeID, session.ID, after, wait)
@@ -254,7 +254,7 @@ func (h appHandler) remoteEvents(w http.ResponseWriter, r *http.Request, grant G
 		case <-timer.C:
 		}
 	}
-	response.Remote = h.remote(grant.NodeID)
+	response.Remote = h.remote(r.Context(), grant.NodeID)
 	writeJSON(w, http.StatusOK, response)
 }
 

@@ -254,7 +254,7 @@ paths:
     post:
       tags: [operator]
       operationId: createNodeRemoteLink
-      summary: Mint a phone link for the node's active remote-input session.
+      summary: Mint a phone link for the node's remote-input session, opening one for its current assignment if it has none (as after a control restart).
       security: [{operatorToken: []}]
       x-required-scopes: [assignment_write]
       parameters: [{$ref: "#/components/parameters/NodeId"}]
@@ -265,7 +265,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/RemoteLink"}
         "404":
-          description: The node has no active remote-input session.
+          description: The node has no active remote-input session and its current assignment does not allow remote input.
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
