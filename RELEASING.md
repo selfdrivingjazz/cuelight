@@ -70,6 +70,12 @@ A release that rebuilds clients costs roughly one macOS job (signing + notarizat
 ~15–25 min → 150–250 billed minutes) plus one Windows job; server-only releases skip
 both. CI stays on Linux for that reason. Use `skip_mac=true` for test releases.
 
+**Actions storage.** Each job hands its files to `publish` as a run artifact (up to ~1 GB per
+release, mostly the mac zip+dmg). The published GitHub release holds the files, so `publish`
+deletes the run's artifacts as its last step, and every upload sets `retention-days: 1` so a
+failed run's artifacts expire the next day. Release assets do not count against Actions
+storage; the pnpm/Go caches have their own free 10 GB per-repo limit.
+
 ## GitHub secrets
 
 | Secret | Contents |
