@@ -275,9 +275,8 @@ in its binary at `https://<public origin>/node/`. Local builds embed whatever
 built" page there. The dev stack rebuilds and embeds it on `sdj cuelight-dev apply`.
 
 1. On the TV (Samsung Tizen/LG webOS browser, Fire TV Silk, or any desktop
-   browser), open `https://<public origin>/node/`. In dev:
-   `https://cuelight.example.ts.net:8454/node/` (the TV must be on the
-   tailnet, or use any origin with a certificate the TV trusts). Bookmark it or set it
+   browser), open `https://<public origin>/node/` (the TV must reach that origin with a
+   certificate it trusts). Bookmark it or set it
    as the browser home page.
 2. The screen shows a code such as `K7QM-4XPD` and a QR code for
    `/pair?code=…`. Enter the code and a name on the controller's **Pair a screen** page
