@@ -303,11 +303,15 @@ remote events unless the Android WebView shell (`window.CuelightAndroid`) is pre
 The build targets ES2019 with ES modules, which means Chromium 61+ or Safari 11+
 (roughly Tizen 5+/2019 and webOS 5+/2020 TVs).
 
+**Android shell:** see [Cuelight for Android](apps/node-android/README.md); 0.2.x installs from before the app-ID change need a one-time manual reinstall: uninstall the old app first, install the new APK, then set up and pair again.
+
 ## Desktop app: multiple networks
 
 The Electron app (`apps/node-desktop`, macOS/Windows/Linux) turns a computer into a
 node, and one app can belong to several Cuelight networks at once — e.g. a laptop on
 both a home tailnet control and a venue LAN control.
+
+**One-time reinstall:** desktop 0.2.x installs from before the app-ID change need a manual reinstall (Mac: delete the old `Cuelight.app`, then install the new DMG); the unchanged Cuelight user-data directory preserves networks and settings.
 
 **Joining.** On a controller's **Pair a screen** page, *Create join link* mints a
 one-time enrollment token and shows `cuelight://join?v=1&url=…&token=…[&ca=sha256:…]&name=…`

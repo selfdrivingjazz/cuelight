@@ -1,4 +1,4 @@
-package com.jmilldotdev.cuelight.node
+package com.selfdrivingjazz.cuelight.node
 
 /**
  * MAJOR.MINOR.PATCH[-PRERELEASE] version, parsed and ordered exactly like the

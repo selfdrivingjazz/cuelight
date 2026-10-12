@@ -38,7 +38,7 @@
     "wait-on": "8.0.4"
   },
   "build": {
-    "appId": "com.jmilldotdev.cuelight",
+    "appId": "com.selfdrivingjazz.cuelight",
     "productName": "Cuelight",
     "executableName": "Cuelight",
     "artifactName": "Cuelight-${version}-${os}-${arch}.${ext}",

@@ -1,4 +1,4 @@
-package com.jmilldotdev.cuelight.node
+package com.selfdrivingjazz.cuelight.node
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

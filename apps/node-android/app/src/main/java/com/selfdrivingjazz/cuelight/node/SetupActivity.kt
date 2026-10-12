@@ -1,4 +1,4 @@
-package com.jmilldotdev.cuelight.node
+package com.selfdrivingjazz.cuelight.node
 
 import android.app.Activity
 import android.os.Bundle

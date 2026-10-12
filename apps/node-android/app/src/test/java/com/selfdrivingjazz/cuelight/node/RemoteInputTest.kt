@@ -1,10 +1,10 @@
-package com.jmilldotdev.cuelight.node
+package com.selfdrivingjazz.cuelight.node
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import com.jmilldotdev.cuelight.node.InputAction.Touch
+import com.selfdrivingjazz.cuelight.node.InputAction.Touch
 
 class RemoteInputTest {
     private fun ev(s: String) = JSONObject(s)

@@ -5,6 +5,8 @@ artifact plus `cuelight-release.json`, the manifest signed with the vendor relea
 Control servers, appliances, the desktop app, and the Android shell trust only manifests
 that verify against the keys compiled into `internal/updates`.
 
+**One-time app-ID migration:** desktop and Android 0.2.x installs from before the switch to `com.selfdrivingjazz.cuelight` / `com.selfdrivingjazz.cuelight.node` must be reinstalled manually once rather than self-updated. On Mac, delete the old `Cuelight.app` and install the new DMG; the unchanged Cuelight user-data directory keeps networks and settings. On Android, uninstall the old app first, install the new APK, then set up and pair the screen again.
+
 ## Cut a release
 
 ```sh

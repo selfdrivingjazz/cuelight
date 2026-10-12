@@ -1,4 +1,4 @@
-package com.jmilldotdev.cuelight.node
+package com.selfdrivingjazz.cuelight.node
 
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -78,7 +78,7 @@ object ApkFiles {
  */
 object UpdateInstaller {
     private const val TAG = "CuelightUpdate"
-    const val ACTION_RESULT = "com.jmilldotdev.cuelight.node.UPDATE_RESULT"
+    const val ACTION_RESULT = "com.selfdrivingjazz.cuelight.node.UPDATE_RESULT"
     const val EXTRA_VERSION = "version"
 
     private val executor = Executors.newSingleThreadExecutor()

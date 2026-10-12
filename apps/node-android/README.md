@@ -4,6 +4,8 @@ Thin native Kotlin shell for phones/tablets and Android TV / Google TV / Fire TV
 (minSdk 24, targetSdk 35). It hosts the browser node (`apps/website-node`, served
 by the control server) in a full-screen kiosk WebView.
 
+**One-time reinstall:** Android 0.2.x installs from before the app-ID change must be uninstalled before installing the new APK; then set up and pair the screen again.
+
 - Launcher + leanback launcher entry (TV banner), immersive full screen, keep-screen-on.
 - Media autoplay without a user gesture (`mediaPlaybackRequiresUserGesture = false`).
 - D-pad / remote keys reach the page as DOM key events. BACK never exits (goes back in
@@ -11,7 +13,7 @@ by the control server) in a full-screen kiosk WebView.
 - Optional start on boot (setup checkbox; `BOOT_COMPLETED` receiver). The shell also relaunches
   itself after a self-update (`MY_PACKAGE_REPLACED`). Android 10+ blocks both background starts
   unless the app may "Display over other apps" — grant it on kiosk screens (Settings → Apps →
-  Special app access, or `adb shell appops set com.jmilldotdev.cuelight.node SYSTEM_ALERT_WINDOW allow`).
+  Special app access, or `adb shell appops set com.selfdrivingjazz.cuelight.node SYSTEM_ALERT_WINDOW allow`).
 - Setup screen: control server URL (scheme inferred: `http` for LAN/loopback/`.local`,
   else `https`), browser node path (default `/node/` — must match where control serves
   website-node) and an optional server root CA SHA-256 pin. QR scanning is not implemented.

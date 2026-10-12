@@ -18,11 +18,11 @@ fun setting(name: String): String? = (findProperty(name) as String?)?.takeIf { i
 val releaseKeystore: String? = setting("CUELIGHT_ANDROID_KEYSTORE")
 
 android {
-    namespace = "com.jmilldotdev.cuelight.node"
+    namespace = "com.selfdrivingjazz.cuelight.node"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.jmilldotdev.cuelight.node"
+        applicationId = "com.selfdrivingjazz.cuelight.node"
         minSdk = 24
         targetSdk = 35
         versionCode = cuelightVersionCode
