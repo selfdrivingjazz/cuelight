@@ -24,7 +24,7 @@ by the control server) in a full-screen kiosk WebView.
 - Publicly trusted certificates (e.g. `tailscale cert`) need nothing.
 - User-installed CAs are trusted, so a private CA (e.g. cuelight-dev's `runtime/trust/ca.pem`)
   can be installed via Android Settings → Security → Install certificate.
-- **Root pin** (LAN controls with a self-signed ECDSA root, e.g. Mars College): enter the
+- **Root pin** (LAN controls with a self-signed ECDSA root): enter the
   SHA-256 of the root certificate's DER in setup — the `ca=sha256:<hex>` value of the control's
   join link, or `openssl x509 -in root.pem -outform DER | sha256sum`. Accepted spellings:
   `sha256:<hex>`, bare hex, colon-separated (openssl `-fingerprint`). Requires an `https://` URL.

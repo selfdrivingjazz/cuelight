@@ -142,11 +142,11 @@ Before enabling it:
   request arrives from the proxy's address, so trusting it trusts whoever can reach
   the proxy. Configure trusted networks only on a listener clients reach directly.
 
-On a dedicated LAN, for example the Mars College network:
+On a dedicated LAN:
 
 ```sh
-cuelight-control init --dir /var/lib/cuelight-control --hostname cuelight.mars \
-  --ip 10.0.0.5 --public-url https://cuelight.mars:8443 --listen 10.0.0.5:8443 \
+cuelight-control init --dir /var/lib/cuelight-control --hostname cuelight.lan \
+  --ip 10.0.0.5 --public-url https://cuelight.lan:8443 --listen 10.0.0.5:8443 \
   --trusted-network 10.0.0.0/8 --trusted-network fd00::/8
 ```
 
