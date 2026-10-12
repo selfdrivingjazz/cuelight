@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/jmilldotdev/cuelight/internal/control/app"
-	"github.com/jmilldotdev/cuelight/internal/control/composition"
+	"github.com/selfdrivingjazz/cuelight/internal/control/app"
+	"github.com/selfdrivingjazz/cuelight/internal/control/composition"
 )
 
 // runUpdates implements `cuelight-control updates import <dir>`: it verifies

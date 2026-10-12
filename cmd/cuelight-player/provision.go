@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
 )
 
 const provisionTokenEnvironment = "CUELIGHT_PLAYER_PROVISION_TOKEN"

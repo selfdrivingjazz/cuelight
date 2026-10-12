@@ -23,9 +23,9 @@ import (
 	"sync"
 	"time"
 
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	playerruntime "github.com/jmilldotdev/cuelight/internal/player/runtime"
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	playerruntime "github.com/selfdrivingjazz/cuelight/internal/player/runtime"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 // Update methods a player can report.

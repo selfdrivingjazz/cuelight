@@ -16,14 +16,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/control/auth"
-	"github.com/jmilldotdev/cuelight/internal/control/persistence"
-	controlplayerapi "github.com/jmilldotdev/cuelight/internal/control/playerapi"
-	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/auth"
+	"github.com/selfdrivingjazz/cuelight/internal/control/persistence"
+	controlplayerapi "github.com/selfdrivingjazz/cuelight/internal/control/playerapi"
+	controlrelease "github.com/selfdrivingjazz/cuelight/internal/control/release"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 const postgresTestDSN = "CUELIGHT_POSTGRES_TEST_DSN"

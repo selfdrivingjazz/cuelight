@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
 )
 
 // Creating or editing file media writes artwork_asset_id (uuid) from a string

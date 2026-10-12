@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
-	"github.com/jmilldotdev/cuelight/internal/player/update"
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
+	"github.com/selfdrivingjazz/cuelight/internal/player/update"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 const updateUsage = "usage: cuelight-player update apply [--opt-dir DIR] [--state-dir DIR] [--units UNIT,...] [--systemctl PATH] [--health-timeout DURATION]"

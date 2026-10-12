@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jmilldotdev/cuelight/internal/control/appaccess"
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/control/media"
-	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
-	"github.com/jmilldotdev/cuelight/internal/control/remote"
+	"github.com/selfdrivingjazz/cuelight/internal/control/appaccess"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/operatorapi"
+	"github.com/selfdrivingjazz/cuelight/internal/control/remote"
 )
 
 func TestPostgresRemoteSessionIsRestoredAfterControlRestart(t *testing.T) {

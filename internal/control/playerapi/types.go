@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/player/client"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/player/client"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 var (

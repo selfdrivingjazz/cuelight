@@ -21,10 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/player/runtime"
-	playerstate "github.com/jmilldotdev/cuelight/internal/player/state"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/player/runtime"
+	playerstate "github.com/selfdrivingjazz/cuelight/internal/player/state"
 )
 
 // Config controls a node simulator. ServerCAPEM is the provisioned control

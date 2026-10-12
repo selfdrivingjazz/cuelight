@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/jmilldotdev/cuelight/internal/dev"
-	"github.com/jmilldotdev/cuelight/internal/e2e"
+	"github.com/selfdrivingjazz/cuelight/internal/dev"
+	"github.com/selfdrivingjazz/cuelight/internal/e2e"
 )
 
 func main() { os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr)) }

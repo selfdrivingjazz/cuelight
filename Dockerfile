@@ -28,7 +28,7 @@ COPY --from=web /src/apps/controller-web/dist internal/control/webui/assets/cont
 COPY --from=web /src/apps/website-node/dist internal/control/webui/assets/website-node
 ARG CUELIGHT_COMMIT=""
 RUN version=$(cat VERSION) && CGO_ENABLED=0 go build -trimpath \
-      -ldflags "-s -w -X github.com/jmilldotdev/cuelight/internal/buildinfo.Version=${version} -X github.com/jmilldotdev/cuelight/internal/buildinfo.Commit=${CUELIGHT_COMMIT}" \
+      -ldflags "-s -w -X github.com/selfdrivingjazz/cuelight/internal/buildinfo.Version=${version} -X github.com/selfdrivingjazz/cuelight/internal/buildinfo.Commit=${CUELIGHT_COMMIT}" \
       -o /out/cuelight-control ./cmd/cuelight-control
 
 FROM alpine:3.22

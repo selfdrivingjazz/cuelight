@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
 )
 
 var _ media.Repository = (*Store)(nil)

@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/release"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 type webLauncher struct {

@@ -10,9 +10,9 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/media"
-	"github.com/jmilldotdev/cuelight/internal/control/webitem"
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/webitem"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
 )
 
 // WebCaptureRepository persists web media thumbnails in the shared artifact CAS.

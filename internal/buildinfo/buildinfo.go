@@ -1,7 +1,7 @@
 // Package buildinfo carries the release identity stamped into every Cuelight
 // binary at link time:
 //
-//	go build -ldflags "-X github.com/jmilldotdev/cuelight/internal/buildinfo.Version=0.2.0 -X github.com/jmilldotdev/cuelight/internal/buildinfo.Commit=abc1234"
+//	go build -ldflags "-X github.com/selfdrivingjazz/cuelight/internal/buildinfo.Version=0.2.0 -X github.com/selfdrivingjazz/cuelight/internal/buildinfo.Commit=abc1234"
 package buildinfo
 
 import "fmt"

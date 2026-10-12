@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
 )
 
 func TestPlanCASReconciliationClassifiesTempBlobAndRowCrashes(t *testing.T) {

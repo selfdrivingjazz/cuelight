@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jmilldotdev/cuelight/internal/client"
-	"github.com/jmilldotdev/cuelight/internal/dev"
-	"github.com/jmilldotdev/cuelight/internal/fixtures"
+	"github.com/selfdrivingjazz/cuelight/internal/client"
+	"github.com/selfdrivingjazz/cuelight/internal/dev"
+	"github.com/selfdrivingjazz/cuelight/internal/fixtures"
 )
 
 // NewProduction creates a runner backed by dev.Manager and the authenticated

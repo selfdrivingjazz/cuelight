@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 
-	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	controlrelease "github.com/selfdrivingjazz/cuelight/internal/control/release"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 var _ controlrelease.Repository = (*Store)(nil)

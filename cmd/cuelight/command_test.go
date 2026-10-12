@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	operator "github.com/jmilldotdev/cuelight/internal/client"
+	operator "github.com/selfdrivingjazz/cuelight/internal/client"
 )
 
 // newAPIServer serves handler at /api/v1, where a bare --server origin points.

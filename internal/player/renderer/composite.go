@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jmilldotdev/cuelight/internal/player/screenshot"
-	"github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/player/screenshot"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 // Composite dispatches a materialized candidate to the adapter that owns its

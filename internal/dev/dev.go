@@ -29,8 +29,8 @@ import (
 	"syscall"
 	"time"
 
-	operator "github.com/jmilldotdev/cuelight/internal/client"
-	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	operator "github.com/selfdrivingjazz/cuelight/internal/client"
+	"github.com/selfdrivingjazz/cuelight/internal/control/pki"
 )
 
 const (

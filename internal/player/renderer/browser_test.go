@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 func TestHTTPBrowserLauncherLifecycle(t *testing.T) {

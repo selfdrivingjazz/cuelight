@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/player/renderer"
-	"github.com/jmilldotdev/cuelight/internal/player/runtime"
-	"github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/player/renderer"
+	"github.com/selfdrivingjazz/cuelight/internal/player/runtime"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 // FakeOutput models the physical output and disk budget independently, so

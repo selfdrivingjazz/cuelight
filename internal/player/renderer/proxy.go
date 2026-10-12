@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 type Proxy struct {

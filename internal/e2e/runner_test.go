@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/client"
-	"github.com/jmilldotdev/cuelight/internal/dev"
-	"github.com/jmilldotdev/cuelight/internal/fixtures"
+	"github.com/selfdrivingjazz/cuelight/internal/client"
+	"github.com/selfdrivingjazz/cuelight/internal/dev"
+	"github.com/selfdrivingjazz/cuelight/internal/fixtures"
 )
 
 type fakeLifecycle struct{ ups, downs int }

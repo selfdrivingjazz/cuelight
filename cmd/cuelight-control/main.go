@@ -11,9 +11,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
-	"github.com/jmilldotdev/cuelight/internal/control/app"
-	"github.com/jmilldotdev/cuelight/internal/control/composition"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
+	"github.com/selfdrivingjazz/cuelight/internal/control/app"
+	"github.com/selfdrivingjazz/cuelight/internal/control/composition"
 )
 
 func main() {

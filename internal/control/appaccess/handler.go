@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/auth"
-	"github.com/jmilldotdev/cuelight/internal/control/page"
-	"github.com/jmilldotdev/cuelight/internal/control/playlist"
-	"github.com/jmilldotdev/cuelight/internal/control/remote"
+	"github.com/selfdrivingjazz/cuelight/internal/control/auth"
+	"github.com/selfdrivingjazz/cuelight/internal/control/page"
+	"github.com/selfdrivingjazz/cuelight/internal/control/playlist"
+	"github.com/selfdrivingjazz/cuelight/internal/control/remote"
 )
 
 // Identity resolves the requesting node (mTLS or browser-node bearer).

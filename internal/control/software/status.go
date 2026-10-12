@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 // NodeStatus is one node's software state for operators.

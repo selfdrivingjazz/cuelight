@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/control/media"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 var _ assignment.Publisher = TargetPublisher{}

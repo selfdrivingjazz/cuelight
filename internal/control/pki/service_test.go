@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/protocol"
+	"github.com/selfdrivingjazz/cuelight/internal/protocol"
 )
 
 func TestEnrollmentTokenAndResultReplayAtomically(t *testing.T) {

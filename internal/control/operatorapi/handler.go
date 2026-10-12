@@ -11,16 +11,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/control/auth"
-	"github.com/jmilldotdev/cuelight/internal/control/media"
-	"github.com/jmilldotdev/cuelight/internal/control/page"
-	"github.com/jmilldotdev/cuelight/internal/control/pki"
-	"github.com/jmilldotdev/cuelight/internal/control/playlist"
-	"github.com/jmilldotdev/cuelight/internal/control/profile"
-	"github.com/jmilldotdev/cuelight/internal/control/release"
-	"github.com/jmilldotdev/cuelight/internal/control/remote"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/auth"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/page"
+	"github.com/selfdrivingjazz/cuelight/internal/control/pki"
+	"github.com/selfdrivingjazz/cuelight/internal/control/playlist"
+	"github.com/selfdrivingjazz/cuelight/internal/control/profile"
+	"github.com/selfdrivingjazz/cuelight/internal/control/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/remote"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
 )
 
 // OperationScopes is exported for clients that want to mount individual

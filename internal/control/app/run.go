@@ -10,9 +10,9 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
-	"github.com/jmilldotdev/cuelight/internal/control/persistence"
-	"github.com/jmilldotdev/cuelight/migrations"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
+	"github.com/selfdrivingjazz/cuelight/internal/control/persistence"
+	"github.com/selfdrivingjazz/cuelight/migrations"
 )
 
 type Runtime struct {

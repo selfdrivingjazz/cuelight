@@ -15,11 +15,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/player/runtime"
-	playerstate "github.com/jmilldotdev/cuelight/internal/player/state"
-	"github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/player/runtime"
+	playerstate "github.com/selfdrivingjazz/cuelight/internal/player/state"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 // ScenarioConfig runs a named case without a control-plane process. It still

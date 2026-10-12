@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/appaccess"
-	"github.com/jmilldotdev/cuelight/internal/control/media"
-	"github.com/jmilldotdev/cuelight/internal/control/playlist"
+	"github.com/selfdrivingjazz/cuelight/internal/control/appaccess"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/playlist"
 )
 
 func TestPostgresAppTokensFollowAssignmentAndAppAccess(t *testing.T) {

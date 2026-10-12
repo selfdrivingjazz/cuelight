@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jmilldotdev/cuelight/internal/control/page"
+	"github.com/selfdrivingjazz/cuelight/internal/control/page"
 )
 
 var (

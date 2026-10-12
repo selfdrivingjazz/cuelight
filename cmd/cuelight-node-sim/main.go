@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/sim"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/sim"
 )
 
 func main() {

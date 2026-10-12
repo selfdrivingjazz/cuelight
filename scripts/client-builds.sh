@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-repo=${GITHUB_REPOSITORY:-jmilldotdev/cuelight}
+repo=${GITHUB_REPOSITORY:-selfdrivingjazz/cuelight}
 force=${FORCE:-false}
 
 # Go packages compiled into the desktop app's bundled player, plus the app itself.

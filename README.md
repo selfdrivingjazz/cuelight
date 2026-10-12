@@ -14,7 +14,7 @@ Early foundation work. No stable release or API compatibility guarantee yet.
 only with `node scripts/set-version.mjs X.Y.Z`, which also rewrites every workspace
 `package.json` (the Android build reads `VERSION` directly); `node scripts/check-version.mjs
 [--expect vX.Y.Z]` fails CI when they disagree. Go binaries get it at link time
-(`-X github.com/jmilldotdev/cuelight/internal/buildinfo.Version=…`, unstamped builds say
+(`-X github.com/selfdrivingjazz/cuelight/internal/buildinfo.Version=…`, unstamped builds say
 `0.0.0-dev`) and print it with `--version`; `cuelight-control` logs it at startup and
 reports it in `GET /health` (`{"status":"ok","version":"0.2.0"}`). Vite builds see it as
 `__CUELIGHT_VERSION__`.

@@ -10,7 +10,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
 )
 
 func TestUploadBoundsAndStrictOffsets(t *testing.T) {

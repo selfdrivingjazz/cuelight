@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/app"
+	"github.com/selfdrivingjazz/cuelight/internal/control/app"
 )
 
 func TestInitGeneratesServableMaterialAndRefusesToOverwrite(t *testing.T) {

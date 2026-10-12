@@ -7,9 +7,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/control/pki"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/pki"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 var _ assignment.Repository = (*Store)(nil)

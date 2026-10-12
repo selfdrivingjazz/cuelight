@@ -11,12 +11,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/control/pki"
-	"github.com/jmilldotdev/cuelight/internal/control/playerapi"
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	"github.com/jmilldotdev/cuelight/internal/player/client"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/pki"
+	"github.com/selfdrivingjazz/cuelight/internal/control/playerapi"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	"github.com/selfdrivingjazz/cuelight/internal/player/client"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 var (

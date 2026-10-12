@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/auth"
-	"github.com/jmilldotdev/cuelight/internal/control/page"
+	"github.com/selfdrivingjazz/cuelight/internal/control/auth"
+	"github.com/selfdrivingjazz/cuelight/internal/control/page"
 )
 
 // MediaAuthorizer is intentionally small so callers can compose the handler

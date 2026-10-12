@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/auth"
-	"github.com/jmilldotdev/cuelight/internal/control/profile"
+	"github.com/selfdrivingjazz/cuelight/internal/control/auth"
+	"github.com/selfdrivingjazz/cuelight/internal/control/profile"
 )
 
 // ProfileService is implemented by profile.Service.

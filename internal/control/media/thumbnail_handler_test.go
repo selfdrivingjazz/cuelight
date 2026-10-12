@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
 )
 
 type thumbnailRepo struct{ media *authoredRepo }

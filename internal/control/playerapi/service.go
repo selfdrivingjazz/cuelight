@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/protocol"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/protocol"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 func NewService(repository Repository, loader ReleaseLoader, cas CASReader, limits Limits) (*Service, error) {

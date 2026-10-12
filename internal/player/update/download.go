@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 const downloadAttemptTimeout = 30 * time.Minute

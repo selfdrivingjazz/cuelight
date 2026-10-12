@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
-	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
+	"github.com/selfdrivingjazz/cuelight/internal/control/pki"
 )
 
 const (

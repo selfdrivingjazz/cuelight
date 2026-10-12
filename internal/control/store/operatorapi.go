@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/control/media"
-	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
-	"github.com/jmilldotdev/cuelight/internal/control/page"
-	"github.com/jmilldotdev/cuelight/internal/control/pki"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/operatorapi"
+	"github.com/selfdrivingjazz/cuelight/internal/control/page"
+	"github.com/selfdrivingjazz/cuelight/internal/control/pki"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 type OperatorAdapter struct{ Store *Store }

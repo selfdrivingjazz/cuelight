@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
 )
 
 func TestEnrollPersistsCredentialAndReloadsClient(t *testing.T) {

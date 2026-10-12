@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jmilldotdev/cuelight/internal/player/runtime"
+	"github.com/selfdrivingjazz/cuelight/internal/player/runtime"
 )
 
 func TestFakeOutputReadinessAndCapacityAreInjectable(t *testing.T) {

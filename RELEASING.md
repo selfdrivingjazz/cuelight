@@ -1,6 +1,6 @@
 # Releasing Cuelight
 
-A release is a GitHub release `v<version>` on `jmilldotdev/cuelight` holding every
+A release is a GitHub release `v<version>` on `selfdrivingjazz/cuelight` holding every
 artifact plus `cuelight-release.json`, the manifest signed with the vendor release key.
 Control servers, appliances, the desktop app, and the Android shell trust only manifests
 that verify against the keys compiled into `internal/updates`.
@@ -61,7 +61,7 @@ version.
 Check a published release locally:
 
 ```sh
-gh release download v0.3.0 -R jmilldotdev/cuelight -D /tmp/cuelight-0.3.0
+gh release download v0.3.0 -R selfdrivingjazz/cuelight -D /tmp/cuelight-0.3.0
 go run ./cmd/cuelight-release verify --manifest /tmp/cuelight-0.3.0/cuelight-release.json --dir /tmp/cuelight-0.3.0
 ```
 
@@ -106,7 +106,7 @@ Needs an Apple Developer Program membership (Account Holder or Admin for the cer
 3. Store them:
 
    ```sh
-   R=jmilldotdev/cuelight
+   R=selfdrivingjazz/cuelight
    base64 -i cuelight-developer-id.p12 | tr -d '\n' | gh secret set CSC_LINK -R $R
    gh secret set CSC_KEY_PASSWORD -R $R          # paste the .p12 password
    gh secret set APPLE_API_KEY -R $R < AuthKey_KEYID.p8
@@ -139,7 +139,7 @@ Clients only accept key ids they were built with, so rotation takes two releases
 2. Add `"cuelight-2027a": "<base64>"` to `trustedKeys` next to the old id and ship a
    release still signed with the old key. Wait until the fleet runs it.
 3. Switch `CUELIGHT_RELEASE_SIGNING_KEY` (`gh secret set CUELIGHT_RELEASE_SIGNING_KEY -R
-   jmilldotdev/cuelight < new.key`) and `--key-id` in `release.yml`; release.
+   selfdrivingjazz/cuelight < new.key`) and `--key-id` in `release.yml`; release.
 4. Once nothing older than step 2 remains, drop the old id from `trustedKeys`.
 
 If the key leaks, do the same immediately and remove the old id in the step 2 release;
@@ -151,7 +151,7 @@ nodes that never install it must be updated by hand.
 `android-release.password`, backed up in the password manager; CI has it as
 `CUELIGHT_ANDROID_KEYSTORE_BASE64` / `CUELIGHT_ANDROID_KEYSTORE_PASSWORD`
 (`base64 -w0 android-release.jks | gh secret set CUELIGHT_ANDROID_KEYSTORE_BASE64 -R
-jmilldotdev/cuelight`). Android only installs updates signed with the same key, so losing
+selfdrivingjazz/cuelight`). Android only installs updates signed with the same key, so losing
 it means every Android screen must uninstall and reinstall. It cannot be rotated in place.
 
 ## Offline servers
@@ -160,7 +160,7 @@ A control server without internet access cannot poll the GitHub feed. On a conne
 machine:
 
 ```sh
-gh release download v0.3.0 -R jmilldotdev/cuelight -D cuelight-0.3.0
+gh release download v0.3.0 -R selfdrivingjazz/cuelight -D cuelight-0.3.0
 ```
 
 Copy the directory to the server (it must contain `cuelight-release.json`; include the

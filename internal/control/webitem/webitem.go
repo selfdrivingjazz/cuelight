@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
 )
 
 const (

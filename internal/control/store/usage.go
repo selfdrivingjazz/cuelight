@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jmilldotdev/cuelight/internal/control/page"
-	"github.com/jmilldotdev/cuelight/internal/control/usage"
+	"github.com/selfdrivingjazz/cuelight/internal/control/page"
+	"github.com/selfdrivingjazz/cuelight/internal/control/usage"
 )
 
 var _ usage.Repository = (*Store)(nil)

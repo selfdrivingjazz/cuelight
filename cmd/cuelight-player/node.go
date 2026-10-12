@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/player/renderer"
-	playerruntime "github.com/jmilldotdev/cuelight/internal/player/runtime"
-	"github.com/jmilldotdev/cuelight/internal/player/update"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/player/renderer"
+	playerruntime "github.com/selfdrivingjazz/cuelight/internal/player/runtime"
+	"github.com/selfdrivingjazz/cuelight/internal/player/update"
 )
 
 const outputPollInterval = 2 * time.Second

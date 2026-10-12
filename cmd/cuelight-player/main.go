@@ -21,14 +21,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/player/renderer"
-	playerruntime "github.com/jmilldotdev/cuelight/internal/player/runtime"
-	playerstate "github.com/jmilldotdev/cuelight/internal/player/state"
-	"github.com/jmilldotdev/cuelight/internal/player/update"
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/player/renderer"
+	playerruntime "github.com/selfdrivingjazz/cuelight/internal/player/runtime"
+	playerstate "github.com/selfdrivingjazz/cuelight/internal/player/state"
+	"github.com/selfdrivingjazz/cuelight/internal/player/update"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 func main() {

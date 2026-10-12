@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/selfdrivingjazz/cuelight/internal/control/auth"
 )
 
 const (

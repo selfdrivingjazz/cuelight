@@ -1,4 +1,4 @@
-module github.com/jmilldotdev/cuelight
+module github.com/selfdrivingjazz/cuelight
 
 go 1.27
 

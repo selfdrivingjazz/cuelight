@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/software"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/control/software"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
 )
 
 var _ software.Repository = (*Store)(nil)

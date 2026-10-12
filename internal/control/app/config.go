@@ -26,7 +26,7 @@ const (
 	defaultMaxLocalMediaBytes  = 8 << 30
 	defaultMaxEvents           = 100
 	defaultMaxWait             = 30 * time.Second
-	defaultUpdateFeedURL       = "https://github.com/jmilldotdev/cuelight/releases/latest/download/cuelight-release.json"
+	defaultUpdateFeedURL       = "https://github.com/selfdrivingjazz/cuelight/releases/latest/download/cuelight-release.json"
 	defaultUpdateInterval      = 6 * time.Hour
 )
 

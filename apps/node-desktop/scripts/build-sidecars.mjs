@@ -7,7 +7,7 @@ const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(appRoot, "../..");
 const version = readFileSync(resolve(repoRoot, "VERSION"), "utf8").trim();
 const commit = spawnSync("git", ["rev-parse", "--short=12", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).stdout?.trim() ?? "";
-const buildinfo = "github.com/jmilldotdev/cuelight/internal/buildinfo";
+const buildinfo = "github.com/selfdrivingjazz/cuelight/internal/buildinfo";
 const ldflags = `-s -w -X ${buildinfo}.Version=${version}` + (commit ? ` -X ${buildinfo}.Commit=${commit}` : "");
 const platformArgument = process.argv.find((value) => value.startsWith("--platform="))?.split("=")[1];
 const architectureArgument = process.argv.find((value) => value.startsWith("--arch="))?.split("=")[1];

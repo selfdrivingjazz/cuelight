@@ -7,7 +7,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jmilldotdev/cuelight/internal/control/pki"
+	"github.com/selfdrivingjazz/cuelight/internal/control/pki"
 )
 
 func trustedHandler(t *testing.T, publicURL string, scopes []string, p *testPKI) http.Handler {

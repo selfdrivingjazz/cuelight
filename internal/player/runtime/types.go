@@ -8,11 +8,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/player/renderer"
-	playerstate "github.com/jmilldotdev/cuelight/internal/player/state"
-	"github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/player/renderer"
+	playerstate "github.com/selfdrivingjazz/cuelight/internal/player/state"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 const (

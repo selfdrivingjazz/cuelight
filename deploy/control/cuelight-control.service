@@ -1,6 +1,6 @@
 [Unit]
 Description=Cuelight control plane
-Documentation=https://github.com/jmilldotdev/cuelight
+Documentation=https://github.com/selfdrivingjazz/cuelight
 After=network-online.target postgresql.service
 Wants=network-online.target
 # Created by `cuelight-control init --dir /var/lib/cuelight-control ...`.

@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/app"
-	"github.com/jmilldotdev/cuelight/internal/control/composition"
-	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
-	"github.com/jmilldotdev/cuelight/internal/control/persistence"
-	"github.com/jmilldotdev/cuelight/migrations"
+	"github.com/selfdrivingjazz/cuelight/internal/control/app"
+	"github.com/selfdrivingjazz/cuelight/internal/control/composition"
+	"github.com/selfdrivingjazz/cuelight/internal/control/operatorapi"
+	"github.com/selfdrivingjazz/cuelight/internal/control/persistence"
+	"github.com/selfdrivingjazz/cuelight/migrations"
 )
 
 // TestTrustedNetworkFullStack drives the production handler graph: operator

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/appaccess"
+	"github.com/selfdrivingjazz/cuelight/internal/control/appaccess"
 )
 
 var _ appaccess.Repository = (*Store)(nil)

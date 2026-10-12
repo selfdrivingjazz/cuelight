@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/protocol"
+	"github.com/selfdrivingjazz/cuelight/internal/protocol"
 )
 
 type CertificateAuthority struct {

@@ -15,9 +15,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	"github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	"github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 // Blobs is the control CAS subset used for release artifacts.

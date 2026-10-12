@@ -4,7 +4,7 @@
   "private": true,
   "description": "Cross-platform Cuelight player node with bundled Chromium",
   "author": "Cuelight contributors",
-  "homepage": "https://github.com/jmilldotdev/cuelight",
+  "homepage": "https://github.com/selfdrivingjazz/cuelight",
   "desktopName": "cuelight.desktop",
   "main": "dist-electron/main/main.js",
   "scripts": {

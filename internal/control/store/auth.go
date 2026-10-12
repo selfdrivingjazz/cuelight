@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/auth"
+	"github.com/selfdrivingjazz/cuelight/internal/control/auth"
 )
 
 var _ auth.TokenRepository = (*Store)(nil)

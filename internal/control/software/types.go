@@ -14,8 +14,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	"github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 // Import sources.

@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
 )
 
 // newEnrollmentServer is a TLS control stub that enrolls any node; received

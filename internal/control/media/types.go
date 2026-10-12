@@ -7,7 +7,7 @@ import (
 	"io"
 	"io/fs"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
 )
 
 var (

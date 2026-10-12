@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	controlplayerapi "github.com/jmilldotdev/cuelight/internal/control/playerapi"
-	"github.com/jmilldotdev/cuelight/internal/control/software"
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	controlplayerapi "github.com/selfdrivingjazz/cuelight/internal/control/playerapi"
+	"github.com/selfdrivingjazz/cuelight/internal/control/software"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 type softwareFixture struct {

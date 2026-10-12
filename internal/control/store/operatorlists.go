@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
-	"github.com/jmilldotdev/cuelight/internal/control/page"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/operatorapi"
+	"github.com/selfdrivingjazz/cuelight/internal/control/page"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 var _ operatorapi.UploadPageService = (*Store)(nil)

@@ -18,14 +18,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
-	"github.com/jmilldotdev/cuelight/internal/control/auth"
-	"github.com/jmilldotdev/cuelight/internal/control/media"
-	"github.com/jmilldotdev/cuelight/internal/control/operatorapi"
-	"github.com/jmilldotdev/cuelight/internal/control/persistence"
-	controlrelease "github.com/jmilldotdev/cuelight/internal/control/release"
-	"github.com/jmilldotdev/cuelight/internal/control/remote"
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/auth"
+	"github.com/selfdrivingjazz/cuelight/internal/control/media"
+	"github.com/selfdrivingjazz/cuelight/internal/control/operatorapi"
+	"github.com/selfdrivingjazz/cuelight/internal/control/persistence"
+	controlrelease "github.com/selfdrivingjazz/cuelight/internal/control/release"
+	"github.com/selfdrivingjazz/cuelight/internal/control/remote"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 type targetTestAuth struct{ actorID string }

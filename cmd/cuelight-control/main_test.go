@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
 )
 
 func TestRunReportsActionableConfigurationError(t *testing.T) {

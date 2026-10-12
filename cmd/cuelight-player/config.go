@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	playerruntime "github.com/jmilldotdev/cuelight/internal/player/runtime"
-	"github.com/jmilldotdev/cuelight/internal/player/update"
-	"github.com/jmilldotdev/cuelight/internal/release"
-	"github.com/jmilldotdev/cuelight/internal/updates"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	playerruntime "github.com/selfdrivingjazz/cuelight/internal/player/runtime"
+	"github.com/selfdrivingjazz/cuelight/internal/player/update"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/updates"
 )
 
 type playerConfig struct {

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/jmilldotdev/cuelight/internal/buildinfo"
+	"github.com/selfdrivingjazz/cuelight/internal/buildinfo"
 )
 
 // cuelight-minimal-node deliberately delegates protocol, storage, and signed

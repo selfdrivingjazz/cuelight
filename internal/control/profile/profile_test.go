@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmilldotdev/cuelight/internal/control/assignment"
+	"github.com/selfdrivingjazz/cuelight/internal/control/assignment"
 )
 
 type fakeFleet struct {

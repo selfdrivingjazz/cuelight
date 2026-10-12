@@ -17,7 +17,7 @@ builds:
     env: [CGO_ENABLED=0]
     flags: [-trimpath]
     ldflags:
-      - -s -w -X github.com/jmilldotdev/cuelight/internal/buildinfo.Version={{ .Version }} -X github.com/jmilldotdev/cuelight/internal/buildinfo.Commit={{ .ShortCommit }}
+      - -s -w -X github.com/selfdrivingjazz/cuelight/internal/buildinfo.Version={{ .Version }} -X github.com/selfdrivingjazz/cuelight/internal/buildinfo.Commit={{ .ShortCommit }}
     goos: [linux, darwin]
     goarch: [amd64, arm64]
   - <<: *gobuild
@@ -84,7 +84,7 @@ nfpms:
     file_name_template: "cuelight-control_{{ .Version }}_{{ .Arch }}"
     formats: [deb]
     vendor: Cuelight
-    homepage: https://github.com/jmilldotdev/cuelight
+    homepage: https://github.com/selfdrivingjazz/cuelight
     maintainer: Cuelight <cuelight@jmill.dev>
     description: Cuelight control plane (API, controller web UI, browser node app) as one binary; needs PostgreSQL.
     license: See /usr/share/doc/cuelight-control/LICENSE
@@ -105,7 +105,7 @@ nfpms:
     file_name_template: "cuelight-player_{{ .Version }}_{{ .Arch }}"
     formats: [deb]
     vendor: Cuelight
-    homepage: https://github.com/jmilldotdev/cuelight
+    homepage: https://github.com/selfdrivingjazz/cuelight
     maintainer: Cuelight <cuelight@jmill.dev>
     description: Cuelight screen appliance (cuelight-player + MPV minimal node) with signed self-updates.
     license: See /usr/share/doc/cuelight-player/LICENSE

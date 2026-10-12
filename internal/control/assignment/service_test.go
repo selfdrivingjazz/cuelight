@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	canonical "github.com/jmilldotdev/cuelight/internal/release"
+	canonical "github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 type assignmentRepositoryFixture struct {

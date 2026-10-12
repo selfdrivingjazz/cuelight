@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
 )
 
 type RegistrationService struct {

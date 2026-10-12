@@ -16,11 +16,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jmilldotdev/cuelight/internal/media/localcas"
-	playerclient "github.com/jmilldotdev/cuelight/internal/player/client"
-	"github.com/jmilldotdev/cuelight/internal/player/renderer"
-	"github.com/jmilldotdev/cuelight/internal/player/screenshot"
-	"github.com/jmilldotdev/cuelight/internal/release"
+	"github.com/selfdrivingjazz/cuelight/internal/media/localcas"
+	playerclient "github.com/selfdrivingjazz/cuelight/internal/player/client"
+	"github.com/selfdrivingjazz/cuelight/internal/player/renderer"
+	"github.com/selfdrivingjazz/cuelight/internal/player/screenshot"
+	"github.com/selfdrivingjazz/cuelight/internal/release"
 )
 
 type Reconciler struct {

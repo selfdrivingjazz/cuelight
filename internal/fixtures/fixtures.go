@@ -16,7 +16,7 @@ import (
 	"slices"
 	"strings"
 
-	embedded "github.com/jmilldotdev/cuelight/fixtures"
+	embedded "github.com/selfdrivingjazz/cuelight/fixtures"
 )
 
 const (
