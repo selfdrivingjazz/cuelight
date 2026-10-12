@@ -43,11 +43,11 @@ test("legacy single-network layout moves into networks/default once, keeping pre
 
 test("multi-network settings with the old autoStart flag become per-network desired state", async () => {
   const network = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id, controlUrl: `https://${id}.example`, displayBinding: "shared", ...extra });
-  await writeFile(path.join(root, "settings.json"), JSON.stringify({ autoStart: false, fullScreen: true, presentationMode: "automatic", networks: [network("home"), network("mars", { enabled: true })] }));
+  await writeFile(path.join(root, "settings.json"), JSON.stringify({ autoStart: false, fullScreen: true, presentationMode: "automatic", networks: [network("home"), network("studio", { enabled: true })] }));
   const settings = await new Layout(root).loadSettings();
   expect(settings.launchAtLogin).toBe(false);
   // Without autoStart nothing started at launch before; an explicit enabled wins.
-  expect(settings.networks.map(({ id, enabled }) => [id, enabled])).toEqual([["home", false], ["mars", true]]);
+  expect(settings.networks.map(({ id, enabled }) => [id, enabled])).toEqual([["home", false], ["studio", true]]);
   expect(JSON.parse(await readFile(path.join(root, "settings.json"), "utf8"))).not.toHaveProperty("autoStart");
 
   await writeFile(path.join(root, "settings.json"), JSON.stringify({ autoStart: true, networks: [network("home")] }));

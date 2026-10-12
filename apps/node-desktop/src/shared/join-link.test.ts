@@ -11,11 +11,11 @@ function link(query: Record<string, string>): string {
 
 describe("parseJoinLink", () => {
   test("accepts a full link and decodes every field", () => {
-    expect(parseJoinLink(link({ v: "1", url: "https://mars.lan:8443/", token, ca: `sha256:${pin.toUpperCase()}`, name: "Mars College" }))).toEqual({
-      controlUrl: "https://mars.lan:8443",
+    expect(parseJoinLink(link({ v: "1", url: "https://studio.lan:8443/", token, ca: `sha256:${pin.toUpperCase()}`, name: "Studio Network" }))).toEqual({
+      controlUrl: "https://studio.lan:8443",
       token,
       caSha256: pin,
-      name: "Mars College",
+      name: "Studio Network",
     });
   });
 

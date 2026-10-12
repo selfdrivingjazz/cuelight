@@ -59,12 +59,12 @@ func TestSelfSignedRootSHA256(t *testing.T) {
 }
 
 func TestJoinLinkURL(t *testing.T) {
-	links, err := NewJoinLinks("https://mars.example:8443/", "", nil)
+	links, err := NewJoinLinks("https://studio.example:8443/", "", nil)
 	if err == nil {
 		t.Fatal("missing chain accepted")
 	}
 	_, _, selfPEM := testCertificate(t, "self", true, nil, nil)
-	links, err = NewJoinLinks("https://mars.example:8443/", "", selfPEM)
+	links, err = NewJoinLinks("https://studio.example:8443/", "", selfPEM)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,10 +73,10 @@ func TestJoinLinkURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	query := parsed.Query()
-	if parsed.Scheme != "cuelight" || parsed.Host != "join" || query.Get("v") != "1" || query.Get("url") != "https://mars.example:8443" || query.Get("token") != "secret+/=" || query.Get("name") != "mars.example" || len(query.Get("ca")) != len("sha256:")+64 {
+	if parsed.Scheme != "cuelight" || parsed.Host != "join" || query.Get("v") != "1" || query.Get("url") != "https://studio.example:8443" || query.Get("token") != "secret+/=" || query.Get("name") != "studio.example" || len(query.Get("ca")) != len("sha256:")+64 {
 		t.Fatalf("join link = %s", parsed)
 	}
-	if disabled, err := NewJoinLinks("", "Mars", selfPEM); err != nil || disabled.URL("secret") != "" {
+	if disabled, err := NewJoinLinks("", "Studio", selfPEM); err != nil || disabled.URL("secret") != "" {
 		t.Fatalf("no public URL should disable links: %q, %v", disabled.URL("secret"), err)
 	}
 }

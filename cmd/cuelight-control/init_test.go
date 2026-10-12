@@ -124,7 +124,7 @@ func TestInitEnvFileSurvivesShellSourcing(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state with space")
 	database := "postgres://cuelight:pw@db:5432/cuelight?sslmode=disable&application_name=cuelight"
 	var stderr bytes.Buffer
-	if code := run(t.Context(), []string{"init", "--dir", dir, "--hostname", "mars.lan", "--network-name", "Mars College", "--database-url", database}, nil, &bytes.Buffer{}, &stderr); code != 0 {
+	if code := run(t.Context(), []string{"init", "--dir", dir, "--hostname", "studio.lan", "--network-name", "Studio Network", "--database-url", database}, nil, &bytes.Buffer{}, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	script := `set -a; . "$1"; printf '%s\n%s\n%s' "$CUELIGHT_CONTROL_NETWORK_NAME" "$CUELIGHT_CONTROL_DATABASE_URL" "$CUELIGHT_CONTROL_CAS_PATH"`
@@ -132,7 +132,7 @@ func TestInitEnvFileSurvivesShellSourcing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("source env file: %v: %s", err, output)
 	}
-	want := "Mars College\n" + database + "\n" + filepath.Join(dir, "cas")
+	want := "Studio Network\n" + database + "\n" + filepath.Join(dir, "cas")
 	if string(output) != want {
 		t.Fatalf("sourced values = %q, want %q", output, want)
 	}
